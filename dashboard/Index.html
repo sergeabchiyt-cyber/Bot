@@ -1,0 +1,77 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>XAUVP</title>
+<script src="https://unpkg.com/lightweight-charts@5/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root{--bg:#0b0e11;--fg:#e6e6e6;--mut:#8a8f98;--pw:#14b8a6;--pd:#f59e0b;--cw:#a78bfa;--so:#9ca3af}
+*{box-sizing:border-box;margin:0}body{background:var(--bg);color:var(--fg);font:14px/1.4 -apple-system,system-ui,sans-serif}
+header{display:flex;gap:16px;align-items:center;padding:12px 16px;flex-wrap:wrap}
+h1{font-size:16px;font-weight:600}#px{font-variant-numeric:tabular-nums;font-size:16px}
+#eq{color:var(--mut)}#mode{padding:2px 8px;border:1px solid var(--mut);border-radius:4px;color:var(--mut);font-size:12px}
+.tabs{display:flex;gap:8px;padding:0 16px 8px}
+.tabs button{background:none;border:1px solid #2a2e33;color:var(--mut);padding:6px 14px;border-radius:4px;min-width:44px;min-height:44px}
+.tabs button.on{color:var(--fg);border-color:var(--fg)}
+#chart{width:100%;height:52vh}
+section{padding:8px 16px}
+table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+td,th{padding:6px 10px;text-align:right;border-bottom:1px solid #1c2026;color:var(--fg)}
+th{color:var(--mut);font-weight:500}td:first-child,th:first-child{text-align:left}
+</style></head><body>
+<header><h1>XAUUSD</h1><span id="px">—</span><span id="eq"></span><span id="mode"></span></header>
+<div class="tabs"><button data-tf="H1" class="on">1H</button><button data-tf="D">1D</button></div>
+<div id="chart"></div>
+<section><table id="sig"><tr><th>time</th><th>side</th><th>level</th><th>entry</th><th>sl</th><th>tp</th><th>vol</th></tr></table></section>
+<section><table id="pos"><tr><th>id</th><th>side</th><th>entry</th><th>exit</th><th>pnl</th></tr></table></section>
+<script>
+const COL={PW:'#14b8a6',PD:'#f59e0b',CW:'#a78bfa',Sunday:'#9ca3af'};
+const col=l=>{for(const k in COL)if(l.startsWith(k))return COL[k];return '#9ca3af'};
+const {createChart,CandlestickSeries,HistogramSeries,createSeriesMarkers,CrosshairMode}=LightweightCharts;
+const chart=createChart(document.getElementById('chart'),{
+  layout:{background:{color:'#0b0e11'},textColor:'#8a8f98',attributionLogo:false},
+  grid:{vertLines:{color:'#1c2026'},horzLines:{color:'#1c2026'}},
+  timeScale:{timeVisible:true},crosshair:{mode:CrosshairMode.Normal}});
+const ser=chart.addSeries(CandlestickSeries,{upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,wickUpColor:'#26a69a',wickDownColor:'#ef5350'});
+const vol=chart.addSeries(HistogramSeries,{priceScaleId:'',priceFormat:{type:'volume'}});
+chart.priceScale('').applyOptions({scaleMargins:{top:0.85,bottom:0}});
+let tf='H1',lines=[],markers=[],markersPlugin=null;
+const fmt=t=>new Date(t*1000).toISOString().slice(0,16).replace('T',' ');
+const snap=t=>tf==='H1'?t-t%3600:t-t%86400;
+function setLevels(rays){lines.forEach(l=>ser.removePriceLine(l));
+  lines=rays.map(r=>ser.createPriceLine({price:r.price,color:col(r.label),lineWidth:1,lineStyle:2,axisLabelVisible:true,title:r.label}));}
+function setCandles(cs){
+  ser.setData(cs.map(c=>({time:c.t,open:c.o,high:c.h,low:c.l,close:c.c})));
+  vol.setData(cs.map(c=>({time:c.t,value:c.v,color:c.c>=c.o?'rgba(38,166,154,.4)':'rgba(239,83,80,.4)'})));
+  chart.timeScale().fitContent();}
+function addSignal(s){
+  markers.push({time:snap(s.t),position:s.side==='Long'?'belowBar':'aboveBar',
+    color:s.side==='Long'?'#26a69a':'#ef5350',shape:s.side==='Long'?'arrowUp':'arrowDown',text:s.level});
+  if(!markersPlugin)markersPlugin=createSeriesMarkers(ser,markers);else markersPlugin.setMarkers(markers);
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td>${fmt(s.t)}</td><td>${s.side}</td><td>${s.level}</td><td>${s.entry.toFixed(3)}</td><td>${s.sl.toFixed(3)}</td><td>${s.tp.toFixed(3)}</td><td>${s.vol.toFixed(0)}</td>`;
+  document.getElementById('sig').append(tr);}
+function addPos(p){if(p.close_t==null)return;
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td>${p.id}</td><td>${p.side}</td><td>${p.entry.toFixed(3)}</td><td>${p.exit.toFixed(3)}</td><td>${p.pnl.toFixed(2)}</td>`;
+  document.getElementById('pos').append(tr);}
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');tf=b.dataset.tf;
+  fetch('/api/state').then(r=>r.json()).then(s=>setCandles(s.candles[tf]||[]));});
+fetch('/api/state').then(r=>r.json()).then(s=>{
+  document.getElementById('mode').textContent=s.mode;
+  document.getElementById('eq').textContent='eq '+s.equity.toFixed(2);
+  const m15=s.candles.M15||[];if(m15.length)document.getElementById('px').textContent=m15[m15.length-1].c.toFixed(3);
+  setCandles(s.candles[tf]||[]);setLevels(s.levels);s.signals.forEach(addSignal);s.positions.forEach(addPos);
+  const ws=new WebSocket(location.origin.replace('http','ws')+'/ws');
+  ws.onmessage=e=>{const m=JSON.parse(e.data);
+    if(m.kind==='tick'&&m.tf===tf){
+      ser.update({time:m.candle.t,open:m.candle.o,high:m.candle.h,low:m.candle.l,close:m.candle.c});
+      vol.update({time:m.candle.t,value:m.candle.v,color:m.candle.c>=m.candle.o?'rgba(38,166,154,.4)':'rgba(239,83,80,.4)'});
+      document.getElementById('px').textContent=m.candle.c.toFixed(3);}
+    else if(m.kind==='tick'&&m.tf==='M15')document.getElementById('px').textContent=m.candle.c.toFixed(3);
+    else if(m.kind==='levels')setLevels(m.rays);
+    else if(m.kind==='signal')addSignal(m.signal);
+    else if(m.kind==='position')addPos(m.position);
+    else if(m.kind==='equity')document.getElementById('eq').textContent='eq '+m.equity.toFixed(2);};
+});
+</script></body></html>
