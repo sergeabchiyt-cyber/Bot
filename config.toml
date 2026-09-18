@@ -1,0 +1,42 @@
+[server]
+bind = "0.0.0.0:10000"
+
+[tz]
+offset_hours = -4
+day_roll = "17:00"
+week_open = "18:00"
+
+[feed]
+kind = "oanda"                 # oanda | csv
+oanda_url = "https://api-fxpractice.oanda.com"
+instrument = "XAU_USD"
+price = "M"                    # M | B | A
+csv_dir = "data"
+
+[vp]
+row = 0.5
+cw_from_weekday = 3
+
+[signal]
+tf = "M15"
+atr_tf = "H1"
+atr_period = 14
+vol_min = 10500.0              # recalibrate to your feed's tick volume
+retest_tol_pips = 25.0
+retest_window = 12
+level_cooldown_h = 4
+
+[risk]
+pip = 0.1
+sl_pips_min = 200.0
+sl_pips_max = 300.0
+tp_pips_min = 600.0
+tp_pips_max = 800.0
+atr_sl_mult = 1.5
+rr = 2.5
+paper_equity = 10000.0
+risk_pct = 1.0
+
+[exec]
+mode = "paper"                 # paper | telegram-only via alert flag below
+alert_telegram = true
