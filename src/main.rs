@@ -1,6 +1,7 @@
 mod config;
 mod types;
 mod binance_ws;
+mod binance_rest;
 mod volume_profile;
 mod order_flow;
 mod execution;
@@ -10,13 +11,14 @@ mod mcp_client;
 mod ws_server;
 
 use std::sync::Arc;
-use axum::Router;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use config::Config;
+use order_flow::OrderFlowAnalyzer;
 use types::WsFrame;
+use volume_profile::VolumeProfileEngine;
 use ws_server::AppState;
 
 #[tokio::main]
@@ -28,22 +30,93 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::from_env();
     info!("Starting XAUUSD engine on port {}", config.port);
 
-    let (tx, _rx) = broadcast::channel::<WsFrame>(1024);
+    // Broadcast bus for WS clients
+    let (bc_tx, _) = broadcast::channel::<WsFrame>(1024);
+
+    // Internal channels for raw Binance data
+    let (tick_tx, mut tick_rx) = mpsc::channel::<types::AggTrade>(4096);
+    let (kline_tx, mut kline_rx) = mpsc::channel::<types::KlineEvent>(256);
+
+    // ---------- Cold start: seed VP windows from REST ----------
+    let vp = Arc::new(RwLock::new(VolumeProfileEngine::new()));
+    match binance_rest::fetch_klines_15m("XAUUSDT", 1000).await {
+        Ok(candles) => {
+            info!("Seeded {} historical 15M candles", candles.len());
+            let mut vp_w = vp.write().await;
+            for c in candles {
+                vp_w.ingest_candle(c);
+            }
+            for lvl in vp_w.all_levels() {
+                info!("{}: poc={:.3} vah={:.3} val={:.3}",
+                    lvl.window, lvl.poc, lvl.vah, lvl.val);
+                let _ = bc_tx.send(WsFrame::Levels { data: lvl });
+            }
+        }
+        Err(e) => tracing::warn!("Cold-start REST fetch failed: {}. Continuing without history.", e),
+    }
+
+    // ---------- Binance streams ----------
+    {
+        let url = config.binance_ws_url.clone();
+        let tx = tick_tx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = binance_ws::run_agg_trade_stream(url, tx).await {
+                tracing::error!("aggTrade stream terminated: {}", e);
+            }
+        });
+    }
+    {
+        let url = config.binance_kline_url.clone();
+        let tx = kline_tx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = binance_ws::run_kline_stream(url, tx).await {
+                tracing::error!("kline stream terminated: {}", e);
+            }
+        });
+    }
+
+    // ---------- Tick consumer: order flow + bubble detection ----------
+    {
+        let vp = vp.clone();
+        let bc = bc_tx.clone();
+        let mut analyzer = OrderFlowAnalyzer::new(10_000);
+        tokio::spawn(async move {
+            while let Some(trade) = tick_rx.recv().await {
+                analyzer.ingest(&trade);
+                let vp_read = vp.read().await;
+                if let Some(bubble) =
+                    analyzer.detect_absorption(&vp_read, trade.price_f64(), 5.0)
+                {
+                    let _ = bc.send(WsFrame::Bubbles { data: bubble });
+                }
+            }
+        });
+    }
+
+    // ---------- Candle consumer: VP updates on close ----------
+    {
+        let vp = vp.clone();
+        let bc = bc_tx.clone();
+        tokio::spawn(async move {
+            while let Some(ev) = kline_rx.recv().await {
+                if !ev.kline.is_closed {
+                    continue;
+                }
+                let candle = ev.kline.to_vp_candle();
+                let mut vp_w = vp.write().await;
+                vp_w.ingest_candle(candle);
+                for lvl in vp_w.all_levels() {
+                    let _ = bc.send(WsFrame::Levels { data: lvl });
+                }
+            }
+        });
+    }
+
+    // ---------- HTTP + WS server ----------
     let state = AppState {
-        tx: tx.clone(),
+        tx: bc_tx.clone(),
         subscriptions: Arc::new(dashmap::DashMap::new()),
     };
-
-    // Spawn Binance WS
-    let binance_url = config.binance_ws_url.clone();
-    let tx_binance = tx.clone();
-    tokio::spawn(async move {
-        if let Err(e) = binance_ws::run_agg_trade_stream(binance_url, tx_binance).await {
-            tracing::error!("Binance WS task terminated: {}", e);
-        }
-    });
-
-    // HTTP + WS server
     let app = ws_server::router(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
     info!("Listening on 0.0.0.0:{}", config.port);
