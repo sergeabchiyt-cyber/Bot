@@ -48,10 +48,8 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
     );
 
-    // Shared topic list — written by the read task, read by the write loop
     let topics = Arc::new(RwLock::new(Vec::<String>::new()));
 
-    // ---- Read task: handles inbound frames (subscribe, etc.)
     let topics_writer = topics.clone();
     let read_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
@@ -65,21 +63,19 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         }
     });
 
-    // ---- Write loop: filters broadcast frames by subscribed topics
     while let Ok(frame) = rx.recv().await {
-        // Determine the topic of the outbound frame
         let topic = match &frame {
             WsFrame::Levels { .. } => "levels",
             WsFrame::Bubbles { .. } => "bubbles",
             WsFrame::Trades { .. } => "trades",
             WsFrame::Sentiment { .. } => "sentiment",
+            WsFrame::Transcript { .. } => "transcript",
             WsFrame::Calendar { .. } => "calendar",
             WsFrame::Learn { .. } => "learn",
             WsFrame::AudioChunk { .. } => "audio_chunk",
             _ => continue,
         };
 
-        // Scope the read lock so it is dropped before the `.await` on send
         let allowed = {
             let current = topics.read().await;
             !current.is_empty() && current.iter().any(|t| t == topic)
