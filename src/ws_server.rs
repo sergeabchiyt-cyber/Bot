@@ -1,13 +1,16 @@
 use std::sync::Arc;
 use axum::{
-    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        State,
+    },
     response::IntoResponse,
     routing::get,
     Router,
 };
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, RwLock};
 use tracing::info;
 
 use crate::types::WsFrame;
@@ -39,25 +42,32 @@ async fn ws_handler(
 async fn handle_socket(socket: WebSocket, state: AppState) {
     let (mut sender, mut receiver) = socket.split();
     let mut rx = state.tx.subscribe();
-    let session_id = format!("sess-{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
-    let mut topics: Vec<String> = vec![];
 
-    // Read inbound frames
+    let session_id = format!(
+        "sess-{}",
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    );
+
+    // Shared topic list — written by the read task, read by the write loop
+    let topics = Arc::new(RwLock::new(Vec::<String>::new()));
+
+    // ---- Read task: handles inbound frames (subscribe, etc.)
+    let topics_writer = topics.clone();
     let read_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
             if let Message::Text(text) = msg {
                 if let Ok(frame) = serde_json::from_str::<WsFrame>(&text) {
                     if let WsFrame::Subscribe { topics: t } = frame {
-                        topics = t;
+                        *topics_writer.write().await = t;
                     }
                 }
             }
         }
     });
 
-    // Write outbound frames (topic-filtered)
+    // ---- Write loop: filters broadcast frames by subscribed topics
     while let Ok(frame) = rx.recv().await {
-        if topics.is_empty() { continue; }
+        // Determine the topic of the outbound frame
         let topic = match &frame {
             WsFrame::Levels { .. } => "levels",
             WsFrame::Bubbles { .. } => "bubbles",
@@ -68,7 +78,16 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
             WsFrame::AudioChunk { .. } => "audio_chunk",
             _ => continue,
         };
-        if !topics.iter().any(|t| t == topic) { continue; }
+
+        // Scope the read lock so it is dropped before the `.await` on send
+        let allowed = {
+            let current = topics.read().await;
+            !current.is_empty() && current.iter().any(|t| t == topic)
+        };
+        if !allowed {
+            continue;
+        }
+
         let json = serde_json::to_string(&frame).unwrap_or_default();
         if sender.send(Message::Text(json.into())).await.is_err() {
             break;
