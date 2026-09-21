@@ -120,6 +120,7 @@ async fn main() -> anyhow::Result<()> {
         tx: bc_tx.clone(),
         subscriptions: Arc::new(dashmap::DashMap::new()),
         cached_levels: cached_levels.clone(),
+        vp: vp.clone(),
     };
     let app = ws_server::router(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
