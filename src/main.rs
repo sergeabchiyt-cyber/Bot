@@ -30,15 +30,14 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::from_env();
     info!("Starting XAUUSD engine on port {}", config.port);
 
-    // Broadcast bus for WS clients
     let (bc_tx, _) = broadcast::channel::<WsFrame>(1024);
-
-    // Internal channels for raw Binance data
     let (tick_tx, mut tick_rx) = mpsc::channel::<types::AggTrade>(4096);
     let (kline_tx, mut kline_rx) = mpsc::channel::<types::KlineEvent>(256);
 
-    // ---------- Cold start: seed VP windows from REST ----------
     let vp = Arc::new(RwLock::new(VolumeProfileEngine::new()));
+    let cached_levels = Arc::new(RwLock::new(Vec::<types::VpLevels>::new()));
+
+    // ---------- Cold start: seed VP windows from REST ----------
     match binance_rest::fetch_klines_15m("XAUUSDT", 1000).await {
         Ok(candles) => {
             info!("Seeded {} historical 15M candles", candles.len());
@@ -46,11 +45,12 @@ async fn main() -> anyhow::Result<()> {
             for c in candles {
                 vp_w.ingest_candle(c);
             }
-            for lvl in vp_w.all_levels() {
+            let levels = vp_w.all_levels();
+            for lvl in &levels {
                 info!("{}: poc={:.3} vah={:.3} val={:.3}",
                     lvl.window, lvl.poc, lvl.vah, lvl.val);
-                let _ = bc_tx.send(WsFrame::Levels { data: lvl });
             }
+            *cached_levels.write().await = levels;
         }
         Err(e) => tracing::warn!("Cold-start REST fetch failed: {}. Continuing without history.", e),
     }
@@ -75,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // ---------- Tick consumer: order flow + bubble detection ----------
+    // ---------- Tick consumer ----------
     {
         let vp = vp.clone();
         let bc = bc_tx.clone();
@@ -93,9 +93,10 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // ---------- Candle consumer: VP updates on close ----------
+    // ---------- Candle consumer ----------
     {
         let vp = vp.clone();
+        let cached = cached_levels.clone();
         let bc = bc_tx.clone();
         tokio::spawn(async move {
             while let Some(ev) = kline_rx.recv().await {
@@ -105,7 +106,9 @@ async fn main() -> anyhow::Result<()> {
                 let candle = ev.kline.to_vp_candle();
                 let mut vp_w = vp.write().await;
                 vp_w.ingest_candle(candle);
-                for lvl in vp_w.all_levels() {
+                let levels = vp_w.all_levels();
+                *cached.write().await = levels.clone();
+                for lvl in levels {
                     let _ = bc.send(WsFrame::Levels { data: lvl });
                 }
             }
@@ -116,6 +119,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         tx: bc_tx.clone(),
         subscriptions: Arc::new(dashmap::DashMap::new()),
+        cached_levels: cached_levels.clone(),
     };
     let app = ws_server::router(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
