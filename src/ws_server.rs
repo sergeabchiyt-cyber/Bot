@@ -6,30 +6,36 @@ use axum::{
     },
     response::IntoResponse,
     routing::get,
-    Router,
+    Json, Router,
 };
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{broadcast, RwLock};
 use tracing::info;
 
-use crate::types::WsFrame;
+use crate::types::{VpLevels, WsFrame};
 
 #[derive(Clone)]
 pub struct AppState {
     pub tx: broadcast::Sender<WsFrame>,
     pub subscriptions: Arc<DashMap<String, Vec<String>>>,
+    pub cached_levels: Arc<RwLock<Vec<VpLevels>>>,
 }
 
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/levels", get(levels_snapshot))
         .route("/ws", get(ws_handler))
         .with_state(state)
 }
 
 async fn health() -> &'static str {
     "ok"
+}
+
+async fn levels_snapshot(State(state): State<AppState>) -> Json<Vec<VpLevels>> {
+    Json(state.cached_levels.read().await.clone())
 }
 
 async fn ws_handler(
@@ -47,49 +53,77 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         "sess-{}",
         chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
     );
+    info!("WS session {} opened", session_id);
 
-    let topics = Arc::new(RwLock::new(Vec::<String>::new()));
+    let mut topics: Vec<String> = Vec::new();
+    let mut subscribed = false;
 
-    let topics_writer = topics.clone();
-    let read_task = tokio::spawn(async move {
-        while let Some(Ok(msg)) = receiver.next().await {
-            if let Message::Text(text) = msg {
-                if let Ok(frame) = serde_json::from_str::<WsFrame>(&text) {
-                    if let WsFrame::Subscribe { topics: t } = frame {
-                        *topics_writer.write().await = t;
+    loop {
+        tokio::select! {
+            // ---- Inbound from client
+            msg = receiver.next() => {
+                match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        if let Ok(frame) = serde_json::from_str::<WsFrame>(&text) {
+                            if let WsFrame::Subscribe { topics: t } = frame {
+                                info!("WS session {} subscribed to {:?}", session_id, t);
+                                topics = t;
+                                subscribed = true;
+
+                                // Replay cached levels immediately
+                                if topics.iter().any(|x| x == "levels") {
+                                    let cached = state.cached_levels.read().await;
+                                    for lvl in cached.iter() {
+                                        let frame = WsFrame::Levels { data: lvl.clone() };
+                                        let json = serde_json::to_string(&frame).unwrap_or_default();
+                                        if sender.send(Message::Text(json.into())).await.is_err() {
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Some(Ok(_)) => {}
+                    Some(Err(_)) | None => {
+                        info!("WS session {} disconnected", session_id);
+                        return;
+                    }
+                }
+            }
+
+            // ---- Outbound from broadcast bus
+            result = rx.recv() => {
+                match result {
+                    Ok(frame) => {
+                        if !subscribed { continue; }
+                        let topic = match &frame {
+                            WsFrame::Levels { .. } => "levels",
+                            WsFrame::Bubbles { .. } => "bubbles",
+                            WsFrame::Trades { .. } => "trades",
+                            WsFrame::Sentiment { .. } => "sentiment",
+                            WsFrame::Transcript { .. } => "transcript",
+                            WsFrame::Calendar { .. } => "calendar",
+                            WsFrame::Learn { .. } => "learn",
+                            WsFrame::AudioChunk { .. } => "audio_chunk",
+                            _ => continue,
+                        };
+                        if !topics.iter().any(|t| t == topic) { continue; }
+
+                        let json = serde_json::to_string(&frame).unwrap_or_default();
+                        if sender.send(Message::Text(json.into())).await.is_err() {
+                            info!("WS session {} send failed", session_id);
+                            return;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        info!("WS session {} lagged {} frames", session_id, n);
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        return;
                     }
                 }
             }
         }
-    });
-
-    while let Ok(frame) = rx.recv().await {
-        let topic = match &frame {
-            WsFrame::Levels { .. } => "levels",
-            WsFrame::Bubbles { .. } => "bubbles",
-            WsFrame::Trades { .. } => "trades",
-            WsFrame::Sentiment { .. } => "sentiment",
-            WsFrame::Transcript { .. } => "transcript",
-            WsFrame::Calendar { .. } => "calendar",
-            WsFrame::Learn { .. } => "learn",
-            WsFrame::AudioChunk { .. } => "audio_chunk",
-            _ => continue,
-        };
-
-        let allowed = {
-            let current = topics.read().await;
-            !current.is_empty() && current.iter().any(|t| t == topic)
-        };
-        if !allowed {
-            continue;
-        }
-
-        let json = serde_json::to_string(&frame).unwrap_or_default();
-        if sender.send(Message::Text(json.into())).await.is_err() {
-            break;
-        }
     }
-
-    info!("WS session {} closed", session_id);
-    read_task.abort();
 }
