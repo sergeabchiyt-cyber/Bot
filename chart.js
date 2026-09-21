@@ -1,9 +1,10 @@
 /* ============================================================
  * XAUUSD Terminal — Node 2
- * Replace WS_URL with your Node 1 host before deploy.
+ * lightweight-charts v4.2.0 API
  * ============================================================ */
 
 const WS_URL = "wss://engine-southeastasia-sng-main.onrender.com/ws";
+const REST_LEVELS_URL = "https://engine-southeastasia-sng-main.onrender.com/levels";
 
 // ---------- Chart bootstrap ----------
 const chartEl = document.getElementById("chart");
@@ -43,10 +44,12 @@ const candleSeries = chart.addCandlestickSeries({
 
 // ---------- Load historical candles from Binance REST ----------
 async function loadHistory(interval = "15m") {
+  setStatus("loading history");
   try {
     const res = await fetch(
       `https://fapi.binance.com/fapi/v1/klines?symbol=XAUUSDT&interval=${interval}&limit=500`
     );
+    if (!res.ok) throw new Error(`Binance REST ${res.status}`);
     const raw = await res.json();
     const data = raw.map((k) => ({
       time: Math.floor(k[0] / 1000),
@@ -57,19 +60,19 @@ async function loadHistory(interval = "15m") {
     }));
     candleSeries.setData(data);
     chart.timeScale().fitContent();
-    updateLastPrice(data[data.length - 1]);
+    if (data.length) updateLastPrice(data[data.length - 1]);
+    console.log(`Loaded ${data.length} candles (${interval})`);
   } catch (e) {
-    console.warn("History load failed:", e);
+    console.error("History load failed:", e);
+    setStatus("history error");
   }
 }
 
-// ---------- Price line management ----------
+// ---------- Price lines ----------
 const priceLines = {};
 
 function upsertPriceLine(key, price, color, title) {
-  if (priceLines[key]) {
-    candleSeries.removePriceLine(priceLines[key]);
-  }
+  if (priceLines[key]) candleSeries.removePriceLine(priceLines[key]);
   priceLines[key] = candleSeries.createPriceLine({
     price,
     color,
@@ -80,9 +83,8 @@ function upsertPriceLine(key, price, color, title) {
   });
 }
 
-// ---------- Bubble markers ----------
-const markers = [];
-const markersApi = LightweightCharts.createSeriesMarkers(candleSeries, markers);
+// ---------- Bubble markers (v4 API) ----------
+let markers = [];
 
 function addBubble(bubble) {
   const isBuy = bubble.direction === "ABS_BUY";
@@ -94,9 +96,13 @@ function addBubble(bubble) {
     text: isBuy ? "ABS BUY" : "ABS SELL",
     size: Math.min(3, Math.max(1, bubble.strength / 100)),
   });
-  markersApi.setMarkers(markers);
-
+  candleSeries.setMarkers(markers);   // v4 API
   renderBubbleRow(bubble);
+}
+
+function clearMarkers() {
+  markers = [];
+  candleSeries.setMarkers(markers);
 }
 
 // ---------- Sidebar renderers ----------
@@ -110,25 +116,28 @@ function renderLevels(levels) {
     return;
   }
 
-  list.innerHTML = levels
+  const html = levels
     .map((l) => {
       const rows = [];
-      const label = l.window === "PW" ? "PW" : "PS";
-      rows.push(row(label, "PoC", l.poc, label === "PW" ? "poc" : "ps-poc"));
       if (l.window === "PW") {
-        rows.push(row(label, "VaH", l.vah, "vah"));
-        rows.push(row(label, "VaL", l.val, "val"));
+        rows.push(row("PW", "PoC", l.poc, "poc"));
+        rows.push(row("PW", "VaH", l.vah, "vah"));
+        rows.push(row("PW", "VaL", l.val, "val"));
+      } else if (l.window === "PS") {
+        rows.push(row("PS", "PoC", l.poc, "ps-poc"));
       }
       return rows.join("");
     })
     .join("");
+
+  list.innerHTML = html;
 }
 
 function row(windowLabel, type, price, cls) {
   return `
     <div class="level-row">
       <div class="level-label"><i class="${cls}"></i>${windowLabel} ${type}</div>
-      <div class="level-price">${price.toFixed(2)}</div>
+      <div class="level-price">${Number(price).toFixed(2)}</div>
     </div>
   `;
 }
@@ -156,7 +165,7 @@ function renderBubbleRow(bubble) {
         <span class="bubble-dir ${b.isBuy ? "buy" : "sell"}">
           ${b.isBuy ? "▲ ABS BUY" : "▼ ABS SELL"}
         </span>
-        <span class="bubble-meta">${b.bubble.level.toFixed(2)} · ${b.time}</span>
+        <span class="bubble-meta">${Number(b.bubble.level).toFixed(2)} · ${b.time}</span>
       </div>
     `
     )
@@ -194,12 +203,12 @@ function renderCalendar(events) {
 
 function updateLastPrice(candle) {
   const priceEl = document.getElementById("last-price");
-  priceEl.textContent = candle.close.toFixed(2);
+  if (priceEl) priceEl.textContent = Number(candle.close).toFixed(2);
 }
 
 function updateSentiment(frame) {
   const val = document.getElementById("sentiment-value");
-  const pill = document.getElementById("sentiment-pill");
+  if (!val) return;
   const { hawkish = 0, dovish = 0 } = frame;
   const bias = hawkish - dovish;
   let label = "Neutral";
@@ -215,16 +224,21 @@ function updateSentiment(frame) {
   val.style.color = color;
 }
 
+function setStatus(text) {
+  const el = document.getElementById("status");
+  if (el) el.textContent = text;
+}
+
 // ---------- WebSocket ----------
 let ws;
 let reconnectDelay = 1000;
 
 function connect() {
-  const statusEl = document.getElementById("status");
+  setStatus("connecting");
   ws = new WebSocket(WS_URL);
 
   ws.onopen = () => {
-    statusEl.textContent = "live";
+    setStatus("live");
     reconnectDelay = 1000;
     ws.send(
       JSON.stringify({
@@ -232,6 +246,7 @@ function connect() {
         topics: ["levels", "bubbles", "trades", "sentiment", "calendar"],
       })
     );
+    console.log("WS connected, subscribed");
   };
 
   ws.onmessage = (ev) => {
@@ -241,16 +256,16 @@ function connect() {
     } catch {
       return;
     }
+    console.log("WS frame:", frame);
 
     switch (frame.type) {
       case "levels": {
         const l = frame.data;
-        const prefix = l.window;
-        if (prefix === "PW") {
+        if (l.window === "PW") {
           upsertPriceLine("PW-poc", l.poc, "#F0B90B", "PW PoC");
           upsertPriceLine("PW-vah", l.vah, "#26A69A", "PW VaH");
           upsertPriceLine("PW-val", l.val, "#EF5350", "PW VaL");
-        } else if (prefix === "PS") {
+        } else if (l.window === "PS") {
           upsertPriceLine("PS-poc", l.poc, "#58A6FF", "PS PoC");
         }
         break;
@@ -270,24 +285,35 @@ function connect() {
   };
 
   ws.onclose = () => {
-    statusEl.textContent = "reconnecting";
+    setStatus("reconnecting");
     setTimeout(connect, reconnectDelay);
     reconnectDelay = Math.min(reconnectDelay * 2, 30000);
   };
 
-  ws.onerror = () => {
-    statusEl.textContent = "error";
+  ws.onerror = (e) => {
+    setStatus("ws error");
+    console.error("WS error:", e);
   };
 }
 
-// ---------- Levels REST fallback (initial render) ----------
+// ---------- REST levels fallback ----------
 async function fetchLevels() {
   try {
-    const res = await fetch(WS_URL.replace("wss://", "https://").replace("/ws", "/levels"));
+    const res = await fetch(REST_LEVELS_URL);
+    if (!res.ok) throw new Error(`levels ${res.status}`);
     const levels = await res.json();
     renderLevels(levels);
+    for (const l of levels) {
+      if (l.window === "PW") {
+        upsertPriceLine("PW-poc", l.poc, "#F0B90B", "PW PoC");
+        upsertPriceLine("PW-vah", l.vah, "#26A69A", "PW VaH");
+        upsertPriceLine("PW-val", l.val, "#EF5350", "PW VaL");
+      } else if (l.window === "PS") {
+        upsertPriceLine("PS-poc", l.poc, "#58A6FF", "PS PoC");
+      }
+    }
   } catch (e) {
-    console.warn("Levels fetch failed:", e);
+    console.error("Levels fetch failed:", e);
   }
 }
 
@@ -296,12 +322,11 @@ document.querySelectorAll(".tf").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tf").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
-    const tf = btn.dataset.tf;
     Object.values(priceLines).forEach((l) => candleSeries.removePriceLine(l));
     Object.keys(priceLines).forEach((k) => delete priceLines[k]);
-    markers.length = 0;
-    markersApi.setMarkers(markers);
-    loadHistory(tf);
+    clearMarkers();
+    loadHistory(btn.dataset.tf);
+    fetchLevels();
   });
 });
 
@@ -315,3 +340,6 @@ const ro = new ResizeObserver(() => {
   chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
 });
 ro.observe(chartEl);
+
+// ---------- Visible diagnostics ----------
+console.log("XAUUSD terminal booted");
