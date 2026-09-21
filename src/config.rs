@@ -2,8 +2,9 @@ use std::env;
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    // Data
+    // Market data
     pub binance_ws_url: String,
+    pub binance_kline_url: String,
     pub binance_rest_url: String,
     pub mcp_browser_url: String,
 
@@ -37,6 +38,8 @@ impl Config {
         Self {
             binance_ws_url: env::var("BINANCE_WS_URL")
                 .unwrap_or_else(|_| "wss://fstream.binance.com/market/ws/xauusdt@aggTrade".into()),
+            binance_kline_url: env::var("BINANCE_KLINE_URL")
+                .unwrap_or_else(|_| "wss://fstream.binance.com/market/ws/xauusdt@kline_15m".into()),
             binance_rest_url: env::var("BINANCE_REST_URL")
                 .unwrap_or_else(|_| "https://fapi.binance.com".into()),
             mcp_browser_url: env::var("MCP_BROWSER_URL")
@@ -48,11 +51,18 @@ impl Config {
                 .unwrap_or_else(|_| "https://api.derivws.com".into()),
             mcp_chelsea_url,
 
-            port: env::var("PORT").unwrap_or_else(|_| "8080".into()).parse().unwrap_or(8080),
+            port: env::var("PORT")
+                .unwrap_or_else(|_| "8080".into())
+                .parse()
+                .unwrap_or(8080),
             volume_spike_percentile: env::var("VOLUME_SPIKE_PCT")
-                .unwrap_or_else(|_| "95.0".into()).parse().unwrap_or(95.0),
+                .unwrap_or_else(|_| "95.0".into())
+                .parse()
+                .unwrap_or(95.0),
             level_proximity_pips: env::var("LEVEL_PROXIMITY_PIPS")
-                .unwrap_or_else(|_| "30.0".into()).parse().unwrap_or(30.0),
+                .unwrap_or_else(|_| "30.0".into())
+                .parse()
+                .unwrap_or(30.0),
             sl_min_pips: 200.0,
             sl_max_pips: 300.0,
             tp_min_pips: 600.0,
@@ -64,7 +74,6 @@ impl Config {
         }
     }
 
-    /// Resolves which venue to use for execution.
     pub fn execution_venue(&self) -> ExecutionVenue {
         if self.deriv_demo_api.is_some() {
             ExecutionVenue::DerivDemo
