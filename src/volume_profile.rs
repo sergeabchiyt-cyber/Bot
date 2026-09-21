@@ -1,7 +1,7 @@
 use anyhow::Result;
-use wickra::{Candle, Indicator, ValueArea};
-use chrono::{DateTime, Utc, TimeZone};
+use chrono::{Datelike, TimeZone, Utc};
 use chrono_tz::America::New_York;
+use wickra::{Candle, ValueArea};
 
 use crate::types::VpLevels;
 
@@ -26,7 +26,7 @@ impl VolumeProfileEngine {
         let mut va = ValueArea::new(candles.len().max(1), bins, va_pct)
             .map_err(|e| anyhow::anyhow!("ValueArea init: {:?}", e))?;
 
-        let mut last: Option<_> = None;
+        let mut last = None;
         for c in candles {
             last = va.update(c.clone());
         }
@@ -57,17 +57,20 @@ impl VolumeProfileEngine {
 
     pub fn all_levels(&self) -> Vec<&VpLevels> {
         [self.pw_levels.as_ref(), self.ps_levels.as_ref(), self.cw_levels.as_ref()]
-            .into_iter().flatten().collect()
+            .into_iter()
+            .flatten()
+            .collect()
     }
 
-    /// Sunday 18:00 UTC-4 boundary helpers
+    /// Sunday 18:00 UTC-4 week boundary
     pub fn week_start_utc4() -> i64 {
         let now = Utc::now().with_timezone(&New_York);
         let days_since_sunday = now.weekday().num_days_from_sunday() as i64;
         let sunday = now - chrono::Duration::days(days_since_sunday);
-        let start = New_York.with_ymd_and_hms(
-            sunday.year(), sunday.month(), sunday.day(), 18, 0, 0
-        ).unwrap();
+        let start = New_York
+            .with_ymd_and_hms(sunday.year(), sunday.month(), sunday.day(), 18, 0, 0)
+            .single()
+            .expect("valid Sunday 18:00 local time");
         start.timestamp_millis()
     }
 }
