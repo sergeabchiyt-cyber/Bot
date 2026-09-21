@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+// =====================================================================
+// Binance market data
+// =====================================================================
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AggTrade {
     #[serde(rename = "e")]
@@ -27,10 +31,21 @@ pub struct AggTrade {
 }
 
 impl AggTrade {
-    pub fn price_f64(&self) -> f64 { self.price.parse().unwrap_or(0.0) }
-    pub fn qty_f64(&self) -> f64 { self.quantity.parse().unwrap_or(0.0) }
+    pub fn price_f64(&self) -> f64 {
+        self.price.parse().unwrap_or(0.0)
+    }
+
+    pub fn qty_f64(&self) -> f64 {
+        self.quantity.parse().unwrap_or(0.0)
+    }
+
+    /// Positive when the buyer is the taker (aggressive buy), negative otherwise.
     pub fn signed_delta(&self) -> f64 {
-        if self.is_buyer_maker { -self.qty_f64() } else { self.qty_f64() }
+        if self.is_buyer_maker {
+            -self.qty_f64()
+        } else {
+            self.qty_f64()
+        }
     }
 }
 
@@ -70,6 +85,33 @@ pub struct Kline {
     pub is_closed: bool,
 }
 
+impl Kline {
+    pub fn to_vp_candle(&self) -> VpCandle {
+        VpCandle {
+            time: self.start_time,
+            open: self.open.parse().unwrap_or(0.0),
+            high: self.high.parse().unwrap_or(0.0),
+            low: self.low.parse().unwrap_or(0.0),
+            close: self.close.parse().unwrap_or(0.0),
+            volume: self.volume.parse().unwrap_or(0.0),
+        }
+    }
+}
+
+// =====================================================================
+// Volume profile
+// =====================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VpCandle {
+    pub time: i64,
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
+    pub volume: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VpLevels {
     pub window: String,
@@ -79,6 +121,10 @@ pub struct VpLevels {
     pub timestamp: i64,
 }
 
+// =====================================================================
+// Order flow
+// =====================================================================
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AbsorptionBubble {
     pub level: f64,
@@ -86,6 +132,10 @@ pub struct AbsorptionBubble {
     pub strength: f64,
     pub timestamp: i64,
 }
+
+// =====================================================================
+// AI / sentiment
+// =====================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SentimentFrame {
@@ -95,6 +145,10 @@ pub struct SentimentFrame {
     pub confidence: f64,
     pub ts: i64,
 }
+
+// =====================================================================
+// Trades
+// =====================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TradeEvent {
@@ -109,25 +163,40 @@ pub struct TradeEvent {
     pub timestamp: i64,
 }
 
+// =====================================================================
+// WebSocket frames
+// =====================================================================
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum WsFrame {
     #[serde(rename = "levels")]
     Levels { data: VpLevels },
+
     #[serde(rename = "bubbles")]
     Bubbles { data: AbsorptionBubble },
+
     #[serde(rename = "trades")]
     Trades { data: TradeEvent },
+
     #[serde(rename = "sentiment")]
     Sentiment { data: SentimentFrame },
+
+    #[serde(rename = "transcript")]
+    Transcript { data: serde_json::Value },
+
     #[serde(rename = "calendar")]
     Calendar { data: serde_json::Value },
+
     #[serde(rename = "subscribe")]
     Subscribe { topics: Vec<String> },
+
     #[serde(rename = "learn")]
     Learn { features: Vec<f64>, target: f64 },
+
     #[serde(rename = "audio_chunk")]
     AudioChunk { data: String },
+
     #[serde(rename = "heartbeat")]
     Heartbeat,
 }
