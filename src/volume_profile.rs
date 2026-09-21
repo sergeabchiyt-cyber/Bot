@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::{Datelike, TimeZone, Utc};
 use chrono_tz::America::New_York;
-use wickra::{Candle, ValueArea};
+use wickra::{Candle, Indicator, ValueArea};
 
 use crate::types::VpLevels;
 
