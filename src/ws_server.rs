@@ -14,12 +14,14 @@ use tokio::sync::{broadcast, RwLock};
 use tracing::info;
 
 use crate::types::{VpLevels, WsFrame};
+use crate::volume_profile::VolumeProfileEngine;
 
 #[derive(Clone)]
 pub struct AppState {
     pub tx: broadcast::Sender<WsFrame>,
     pub subscriptions: Arc<DashMap<String, Vec<String>>>,
     pub cached_levels: Arc<RwLock<Vec<VpLevels>>>,
+    pub vp: Arc<RwLock<VolumeProfileEngine>>,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -35,7 +37,8 @@ async fn health() -> &'static str {
 }
 
 async fn levels_snapshot(State(state): State<AppState>) -> Json<Vec<VpLevels>> {
-    Json(state.cached_levels.read().await.clone())
+    let vp = state.vp.read().await;
+    Json(vp.all_levels_full())
 }
 
 async fn ws_handler(
@@ -60,7 +63,6 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
     loop {
         tokio::select! {
-            // ---- Inbound from client
             msg = receiver.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
@@ -70,7 +72,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                 topics = t;
                                 subscribed = true;
 
-                                // Replay cached levels immediately
+                                // Replay cached levels (PW/PS only)
                                 if topics.iter().any(|x| x == "levels") {
                                     let cached = state.cached_levels.read().await;
                                     for lvl in cached.iter() {
@@ -92,7 +94,6 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 }
             }
 
-            // ---- Outbound from broadcast bus
             result = rx.recv() => {
                 match result {
                     Ok(frame) => {
