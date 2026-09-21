@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>XAUUSD — Trading Terminal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#26A69A" stroke-width="2">
+          <path d="M3 17l6-6 4 4 8-8" />
+          <path d="M17 7h4v4" />
+        </svg>
+        <span>XAUUSD</span>
+        <span class="dot"></span>
+        <span class="status" id="status">connecting</span>
+      </div>
+      <div class="meta">
+        <span class="price" id="last-price">—</span>
+        <span class="change" id="last-change">—</span>
+      </div>
+      <div class="sentiment" id="sentiment-pill">
+        <span class="label">Sentiment</span>
+        <span class="value" id="sentiment-value">—</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="chart-panel">
+        <div class="chart-header">
+          <div class="tf-tabs">
+            <button class="tf active" data-tf="15m">15M</button>
+            <button class="tf" data-tf="1h">1H</button>
+            <button class="tf" data-tf="1d">1D</button>
+          </div>
+          <div class="legend">
+            <span class="legend-item"><i class="swatch gold"></i>PW PoC</span>
+            <span class="legend-item"><i class="swatch teal"></i>PW VaH</span>
+            <span class="legend-item"><i class="swatch coral"></i>PW VaL</span>
+            <span class="legend-item"><i class="swatch blue"></i>PS PoC</span>
+          </div>
+        </div>
+        <div id="chart"></div>
+      </section>
+
+      <aside class="sidebar">
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Levels</h3>
+            <span class="badge" id="levels-count">0</span>
+          </div>
+          <div class="levels-list" id="levels-list">
+            <div class="empty">Awaiting data…</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Order Flow</h3>
+            <span class="badge" id="bubbles-count">0</span>
+          </div>
+          <div class="bubbles-list" id="bubbles-list">
+            <div class="empty">No bubbles detected</div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Calendar</h3>
+            <span class="badge" id="calendar-count">0</span>
+          </div>
+          <div class="calendar-list" id="calendar-list">
+            <div class="empty">No events loaded</div>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+  <script src="chart.js"></script>
+</body>
+</html>
