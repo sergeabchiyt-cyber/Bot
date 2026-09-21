@@ -4,6 +4,8 @@ mod binance_ws;
 mod volume_profile;
 mod order_flow;
 mod execution;
+mod execution_deriv;
+mod execution_chelsea;
 mod mcp_client;
 mod ws_server;
 
