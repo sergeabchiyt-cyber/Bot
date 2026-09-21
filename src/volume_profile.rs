@@ -105,10 +105,13 @@ impl VolumeProfileEngine {
         self.cw_levels = Self::compute(&self.cw_candles, "CW");
     }
 
-    /// Route a candle into the correct window based on its timestamp.
+    /// Route a candle into the correct window based on its age relative to NOW,
+    /// not relative to its own timestamp.
     pub fn ingest_candle(&mut self, candle: VpCandle) {
-        let week_start = Self::most_recent_week_start_utc(candle.time);
-        let ps_start = Self::previous_friday_close_utc(candle.time);
+        let now_ms = Utc::now().timestamp_millis();
+        let week_start = Self::most_recent_week_start_utc(now_ms);
+        let ps_start = week_start - 49 * 60 * 60 * 1000;        // Friday 17:00 UTC-4
+        let pw_floor = week_start - 7 * 24 * 60 * 60 * 1000;    // prior Sunday 18:00
 
         if candle.time >= week_start {
             self.cw_candles.push(candle);
@@ -120,15 +123,26 @@ impl VolumeProfileEngine {
             self.ps_candles.sort_by_key(|c| c.time);
             self.ps_candles.dedup_by_key(|c| c.time);
             self.recompute_ps();
-        } else {
+        } else if candle.time >= pw_floor {
             self.pw_candles.push(candle);
             self.pw_candles.sort_by_key(|c| c.time);
             self.pw_candles.dedup_by_key(|c| c.time);
             self.recompute_pw();
         }
+        // else: older than the prior week — discard
     }
 
+    /// Levels emitted to the broadcast bus and replayed on WS subscribe.
+    /// PW and PS only — CW is tracked but not published.
     pub fn all_levels(&self) -> Vec<VpLevels> {
+        [self.pw_levels.clone(), self.ps_levels.clone()]
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
+    /// Full set including CW. Used only by the /levels REST endpoint.
+    pub fn all_levels_full(&self) -> Vec<VpLevels> {
         [self.pw_levels.clone(), self.ps_levels.clone(), self.cw_levels.clone()]
             .into_iter()
             .flatten()
