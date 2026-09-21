@@ -16,7 +16,6 @@ chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-wickra = "0.8"
 rill-ml = { version = "1.5", features = ["serde"] }
 tokio-stream = "0.1"
 dashmap = "6"
