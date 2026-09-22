@@ -11,9 +11,7 @@ pub struct VolumeProfileEngine {
     pub pw_levels: Option<VpLevels>,
     pub ps_levels: Option<VpLevels>,
     pub cw_levels: Option<VpLevels>,
-    pub pw_candles: Vec<VpCandle>,
-    pub ps_candles: Vec<VpCandle>,
-    pub cw_candles: Vec<VpCandle>,
+    candles: Vec<VpCandle>,
 }
 
 impl VolumeProfileEngine {
@@ -22,9 +20,7 @@ impl VolumeProfileEngine {
             pw_levels: None,
             ps_levels: None,
             cw_levels: None,
-            pw_candles: Vec::new(),
-            ps_candles: Vec::new(),
-            cw_candles: Vec::new(),
+            candles: Vec::new(),
         }
     }
 
@@ -94,38 +90,25 @@ impl VolumeProfileEngine {
         })
     }
 
-    pub fn recompute_pw(&mut self) {
-        self.pw_levels = Self::compute(&self.pw_candles, "PW");
-    }
-    pub fn recompute_ps(&mut self) {
-        self.ps_levels = Self::compute(&self.ps_candles, "PS");
-    }
-    pub fn recompute_cw(&mut self) {
-        self.cw_levels = Self::compute(&self.cw_candles, "CW");
-    }
-
     pub fn ingest_candle(&mut self, candle: VpCandle) {
+        self.candles.push(candle);
+        self.candles.sort_by_key(|c| c.time);
+        self.candles.dedup_by_key(|c| c.time);
+
         let now_ms = Utc::now().timestamp_millis();
         let week_start = Self::most_recent_week_start_utc(now_ms);
         let ps_start = week_start - 49 * 60 * 60 * 1000;
         let pw_floor = week_start - 7 * 24 * 60 * 60 * 1000;
 
-        if candle.time >= week_start {
-            self.cw_candles.push(candle);
-            self.cw_candles.sort_by_key(|c| c.time);
-            self.cw_candles.dedup_by_key(|c| c.time);
-            self.recompute_cw();
-        } else if candle.time >= ps_start {
-            self.ps_candles.push(candle);
-            self.ps_candles.sort_by_key(|c| c.time);
-            self.ps_candles.dedup_by_key(|c| c.time);
-            self.recompute_ps();
-        } else if candle.time >= pw_floor {
-            self.pw_candles.push(candle);
-            self.pw_candles.sort_by_key(|c| c.time);
-            self.pw_candles.dedup_by_key(|c| c.time);
-            self.recompute_pw();
-        }
+        self.candles.retain(|c| c.time >= pw_floor);
+
+        let pw: Vec<_> = self.candles.iter().filter(|c| c.time < ps_start).cloned().collect();
+        let ps: Vec<_> = self.candles.iter().filter(|c| c.time >= ps_start && c.time < week_start).cloned().collect();
+        let cw: Vec<_> = self.candles.iter().filter(|c| c.time >= week_start).cloned().collect();
+
+        self.pw_levels = Self::compute(&pw, "PW");
+        self.ps_levels = Self::compute(&ps, "PS");
+        self.cw_levels = Self::compute(&cw, "CW");
     }
 
     /// Emitted to the broadcast bus, replayed on WS subscribe, and used by
