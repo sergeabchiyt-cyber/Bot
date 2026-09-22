@@ -10,7 +10,8 @@ const BACKEND_REST = "https://engine-southeastasia-sng-main.onrender.com/levels"
 
 // ---------- Level visibility policy ----------
 function levelVisible(windowKey, kind) {
-  return true; // Draw PoC, VaH, VaL for PW, PS, and CW
+  if (windowKey === "PS") return kind === "poc";
+  return true; // Draw PoC, VaH, VaL for PW and CW
 }
 
 // ---------- Chart bootstrap ----------
@@ -103,8 +104,6 @@ const LEVEL_STYLE = {
   },
   PS: {
     poc: { color: "#58A6FF", title: "PS PoC", dashed: false },
-    vah: { color: "#357ABD", title: "PS VaH", dashed: true },
-    val: { color: "#9E4242", title: "PS VaL", dashed: true },
   },
   CW: {
     poc: { color: "#A371F7", title: "CW PoC", dashed: true },
@@ -213,7 +212,7 @@ function visibleRowCount(levels) {
   let n = 0;
   for (const l of levels) {
     if (l.window === "PW") n += 3;
-    else if (l.window === "PS") n += 3;
+    else if (l.window === "PS") n += 1; // Only PoC for PS
     else if (l.window === "CW") n += 3;
   }
   return n;
@@ -238,8 +237,6 @@ function renderLevels(levels) {
         rows.push(row("PW", "VaL", l.val, "val"));
       } else if (l.window === "PS") {
         rows.push(row("PS", "PoC", l.poc, "ps-poc"));
-        rows.push(row("PS", "VaH", l.vah, "ps-vah"));
-        rows.push(row("PS", "VaL", l.val, "ps-val"));
       } else if (l.window === "CW") {
         rows.push(row("CW", "PoC", l.poc, "cw-poc"));
         rows.push(row("CW", "VaH", l.vah, "cw-vah"));
