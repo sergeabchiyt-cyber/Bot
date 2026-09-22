@@ -28,7 +28,6 @@ impl VolumeProfileEngine {
         }
     }
 
-    /// Bin volume across price levels and expand a value area from the PoC.
     fn compute(candles: &[VpCandle], label: &str) -> Option<VpLevels> {
         if candles.is_empty() {
             return None;
@@ -105,13 +104,11 @@ impl VolumeProfileEngine {
         self.cw_levels = Self::compute(&self.cw_candles, "CW");
     }
 
-    /// Route a candle into the correct window based on its age relative to NOW,
-    /// not relative to its own timestamp.
     pub fn ingest_candle(&mut self, candle: VpCandle) {
         let now_ms = Utc::now().timestamp_millis();
         let week_start = Self::most_recent_week_start_utc(now_ms);
-        let ps_start = week_start - 49 * 60 * 60 * 1000;        // Friday 17:00 UTC-4
-        let pw_floor = week_start - 7 * 24 * 60 * 60 * 1000;    // prior Sunday 18:00
+        let ps_start = week_start - 49 * 60 * 60 * 1000;
+        let pw_floor = week_start - 7 * 24 * 60 * 60 * 1000;
 
         if candle.time >= week_start {
             self.cw_candles.push(candle);
@@ -129,27 +126,24 @@ impl VolumeProfileEngine {
             self.pw_candles.dedup_by_key(|c| c.time);
             self.recompute_pw();
         }
-        // else: older than the prior week — discard
     }
 
-    /// Levels emitted to the broadcast bus and replayed on WS subscribe.
-    /// PW and PS only — CW is tracked but not published.
+    /// Emitted to the broadcast bus, replayed on WS subscribe, and used by
+    /// order flow for bubble detection. Includes PW (PoC/VaH/VaL), PS (PoC),
+    /// and CW (PoC, plus VaH/VaL populated for consumers that want them).
     pub fn all_levels(&self) -> Vec<VpLevels> {
-        [self.pw_levels.clone(), self.ps_levels.clone()]
-            .into_iter()
-            .flatten()
-            .collect()
+        let mut out = Vec::new();
+        if let Some(pw) = &self.pw_levels { out.push(pw.clone()); }
+        if let Some(ps) = &self.ps_levels { out.push(ps.clone()); }
+        if let Some(cw) = &self.cw_levels { out.push(cw.clone()); }
+        out
     }
 
-    /// Full set including CW. Used only by the /levels REST endpoint.
+    /// Alias kept for the REST /levels endpoint in ws_server.rs.
     pub fn all_levels_full(&self) -> Vec<VpLevels> {
-        [self.pw_levels.clone(), self.ps_levels.clone(), self.cw_levels.clone()]
-            .into_iter()
-            .flatten()
-            .collect()
+        self.all_levels()
     }
 
-    /// Timestamp (ms) of the most recent Sunday 18:00 UTC-4 at or before `now_ms`.
     pub fn most_recent_week_start_utc(now_ms: i64) -> i64 {
         let now = Utc.timestamp_millis_opt(now_ms).single().unwrap_or_else(Utc::now);
         let local = now.with_timezone(&New_York);
@@ -165,7 +159,6 @@ impl VolumeProfileEngine {
         sunday.with_timezone(&Utc).timestamp_millis()
     }
 
-    /// Timestamp (ms) of the Friday 17:00 UTC-4 close preceding `now_ms`.
     pub fn previous_friday_close_utc(now_ms: i64) -> i64 {
         let week_start = Self::most_recent_week_start_utc(now_ms);
         week_start - 49 * 60 * 60 * 1000
