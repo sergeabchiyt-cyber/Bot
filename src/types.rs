@@ -29,7 +29,6 @@ pub struct AggTrade {
     #[serde(rename = "st")]
     pub symbol_type: Option<i32>,
 
-    /// Source exchange tag: "binance", "bybit", "okx". Not part of the wire format.
     #[serde(default = "default_exchange")]
     pub exchange: String,
 }
@@ -47,7 +46,6 @@ impl AggTrade {
         self.quantity.parse().unwrap_or(0.0)
     }
 
-    /// Positive when the buyer is the taker (aggressive buy), negative otherwise.
     pub fn signed_delta(&self) -> f64 {
         if self.is_buyer_maker {
             -self.qty_f64()
@@ -130,16 +128,16 @@ pub struct VpLevels {
 }
 
 // =====================================================================
-// Order flow
+// Order flow events
 // =====================================================================
 
+/// kind = "BUY_BUBBLE" | "SELL_BUBBLE" | "ABS_BUY" | "ABS_SELL"
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AbsorptionBubble {
+pub struct OrderflowEvent {
+    pub kind: String,
     pub level: f64,
-    pub direction: String,
     pub strength: f64,
     pub timestamp: i64,
-    /// Source exchange that triggered the bubble: "binance", "bybit", "okx".
     #[serde(default = "default_exchange")]
     pub exchange: String,
 }
@@ -185,7 +183,7 @@ pub enum WsFrame {
     Levels { data: VpLevels },
 
     #[serde(rename = "bubbles")]
-    Bubbles { data: AbsorptionBubble },
+    Bubbles { data: OrderflowEvent },
 
     #[serde(rename = "trades")]
     Trades { data: TradeEvent },
