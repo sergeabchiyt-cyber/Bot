@@ -2,6 +2,7 @@ mod config;
 mod types;
 mod binance_ws;
 mod binance_rest;
+mod multi_exchange;
 mod volume_profile;
 mod order_flow;
 mod execution;
@@ -31,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Starting XAUUSD engine on port {}", config.port);
 
     let (bc_tx, _) = broadcast::channel::<WsFrame>(1024);
-    let (tick_tx, mut tick_rx) = mpsc::channel::<types::AggTrade>(4096);
+    let (tick_tx, mut tick_rx) = mpsc::channel::<types::AggTrade>(8192);
     let (kline_tx, mut kline_rx) = mpsc::channel::<types::KlineEvent>(256);
 
     let vp = Arc::new(RwLock::new(VolumeProfileEngine::new()));
@@ -55,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
         Err(e) => tracing::warn!("Cold-start REST fetch failed: {}. Continuing without history.", e),
     }
 
-    // ---------- Binance streams ----------
+    // ---------- Binance aggTrade + kline ----------
     {
         let url = config.binance_ws_url.clone();
         let tx = tick_tx.clone();
@@ -75,17 +76,36 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // ---------- Tick consumer ----------
+    // ---------- Multi-exchange order flow (Bybit + OKX) ----------
+    {
+        let tx = tick_tx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = multi_exchange::run_bybit_stream(tx).await {
+                tracing::error!("Bybit stream terminated: {}", e);
+            }
+        });
+    }
+    {
+        let tx = tick_tx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = multi_exchange::run_okx_stream(tx).await {
+                tracing::error!("OKX stream terminated: {}", e);
+            }
+        });
+    }
+
+    // ---------- Tick consumer: order flow + bubble detection ----------
+    // Threshold raised from 5.0 to 15.0 now that three exchanges feed the buffer.
     {
         let vp = vp.clone();
         let bc = bc_tx.clone();
-        let mut analyzer = OrderFlowAnalyzer::new(10_000);
+        let mut analyzer = OrderFlowAnalyzer::new(20_000);
         tokio::spawn(async move {
             while let Some(trade) = tick_rx.recv().await {
                 analyzer.ingest(&trade);
                 let vp_read = vp.read().await;
                 if let Some(bubble) =
-                    analyzer.detect_absorption(&vp_read, trade.price_f64(), 5.0)
+                    analyzer.detect_absorption(&vp_read, trade.price_f64(), 15.0)
                 {
                     let _ = bc.send(WsFrame::Bubbles { data: bubble });
                 }
@@ -93,7 +113,7 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // ---------- Candle consumer ----------
+    // ---------- Candle consumer: VP update on 15M close ----------
     {
         let vp = vp.clone();
         let cached = cached_levels.clone();
