@@ -184,6 +184,7 @@ html, body {
 .swatch.teal { background: var(--teal); }
 .swatch.coral { background: var(--coral); }
 .swatch.blue { background: var(--blue); }
+.swatch.purple { background: #A371F7; }
 
 #chart {
   flex: 1;
