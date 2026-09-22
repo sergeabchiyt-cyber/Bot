@@ -1,10 +1,12 @@
 /* ============================================================
  * XAUUSD Terminal — Node 2
  * lightweight-charts v4.2.0 API
+ * Direct Binance kline WS + multi-exchange bubbles from backend
  * ============================================================ */
 
-const WS_URL = "wss://engine-southeastasia-sng-main.onrender.com/ws";
-const REST_LEVELS_URL = "https://engine-southeastasia-sng-main.onrender.com/levels";
+const BACKEND_WS = "wss://engine-southeastasia-sng-main.onrender.com/ws";
+const BACKEND_REST = "https://engine-southeastasia-sng-main.onrender.com/levels";
+const BINANCE_KLINE_WS = "wss://fstream.binance.com/market/ws/xauusdt@kline_15m";
 
 // ---------- Chart bootstrap ----------
 const chartEl = document.getElementById("chart");
@@ -42,12 +44,12 @@ const candleSeries = chart.addCandlestickSeries({
   wickDownColor: "#EF5350",
 });
 
-// ---------- Load historical candles from Binance REST ----------
-async function loadHistory(interval = "15m") {
+// ---------- Historical candles (one-time REST) ----------
+async function loadHistory() {
   setStatus("loading history");
   try {
     const res = await fetch(
-      `https://fapi.binance.com/fapi/v1/klines?symbol=XAUUSDT&interval=${interval}&limit=500`
+      "https://fapi.binance.com/fapi/v1/klines?symbol=XAUUSDT&interval=15m&limit=500"
     );
     if (!res.ok) throw new Error(`Binance REST ${res.status}`);
     const raw = await res.json();
@@ -61,23 +63,72 @@ async function loadHistory(interval = "15m") {
     candleSeries.setData(data);
     chart.timeScale().fitContent();
     if (data.length) updateLastPrice(data[data.length - 1]);
-    console.log(`Loaded ${data.length} candles (${interval})`);
+    console.log(`Loaded ${data.length} historical candles`);
   } catch (e) {
     console.error("History load failed:", e);
     setStatus("history error");
   }
 }
 
+// ---------- Direct Binance kline WebSocket ----------
+let binanceWs;
+let binanceReconnect = 1000;
+
+function connectBinanceKline() {
+  binanceWs = new WebSocket(BINANCE_KLINE_WS);
+
+  binanceWs.onopen = () => {
+    console.log("Binance kline WS connected");
+  };
+
+  binanceWs.onmessage = (ev) => {
+    let msg;
+    try {
+      msg = JSON.parse(ev.data);
+    } catch {
+      return;
+    }
+    if (msg.e !== "kline" || !msg.k) return;
+
+    const k = msg.k;
+    const candle = {
+      time: Math.floor(k.t / 1000),
+      open: parseFloat(k.o),
+      high: parseFloat(k.h),
+      low: parseFloat(k.l),
+      close: parseFloat(k.c),
+    };
+
+    candleSeries.update(candle);
+    updateLastPrice(candle);
+
+    if (k.x === true) {
+      console.log(`Candle closed @ ${candle.time}`, candle);
+      fetchLevels();
+    }
+  };
+
+  binanceWs.onclose = () => {
+    console.log(`Binance kline WS closed, retrying in ${binanceReconnect}ms`);
+    setTimeout(connectBinanceKline, binanceReconnect);
+    binanceReconnect = Math.min(binanceReconnect * 2, 30000);
+  };
+
+  binanceWs.onerror = (e) => console.error("Binance kline WS error:", e);
+}
+
 // ---------- Price lines ----------
 const priceLines = {};
 
-function upsertPriceLine(key, price, color, title) {
+function upsertPriceLine(key, price, color, title, dashed = false) {
   if (priceLines[key]) candleSeries.removePriceLine(priceLines[key]);
   priceLines[key] = candleSeries.createPriceLine({
     price,
     color,
     lineWidth: 1,
-    lineStyle: LightweightCharts.LineStyle.Solid,
+    lineStyle: dashed
+      ? LightweightCharts.LineStyle.Dashed
+      : LightweightCharts.LineStyle.Solid,
     axisLabelVisible: true,
     title,
   });
@@ -88,15 +139,16 @@ let markers = [];
 
 function addBubble(bubble) {
   const isBuy = bubble.direction === "ABS_BUY";
+  const src = (bubble.exchange || "binance").toUpperCase();
   markers.push({
     time: Math.floor(bubble.timestamp / 1000),
     position: isBuy ? "belowBar" : "aboveBar",
     color: isBuy ? "#26A69A" : "#EF5350",
     shape: "circle",
-    text: isBuy ? "ABS BUY" : "ABS SELL",
+    text: (isBuy ? "ABS BUY" : "ABS SELL") + " · " + src,
     size: Math.min(3, Math.max(1, bubble.strength / 100)),
   });
-  candleSeries.setMarkers(markers);   // v4 API
+  candleSeries.setMarkers(markers);
   renderBubbleRow(bubble);
 }
 
@@ -125,6 +177,8 @@ function renderLevels(levels) {
         rows.push(row("PW", "VaL", l.val, "val"));
       } else if (l.window === "PS") {
         rows.push(row("PS", "PoC", l.poc, "ps-poc"));
+      } else if (l.window === "CW") {
+        rows.push(row("CW", "PoC", l.poc, "cw-poc"));
       }
       return rows.join("");
     })
@@ -154,9 +208,10 @@ function renderBubbleRow(bubble) {
     hour: "2-digit",
     minute: "2-digit",
   });
+  const src = (bubble.exchange || "binance").toUpperCase();
 
-  bubbleRows.unshift({ bubble, time, isBuy });
-  if (bubbleRows.length > 20) bubbleRows.pop();
+  bubbleRows.unshift({ bubble, time, isBuy, src });
+  if (bubbleRows.length > 30) bubbleRows.pop();
 
   list.innerHTML = bubbleRows
     .map(
@@ -165,7 +220,7 @@ function renderBubbleRow(bubble) {
         <span class="bubble-dir ${b.isBuy ? "buy" : "sell"}">
           ${b.isBuy ? "▲ ABS BUY" : "▼ ABS SELL"}
         </span>
-        <span class="bubble-meta">${Number(b.bubble.level).toFixed(2)} · ${b.time}</span>
+        <span class="bubble-meta">${Number(b.bubble.level).toFixed(2)} · ${b.time} · <em>${b.src}</em></span>
       </div>
     `
     )
@@ -229,34 +284,30 @@ function setStatus(text) {
   if (el) el.textContent = text;
 }
 
-// ---------- WebSocket ----------
-let ws;
-let reconnectDelay = 1000;
+// ---------- Backend WebSocket ----------
+let backendWs;
+let backendReconnect = 1000;
 
-function connect() {
-  setStatus("connecting");
-  ws = new WebSocket(WS_URL);
+function connectBackend() {
+  backendWs = new WebSocket(BACKEND_WS);
 
-  ws.onopen = () => {
-    setStatus("live");
-    reconnectDelay = 1000;
-    ws.send(
+  backendWs.onopen = () => {
+    console.log("Backend WS connected");
+    backendWs.send(
       JSON.stringify({
         type: "subscribe",
         topics: ["levels", "bubbles", "trades", "sentiment", "calendar"],
       })
     );
-    console.log("WS connected, subscribed");
   };
 
-  ws.onmessage = (ev) => {
+  backendWs.onmessage = (ev) => {
     let frame;
     try {
       frame = JSON.parse(ev.data);
     } catch {
       return;
     }
-    console.log("WS frame:", frame);
 
     switch (frame.type) {
       case "levels": {
@@ -267,6 +318,8 @@ function connect() {
           upsertPriceLine("PW-val", l.val, "#EF5350", "PW VaL");
         } else if (l.window === "PS") {
           upsertPriceLine("PS-poc", l.poc, "#58A6FF", "PS PoC");
+        } else if (l.window === "CW") {
+          upsertPriceLine("CW-poc", l.poc, "#A371F7", "CW PoC", true);
         }
         break;
       }
@@ -279,27 +332,25 @@ function connect() {
       case "calendar":
         renderCalendar(frame.data);
         break;
-      case "trades":
-        break;
     }
   };
 
-  ws.onclose = () => {
+  backendWs.onclose = () => {
     setStatus("reconnecting");
-    setTimeout(connect, reconnectDelay);
-    reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+    setTimeout(connectBackend, backendReconnect);
+    backendReconnect = Math.min(backendReconnect * 2, 30000);
   };
 
-  ws.onerror = (e) => {
+  backendWs.onerror = (e) => {
     setStatus("ws error");
-    console.error("WS error:", e);
+    console.error("Backend WS error:", e);
   };
 }
 
 // ---------- REST levels fallback ----------
 async function fetchLevels() {
   try {
-    const res = await fetch(REST_LEVELS_URL);
+    const res = await fetch(BACKEND_REST);
     if (!res.ok) throw new Error(`levels ${res.status}`);
     const levels = await res.json();
     renderLevels(levels);
@@ -310,6 +361,8 @@ async function fetchLevels() {
         upsertPriceLine("PW-val", l.val, "#EF5350", "PW VaL");
       } else if (l.window === "PS") {
         upsertPriceLine("PS-poc", l.poc, "#58A6FF", "PS PoC");
+      } else if (l.window === "CW") {
+        upsertPriceLine("CW-poc", l.poc, "#A371F7", "CW PoC", true);
       }
     }
   } catch (e) {
@@ -322,18 +375,26 @@ document.querySelectorAll(".tf").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.querySelectorAll(".tf").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
-    Object.values(priceLines).forEach((l) => candleSeries.removePriceLine(l));
-    Object.keys(priceLines).forEach((k) => delete priceLines[k]);
-    clearMarkers();
-    loadHistory(btn.dataset.tf);
+    const tf = btn.dataset.tf;
+    if (tf !== "15m") {
+      // 1H / 1D not wired yet — leave 15m active
+      document.querySelector('.tf[data-tf="15m"]').classList.add("active");
+      btn.classList.remove("active");
+      return;
+    }
+    loadHistory();
     fetchLevels();
   });
 });
 
 // ---------- Boot ----------
-loadHistory("15m");
-fetchLevels();
-connect();
+setStatus("initializing");
+loadHistory().then(() => {
+  setStatus("live");
+  connectBinanceKline();
+  connectBackend();
+  fetchLevels();
+});
 
 // ---------- Resize ----------
 const ro = new ResizeObserver(() => {
@@ -341,5 +402,4 @@ const ro = new ResizeObserver(() => {
 });
 ro.observe(chartEl);
 
-// ---------- Visible diagnostics ----------
-console.log("XAUUSD terminal booted");
+console.log("XAUUSD terminal booted — direct Binance kline + multi-exchange bubbles");
