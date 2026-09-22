@@ -185,6 +185,11 @@ html, body {
 .swatch.coral { background: var(--coral); }
 .swatch.blue { background: var(--blue); }
 .swatch.purple { background: #A371F7; }
+.swatch.poc { background: #F0B90B; }
+.swatch.vah { background: #26A69A; }
+.swatch.val { background: #EF5350; }
+.swatch.ps-poc { background: #58A6FF; }
+.swatch.cw-poc { background: #A371F7; }
 
 #chart {
   flex: 1;
