@@ -182,6 +182,9 @@ pub enum WsFrame {
     #[serde(rename = "levels")]
     Levels { data: VpLevels },
 
+    #[serde(rename = "candle")]
+    Candle { data: VpCandle },
+
     #[serde(rename = "bubbles")]
     Bubbles { data: OrderflowEvent },
 
