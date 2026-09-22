@@ -1,3 +1,10 @@
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExecutionVenue {
+    DerivDemo,
+    ChelseaLive,
+    None,
+}
+
 #[derive(Clone)]
 pub struct Config {
     pub port: u16,
@@ -65,6 +72,16 @@ impl Config {
                 .unwrap_or_else(|_| "3.0".to_string())
                 .parse()
                 .unwrap_or(3.0),
+        }
+    }
+
+    pub fn execution_venue(&self) -> ExecutionVenue {
+        if self.mcp_chelsea_url.is_some() {
+            ExecutionVenue::ChelseaLive
+        } else if self.deriv_demo_api.is_some() {
+            ExecutionVenue::DerivDemo
+        } else {
+            ExecutionVenue::None
         }
     }
 }
