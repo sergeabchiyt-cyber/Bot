@@ -8,8 +8,8 @@ pub struct Config {
     pub mcp_chelsea_url: Option<String>,
     pub sifting_api_key: String,
     pub deriv_api_url: String,
-    pub deriv_app_id: String,
-    pub deriv_api_key: String,
+    pub deriv_app_id: Option<String>,
+    pub deriv_demo_api: Option<String>,
 }
 
 impl Config {
@@ -33,8 +33,8 @@ impl Config {
             sifting_api_key: std::env::var("SIFTING_API_KEY").unwrap_or_default(),
             deriv_api_url: std::env::var("DERIV_API_URL")
                 .unwrap_or_else(|_| "wss://ws.derivws.com/websockets/v3".to_string()),
-            deriv_app_id: std::env::var("DERIV_APP_ID").unwrap_or_default(),
-            deriv_api_key: std::env::var("DERIV_API_KEY").unwrap_or_default(),
+            deriv_app_id: std::env::var("DERIV_APP_ID").ok(),
+            deriv_demo_api: std::env::var("DERIV_DEMO_API").ok(),
         }
     }
 }
