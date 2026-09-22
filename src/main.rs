@@ -13,14 +13,60 @@ mod ws_server;
 
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, RwLock};
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use config::Config;
+use execution::ExecutionManager;
 use order_flow::OrderFlowAnalyzer;
-use types::WsFrame;
+use types::{OrderflowEvent, WsFrame};
 use volume_profile::VolumeProfileEngine;
 use ws_server::AppState;
+
+/// Parses the Forex Factory markdown table into structured events.
+/// The browser agent returns markdown with a table like:
+/// | Time | Currency | Impact | Event |
+fn parse_calendar_markdown(md: &str) -> Vec<serde_json::Value> {
+    let mut out = Vec::new();
+    for line in md.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with('|') {
+            continue;
+        }
+        let cols: Vec<&str> = trimmed
+            .trim_matches('|')
+            .split('|')
+            .map(|s| s.trim())
+            .collect();
+        if cols.len() < 4 {
+            continue;
+        }
+        // Skip header and separator rows.
+        if cols[0].eq_ignore_ascii_case("time") || cols[0].starts_with(':') {
+            continue;
+        }
+        out.push(serde_json::json!({
+            "time": cols[0],
+            "currency": cols[1],
+            "impact": cols[2],
+            "event": cols[3],
+        }));
+    }
+    out
+}
+
+/// Returns true if `price` is within `pips` of any PoC/VaH/VaL across all windows.
+fn near_level(levels: &[types::VpLevels], price: f64, pips: f64) -> bool {
+    let dollars = pips * 0.01;
+    for lvl in levels {
+        for target in [lvl.poc, lvl.vah, lvl.val] {
+            if (price - target).abs() <= dollars {
+                return true;
+            }
+        }
+    }
+    false
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -31,13 +77,17 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::from_env();
     info!("Starting XAUUSD engine on port {}", config.port);
 
-    let (bc_tx, _) = broadcast::channel::<WsFrame>(1024);
-    let (tick_tx, mut tick_rx) = mpsc::channel::<types::AggTrade>(8192);
-    let (kline_tx, mut kline_rx) = mpsc::channel::<types::KlineEvent>(256);
+    let (bc_tx, _) = broadcast::channel(1024);
+    let (tick_tx, mut tick_rx) = mpsc::channel(8192);
+    let (kline_tx, mut kline_rx) = mpsc::channel(256);
+    // Closed-candle fan-out for the execution trigger.
+    let (exec_tx, mut exec_rx) = mpsc::channel::<types::VpCandle>(64);
 
     let vp = Arc::new(RwLock::new(VolumeProfileEngine::new()));
-    let cached_levels = Arc::new(RwLock::new(Vec::<types::VpLevels>::new()));
+    let cached_levels = Arc::new(RwLock::new(Vec::new()));
+    let recent_bubbles: Arc<RwLock<Vec<OrderflowEvent>>> = Arc::new(RwLock::new(Vec::new()));
 
+    // ---------- Cold-start REST fetch ----------
     match binance_rest::fetch_klines_15m("XAUUSDT", 1000).await {
         Ok(candles) => {
             info!("Seeded {} historical 15M candles", candles.len());
@@ -47,14 +97,17 @@ async fn main() -> anyhow::Result<()> {
             }
             let levels = vp_w.all_levels();
             for lvl in &levels {
-                info!("{}: poc={:.3} vah={:.3} val={:.3}",
-                    lvl.window, lvl.poc, lvl.vah, lvl.val);
+                info!(
+                    "{}: poc={:.3} vah={:.3} val={:.3}",
+                    lvl.window, lvl.poc, lvl.vah, lvl.val
+                );
             }
             *cached_levels.write().await = levels;
         }
-        Err(e) => tracing::warn!("Cold-start REST fetch failed: {}. Continuing.", e),
+        Err(e) => warn!("Cold-start REST fetch failed: {}. Continuing.", e),
     }
 
+    // ---------- Exchange streams ----------
     {
         let url = config.binance_ws_url.clone();
         let tx = tick_tx.clone();
@@ -90,32 +143,40 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // ---------- Tick consumer ----------
-{
-    let vp = vp.clone();
-    let bc = bc_tx.clone();
-    let mut analyzer = OrderFlowAnalyzer::new(20_000);
-    tokio::spawn(async move {
-        while let Some(trade) = tick_rx.recv().await {
-            analyzer.ingest(&trade);
-            let vp_read = vp.read().await;
-            let events = analyzer.detect_events(
-                &vp_read,
-                trade.price_f64(),
-                0.90,   // bubble percentile: top 10% of recent magnitudes
-                0.97,   // absorption percentile: top 3%
-            );
-            drop(vp_read);
-            for ev in events {
-                let _ = bc.send(WsFrame::Bubbles { data: ev });
+    // ---------- Tick consumer (order flow) ----------
+    {
+        let vp = vp.clone();
+        let bc = bc_tx.clone();
+        let recent = recent_bubbles.clone();
+        let mut analyzer = OrderFlowAnalyzer::new(20_000);
+        tokio::spawn(async move {
+            while let Some(trade) = tick_rx.recv().await {
+                analyzer.ingest(&trade);
+                let vp_read = vp.read().await;
+                let events = analyzer.detect_events(&vp_read, trade.price_f64(), 0.90, 0.97);
+                drop(vp_read);
+                for ev in events {
+                    // Keep a rolling window for the execution trigger.
+                    {
+                        let mut buf = recent.write().await;
+                        buf.push(ev.clone());
+                        if buf.len() > 200 {
+                            let drain = buf.len() - 200;
+                            buf.drain(0..drain);
+                        }
+                    }
+                    let _ = bc.send(WsFrame::Bubbles { data: ev });
+                }
             }
-        }
-    });
-}
+        });
+    }
+
+    // ---------- Kline consumer (VP + execution fan-out) ----------
     {
         let vp = vp.clone();
         let cached = cached_levels.clone();
         let bc = bc_tx.clone();
+        let exec = exec_tx.clone();
         tokio::spawn(async move {
             while let Some(ev) = kline_rx.recv().await {
                 if !ev.kline.is_closed {
@@ -123,16 +184,113 @@ async fn main() -> anyhow::Result<()> {
                 }
                 let candle = ev.kline.to_vp_candle();
                 let mut vp_w = vp.write().await;
-                vp_w.ingest_candle(candle);
+                vp_w.ingest_candle(candle.clone());
                 let levels = vp_w.all_levels();
+                drop(vp_w);
                 *cached.write().await = levels.clone();
                 for lvl in levels {
                     let _ = bc.send(WsFrame::Levels { data: lvl });
+                }
+                let _ = exec.send(candle).await;
+            }
+        });
+    }
+
+    // ---------- MCP calendar scraper (every 15 min) ----------
+    {
+        let mcp = Arc::new(mcp_client::McpClient::new(
+            config.mcp_browser_url.clone(),
+            config.mcp_chelsea_url.clone().unwrap_or_default(),
+        ));
+        let bc = bc_tx.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(900));
+            loop {
+                interval.tick().await;
+                match mcp.scrape_calendar().await {
+                    Ok(md) => {
+                        let events = parse_calendar_markdown(&md);
+                        info!("Calendar scraped: {} events", events.len());
+                        let _ = bc.send(WsFrame::Calendar {
+                            data: serde_json::json!({ "events": events }),
+                        });
+                    }
+                    Err(e) => warn!("Calendar scrape failed: {}", e),
                 }
             }
         });
     }
 
+    // ---------- Execution trigger loop ----------
+    {
+        let levels = cached_levels.clone();
+        let bubbles = recent_bubbles.clone();
+        let exec_mgr = Arc::new(ExecutionManager::new(config.clone()));
+        let proximity = config.level_proximity_pips;
+        let bc = bc_tx.clone();
+
+        tokio::spawn(async move {
+            // Minimum bubble strength required to act. Tune this once
+            // you see the live distribution in the dashboard sidebar.
+            const MIN_CONFIRM_STRENGTH: f64 = 15.0;
+
+            while let Some(candle) = exec_rx.recv().await {
+                let price = candle.close;
+                let lvls = levels.read().await.clone();
+                if !near_level(&lvls, price, proximity) {
+                    continue;
+                }
+
+                // Snapshot bubbles that arrived since this candle opened.
+                let cutoff = candle.time;
+                let candidates: Vec<OrderflowEvent> = {
+                    let buf = bubbles.read().await;
+                    buf.iter()
+                        .filter(|b| b.timestamp >= cutoff && b.strength >= MIN_CONFIRM_STRENGTH)
+                        .cloned()
+                        .collect()
+                };
+
+                if candidates.is_empty() {
+                    info!(
+                        "Price {:.3} near level but no qualifying bubble — skipping",
+                        price
+                    );
+                    continue;
+                }
+
+                // Strongest qualifying event wins.
+                let best = candidates
+                    .iter()
+                    .max_by(|a, b| a.strength.partial_cmp(&b.strength).unwrap())
+                    .unwrap();
+
+                let side = match best.kind.as_str() {
+                    "BUY_BUBBLE" | "ABS_BUY" => "buy",
+                    "SELL_BUBBLE" | "ABS_SELL" => "sell",
+                    _ => continue,
+                };
+
+                info!(
+                    "Execution trigger: {} @ {:.3} (strength {:.1}, kind {})",
+                    side, price, best.strength, best.kind
+                );
+
+                // Size is a placeholder until the Deriv risk-per-trade
+                // sizing logic is added. 0.01 lots keeps the first live
+                // test minimal.
+                match exec_mgr.execute(side, 0.01, price, &lvls[0]).await {
+                    Ok(ev) => {
+                        info!("Trade event: {:?}", ev);
+                        let _ = bc.send(WsFrame::Trades { data: ev });
+                    }
+                    Err(e) => warn!("Execution failed: {}", e),
+                }
+            }
+        });
+    }
+
+    // ---------- HTTP + WS server ----------
     let state = AppState {
         tx: bc_tx.clone(),
         subscriptions: Arc::new(dashmap::DashMap::new()),
