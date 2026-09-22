@@ -190,6 +190,8 @@ html, body {
 .swatch.val { background: #EF5350; }
 .swatch.ps-poc { background: #58A6FF; }
 .swatch.cw-poc { background: #A371F7; }
+.swatch.cw-vah { background: #F778BA; }
+.swatch.cw-val { background: #22D3EE; }
 
 #chart {
   flex: 1;
