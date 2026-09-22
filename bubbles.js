@@ -12,6 +12,13 @@
     ABS_SELL:    { r: 240, g: 185, b: 11  },  // gold
   };
 
+  const EVENT_STYLE = {
+    BUY_BUBBLE:  { color: "#26A69A", label: "BUY"   },
+    SELL_BUBBLE: { color: "#EF5350", label: "SELL"  },
+    ABS_BUY:     { color: "#F0B90B", label: "ABS-B" },
+    ABS_SELL:    { color: "#F0B90B", label: "ABS-S" },
+  };
+
   const MAX_RADIUS = 28;      // px at full strength
   const MIN_RADIUS = 5;       // px at minimum visible strength
   const MIN_ALPHA  = 0.25;
@@ -23,7 +30,6 @@
       this._chart = null;
       this._series = null;
       this._paneViews = [new OrderFlowBubblesPaneView(this)];
-      // Scale reference — updated by the primitive owner when new events arrive
       this.maxStrength = 100;
     }
 
@@ -39,6 +45,11 @@
 
     updateData(data) {
       this._data = data;
+    }
+
+    updateAllViews() {
+      // Required by lightweight-charts to trigger a primitive repaint.
+      // No internal state to sync; the renderer reads _data directly.
     }
 
     paneViews() {
@@ -122,5 +133,6 @@
       return new OrderFlowBubblesRenderer();
     },
     EVENT_COLORS,
+    EVENT_STYLE,
   };
 })(window);
