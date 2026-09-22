@@ -7,58 +7,85 @@ use crate::volume_profile::VolumeProfileEngine;
 const DEBOUNCE_MS: i64 = 2000;
 const LOOKBACK: usize = 500;
 const LEVEL_RADIUS: f64 = 10.0;
-const MAG_BUFFER_SIZE: usize = 5000;
-const MIN_SAMPLES: usize = 300;
+const SLIDING_WINDOW_MS: i64 = 300_000; // 5 minutes
+const MIN_SAMPLES: usize = 50;
 
-// Absolute floors. Used during cold start and to prevent triggering on
-// numerically tiny deltas in dead markets.
-const FLOOR_BUBBLE: f64 = 8.0;
-const FLOOR_ABSORPTION: f64 = 20.0;
+// Absolute floors in USD notional.
+const FLOOR_BUBBLE: f64 = 50_000.0;   // $50k net delta over 500 trades
+const FLOOR_ABSORPTION: f64 = 100_000.0; // $100k total volume over 500 trades
+const ABSORPTION_DELTA_CAP: f64 = 20_000.0; // |net delta| must be < $20k to count as "near zero"
 
 pub struct OrderFlowAnalyzer {
-    /// (timestamp, price, signed_delta) rolling buffer
-    pub delta_history: VecDeque<(i64, f64, f64)>,
-    /// Rolling history of |recent_delta| snapshots — the adaptive baseline
-    pub magnitudes: VecDeque<f64>,
+    pub delta_history: VecDeque<(i64, f64, f64, f64)>, // (time_ms, price, notional_delta, notional_volume)
     pub event_history: VecDeque<OrderflowEvent>,
     pub cumulative_delta: f64,
     pub window_size: usize,
     pub last_exchange: String,
     pub last_emit: HashMap<String, i64>,
+
+    pub bubble_mags: VecDeque<(i64, f64)>,
+    pub abs_vols: VecDeque<(i64, f64)>,
 }
 
 impl OrderFlowAnalyzer {
     pub fn new(window: usize) -> Self {
         Self {
             delta_history: VecDeque::with_capacity(window),
-            magnitudes: VecDeque::with_capacity(MAG_BUFFER_SIZE),
             event_history: VecDeque::with_capacity(500),
             cumulative_delta: 0.0,
             window_size: window,
             last_exchange: "binance".into(),
             last_emit: HashMap::new(),
+            bubble_mags: VecDeque::new(),
+            abs_vols: VecDeque::new(),
         }
     }
 
     pub fn ingest(&mut self, trade: &AggTrade) {
-        let delta = trade.signed_delta();
-        self.cumulative_delta += delta;
+        let price = trade.price_f64();
+        let qty = trade.qty_f64();
+        let signed_qty = trade.signed_delta();
+        
+        let notional_delta = signed_qty * price;
+        let notional_volume = qty * price;
+        
+        self.cumulative_delta += notional_delta;
         self.last_exchange = trade.exchange.clone();
-        self.delta_history
-            .push_back((trade.trade_time, trade.price_f64(), delta));
+        self.delta_history.push_back((trade.trade_time, price, notional_delta, notional_volume));
+        
         while self.delta_history.len() > self.window_size {
             self.delta_history.pop_front();
         }
+
+        if self.delta_history.len() >= LOOKBACK {
+            let net_delta: f64 = self.delta_history.iter().rev().take(LOOKBACK).map(|(_, _, d, _)| *d).sum();
+            let total_vol: f64 = self.delta_history.iter().rev().take(LOOKBACK).map(|(_, _, _, v)| *v).sum();
+            let t = self.delta_history.back().unwrap().0;
+
+            self.bubble_mags.push_back((t, net_delta.abs()));
+            
+            if net_delta.abs() < ABSORPTION_DELTA_CAP {
+                self.abs_vols.push_back((t, total_vol));
+            }
+
+            let cutoff = t - SLIDING_WINDOW_MS;
+            while let Some(&front) = self.bubble_mags.front() {
+                if front.0 < cutoff { self.bubble_mags.pop_front(); } else { break; }
+            }
+            while let Some(&front) = self.abs_vols.front() {
+                if front.0 < cutoff { self.abs_vols.pop_front(); } else { break; }
+            }
+        }
     }
 
-    pub fn recent_delta(&self, lookback: usize) -> f64 {
-        let n = lookback.min(self.delta_history.len());
-        self.delta_history
-            .iter()
-            .rev()
-            .take(n)
-            .map(|(_, _, d)| *d)
-            .sum()
+    pub fn recent_delta_notional(&self) -> f64 {
+        let n = LOOKBACK.min(self.delta_history.len());
+        self.delta_history.iter().rev().take(n).map(|(_, _, d, _)| *d).sum()
+    }
+
+    pub fn recent_total_volume(&self) -> f64 {
+        let n = LOOKBACK.min(self.delta_history.len());
+        self.delta_history.iter().rev().take(n).map(|(_, _, _, v)| *v).sum()
     }
 
     fn price_at(&self, lookback: usize) -> Option<f64> {
@@ -69,7 +96,7 @@ impl OrderFlowAnalyzer {
             .iter()
             .rev()
             .nth(lookback - 1)
-            .map(|(_, p, _)| *p)
+            .map(|(_, p, _, _)| *p)
     }
 
     fn nearest_level(vp: &VolumeProfileEngine, price: f64) -> Option<f64> {
@@ -95,24 +122,32 @@ impl OrderFlowAnalyzer {
         true
     }
 
-    /// Percentile-based adaptive thresholds.
-    /// `bubble_p` and `absorption_p` are in (0.0, 1.0) — e.g. 0.90 and 0.97.
-    /// Falls back to the fixed floors until MIN_SAMPLES snapshots are available.
+    fn percentile(sorted: &[f64], p: f64) -> f64 {
+        if sorted.is_empty() { return 0.0; }
+        let idx = (((sorted.len() as f64) - 1.0) * p).round() as usize;
+        sorted[idx.min(sorted.len() - 1)]
+    }
+
     fn adaptive_thresholds(&self, bubble_p: f64, absorption_p: f64) -> (f64, f64) {
-        if self.magnitudes.len() < MIN_SAMPLES {
-            return (FLOOR_BUBBLE, FLOOR_ABSORPTION);
-        }
-        let mut sorted: Vec<f64> = self.magnitudes.iter().cloned().collect();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let n = sorted.len();
+        let mut b_mags: Vec<f64> = self.bubble_mags.iter().map(|(_, v)| *v).collect();
+        b_mags.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-        let bubble_idx = (((n as f64) - 1.0) * bubble_p).round() as usize;
-        let abs_idx = (((n as f64) - 1.0) * absorption_p).round() as usize;
+        let mut a_vols: Vec<f64> = self.abs_vols.iter().map(|(_, v)| *v).collect();
+        a_vols.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
-        let bubble = sorted[bubble_idx.min(n - 1)].max(FLOOR_BUBBLE);
-        let absorption = sorted[abs_idx.min(n - 1)].max(FLOOR_ABSORPTION);
+        let bubble_thresh = if b_mags.len() >= MIN_SAMPLES {
+            Self::percentile(&b_mags, bubble_p).max(FLOOR_BUBBLE)
+        } else {
+            FLOOR_BUBBLE
+        };
 
-        (bubble, absorption)
+        let abs_thresh = if a_vols.len() >= MIN_SAMPLES {
+            Self::percentile(&a_vols, absorption_p).max(FLOOR_ABSORPTION)
+        } else {
+            FLOOR_ABSORPTION
+        };
+
+        (bubble_thresh, abs_thresh)
     }
 
     pub fn detect_events(
@@ -123,50 +158,40 @@ impl OrderFlowAnalyzer {
         absorption_percentile: f64,
     ) -> Vec<OrderflowEvent> {
         let now_ms = Utc::now().timestamp_millis();
-        let recent = self.recent_delta(LOOKBACK);
-        let mag = recent.abs();
+        let net_delta = self.recent_delta_notional();
+        let total_vol = self.recent_total_volume();
 
-        // Thresholds computed BEFORE inserting the current snapshot, so the
-        // current tick does not influence the baseline it is compared against.
         let (bubble_threshold, absorption_threshold) =
             self.adaptive_thresholds(bubble_percentile, absorption_percentile);
 
-        // Update rolling baseline
-        self.magnitudes.push_back(mag);
-        while self.magnitudes.len() > MAG_BUFFER_SIZE {
-            self.magnitudes.pop_front();
-        }
-
         let mut events = Vec::new();
 
-        // ----- Buy bubble -----
-        if recent > bubble_threshold && self.should_emit("BUY_BUBBLE", now_ms) {
+        if net_delta > bubble_threshold && self.should_emit("BUY_BUBBLE", now_ms) {
             events.push(OrderflowEvent {
                 kind: "BUY_BUBBLE".into(),
                 level: current_price,
-                strength: recent,
+                strength: net_delta,
                 timestamp: now_ms,
                 exchange: self.last_exchange.clone(),
             });
         }
 
-        // ----- Sell bubble -----
-        if recent < -bubble_threshold && self.should_emit("SELL_BUBBLE", now_ms) {
+        if net_delta < -bubble_threshold && self.should_emit("SELL_BUBBLE", now_ms) {
             events.push(OrderflowEvent {
                 kind: "SELL_BUBBLE".into(),
                 level: current_price,
-                strength: recent.abs(),
+                strength: net_delta.abs(),
                 timestamp: now_ms,
                 exchange: self.last_exchange.clone(),
             });
         }
 
-        // ----- Absorption -----
         if let Some(start_price) = self.price_at(LOOKBACK) {
             let displacement = current_price - start_price;
 
-            if recent < -absorption_threshold
-                && displacement >= -0.5
+            if total_vol > absorption_threshold 
+                && net_delta.abs() < ABSORPTION_DELTA_CAP * 2.0 
+                && displacement >= -0.5 
                 && self.should_emit("ABS_BUY", now_ms)
             {
                 let reference = Self::nearest_level(vp, current_price)
@@ -174,14 +199,15 @@ impl OrderFlowAnalyzer {
                 events.push(OrderflowEvent {
                     kind: "ABS_BUY".into(),
                     level: reference,
-                    strength: recent.abs(),
+                    strength: total_vol,
                     timestamp: now_ms,
                     exchange: self.last_exchange.clone(),
                 });
             }
 
-            if recent > absorption_threshold
-                && displacement <= 0.5
+            if total_vol > absorption_threshold 
+                && net_delta.abs() < ABSORPTION_DELTA_CAP * 2.0
+                && displacement <= 0.5 
                 && self.should_emit("ABS_SELL", now_ms)
             {
                 let reference = Self::nearest_level(vp, current_price)
@@ -189,7 +215,7 @@ impl OrderFlowAnalyzer {
                 events.push(OrderflowEvent {
                     kind: "ABS_SELL".into(),
                     level: reference,
-                    strength: recent,
+                    strength: total_vol,
                     timestamp: now_ms,
                     exchange: self.last_exchange.clone(),
                 });
