@@ -5,11 +5,21 @@ use crate::types::{AggTrade, OrderflowEvent};
 use crate::volume_profile::VolumeProfileEngine;
 
 const DEBOUNCE_MS: i64 = 2000;
-const ABSORPTION_LOOKBACK: usize = 500;
-const LEVEL_REFERENCE_RADIUS: f64 = 10.0;
+const LOOKBACK: usize = 500;
+const LEVEL_RADIUS: f64 = 10.0;
+const MAG_BUFFER_SIZE: usize = 5000;
+const MIN_SAMPLES: usize = 300;
+
+// Absolute floors. Used during cold start and to prevent triggering on
+// numerically tiny deltas in dead markets.
+const FLOOR_BUBBLE: f64 = 8.0;
+const FLOOR_ABSORPTION: f64 = 20.0;
 
 pub struct OrderFlowAnalyzer {
+    /// (timestamp, price, signed_delta) rolling buffer
     pub delta_history: VecDeque<(i64, f64, f64)>,
+    /// Rolling history of |recent_delta| snapshots — the adaptive baseline
+    pub magnitudes: VecDeque<f64>,
     pub event_history: VecDeque<OrderflowEvent>,
     pub cumulative_delta: f64,
     pub window_size: usize,
@@ -21,6 +31,7 @@ impl OrderFlowAnalyzer {
     pub fn new(window: usize) -> Self {
         Self {
             delta_history: VecDeque::with_capacity(window),
+            magnitudes: VecDeque::with_capacity(MAG_BUFFER_SIZE),
             event_history: VecDeque::with_capacity(500),
             cumulative_delta: 0.0,
             window_size: window,
@@ -50,7 +61,6 @@ impl OrderFlowAnalyzer {
             .sum()
     }
 
-    /// Price `lookback` trades ago. Used to measure price displacement.
     fn price_at(&self, lookback: usize) -> Option<f64> {
         if self.delta_history.len() < lookback {
             return None;
@@ -66,7 +76,7 @@ impl OrderFlowAnalyzer {
         vp.all_levels()
             .iter()
             .flat_map(|l| [l.poc, l.vah, l.val])
-            .filter(|l| (l - price).abs() <= LEVEL_REFERENCE_RADIUS)
+            .filter(|l| (l - price).abs() <= LEVEL_RADIUS)
             .min_by(|a, b| {
                 (a - price)
                     .abs()
@@ -85,21 +95,51 @@ impl OrderFlowAnalyzer {
         true
     }
 
-    /// Runs on every ingested tick. Returns zero or more events.
-    /// `bubble_threshold` triggers buy/sell bubbles.
-    /// `absorption_threshold` triggers absorption (higher bar).
+    /// Percentile-based adaptive thresholds.
+    /// `bubble_p` and `absorption_p` are in (0.0, 1.0) — e.g. 0.90 and 0.97.
+    /// Falls back to the fixed floors until MIN_SAMPLES snapshots are available.
+    fn adaptive_thresholds(&self, bubble_p: f64, absorption_p: f64) -> (f64, f64) {
+        if self.magnitudes.len() < MIN_SAMPLES {
+            return (FLOOR_BUBBLE, FLOOR_ABSORPTION);
+        }
+        let mut sorted: Vec<f64> = self.magnitudes.iter().cloned().collect();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let n = sorted.len();
+
+        let bubble_idx = (((n as f64) - 1.0) * bubble_p).round() as usize;
+        let abs_idx = (((n as f64) - 1.0) * absorption_p).round() as usize;
+
+        let bubble = sorted[bubble_idx.min(n - 1)].max(FLOOR_BUBBLE);
+        let absorption = sorted[abs_idx.min(n - 1)].max(FLOOR_ABSORPTION);
+
+        (bubble, absorption)
+    }
+
     pub fn detect_events(
         &mut self,
         vp: &VolumeProfileEngine,
         current_price: f64,
-        bubble_threshold: f64,
-        absorption_threshold: f64,
+        bubble_percentile: f64,
+        absorption_percentile: f64,
     ) -> Vec<OrderflowEvent> {
         let now_ms = Utc::now().timestamp_millis();
-        let recent = self.recent_delta(ABSORPTION_LOOKBACK);
+        let recent = self.recent_delta(LOOKBACK);
+        let mag = recent.abs();
+
+        // Thresholds computed BEFORE inserting the current snapshot, so the
+        // current tick does not influence the baseline it is compared against.
+        let (bubble_threshold, absorption_threshold) =
+            self.adaptive_thresholds(bubble_percentile, absorption_percentile);
+
+        // Update rolling baseline
+        self.magnitudes.push_back(mag);
+        while self.magnitudes.len() > MAG_BUFFER_SIZE {
+            self.magnitudes.pop_front();
+        }
+
         let mut events = Vec::new();
 
-        // ----- 1. Buy bubble: net aggressive buying -----
+        // ----- Buy bubble -----
         if recent > bubble_threshold && self.should_emit("BUY_BUBBLE", now_ms) {
             events.push(OrderflowEvent {
                 kind: "BUY_BUBBLE".into(),
@@ -110,7 +150,7 @@ impl OrderFlowAnalyzer {
             });
         }
 
-        // ----- 2. Sell bubble: net aggressive selling -----
+        // ----- Sell bubble -----
         if recent < -bubble_threshold && self.should_emit("SELL_BUBBLE", now_ms) {
             events.push(OrderflowEvent {
                 kind: "SELL_BUBBLE".into(),
@@ -121,11 +161,10 @@ impl OrderFlowAnalyzer {
             });
         }
 
-        // ----- 3/4. Absorption: heavy opposing delta, price holds -----
-        if let Some(start_price) = self.price_at(ABSORPTION_LOOKBACK) {
+        // ----- Absorption -----
+        if let Some(start_price) = self.price_at(LOOKBACK) {
             let displacement = current_price - start_price;
 
-            // ABS_BUY: heavy selling, but price didn't fall
             if recent < -absorption_threshold
                 && displacement >= -0.5
                 && self.should_emit("ABS_BUY", now_ms)
@@ -141,7 +180,6 @@ impl OrderFlowAnalyzer {
                 });
             }
 
-            // ABS_SELL: heavy buying, but price didn't rise
             if recent > absorption_threshold
                 && displacement <= 0.5
                 && self.should_emit("ABS_SELL", now_ms)
