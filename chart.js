@@ -7,17 +7,10 @@
 
 const BACKEND_WS = "wss://engine-southeastasia-sng-main.onrender.com/ws";
 const BACKEND_REST = "https://engine-southeastasia-sng-main.onrender.com/levels";
-const BINANCE_KLINE_WS = "wss://fstream.binance.com/market/ws/xauusdt@kline_15m";
 
 // ---------- Level visibility policy ----------
-// PW -> PoC + VaH + VaL
-// PS -> PoC only
-// CW -> PoC + VaH + VaL
 function levelVisible(windowKey, kind) {
-  if (windowKey === "PW") return true;
-  if (windowKey === "PS") return kind === "poc";
-  if (windowKey === "CW") return true;
-  return false;
+  return true; // Draw PoC, VaH, VaL for PW, PS, and CW
 }
 
 // ---------- Chart bootstrap ----------
@@ -82,52 +75,7 @@ async function loadHistory() {
   }
 }
 
-// ---------- Direct Binance kline WebSocket ----------
-let binanceWs;
-let binanceReconnect = 1000;
-
-function connectBinanceKline() {
-  binanceWs = new WebSocket(BINANCE_KLINE_WS);
-
-  binanceWs.onopen = () => {
-    console.log("Binance kline WS connected");
-  };
-
-  binanceWs.onmessage = (ev) => {
-    let msg;
-    try {
-      msg = JSON.parse(ev.data);
-    } catch {
-      return;
-    }
-    if (msg.e !== "kline" || !msg.k) return;
-
-    const k = msg.k;
-    const candle = {
-      time: Math.floor(k.t / 1000),
-      open: parseFloat(k.o),
-      high: parseFloat(k.h),
-      low: parseFloat(k.l),
-      close: parseFloat(k.c),
-    };
-
-    candleSeries.update(candle);
-    updateLastPrice(candle);
-
-    if (k.x === true) {
-      console.log(`Candle closed @ ${candle.time}`, candle);
-      fetchLevels();
-    }
-  };
-
-  binanceWs.onclose = () => {
-    console.log(`Binance kline WS closed, retrying in ${binanceReconnect}ms`);
-    setTimeout(connectBinanceKline, binanceReconnect);
-    binanceReconnect = Math.min(binanceReconnect * 2, 30000);
-  };
-
-  binanceWs.onerror = (e) => console.error("Binance kline WS error:", e);
-}
+// Direct Binance kline WS removed. Live candles now stream from backend.
 
 // ---------- Price lines ----------
 const priceLines = {};
@@ -155,6 +103,8 @@ const LEVEL_STYLE = {
   },
   PS: {
     poc: { color: "#58A6FF", title: "PS PoC", dashed: false },
+    vah: { color: "#357ABD", title: "PS VaH", dashed: true },
+    val: { color: "#9E4242", title: "PS VaL", dashed: true },
   },
   CW: {
     poc: { color: "#A371F7", title: "CW PoC", dashed: true },
@@ -263,7 +213,7 @@ function visibleRowCount(levels) {
   let n = 0;
   for (const l of levels) {
     if (l.window === "PW") n += 3;
-    else if (l.window === "PS") n += 1;
+    else if (l.window === "PS") n += 3;
     else if (l.window === "CW") n += 3;
   }
   return n;
@@ -288,6 +238,8 @@ function renderLevels(levels) {
         rows.push(row("PW", "VaL", l.val, "val"));
       } else if (l.window === "PS") {
         rows.push(row("PS", "PoC", l.poc, "ps-poc"));
+        rows.push(row("PS", "VaH", l.vah, "ps-vah"));
+        rows.push(row("PS", "VaL", l.val, "ps-val"));
       } else if (l.window === "CW") {
         rows.push(row("CW", "PoC", l.poc, "cw-poc"));
         rows.push(row("CW", "VaH", l.vah, "cw-vah"));
@@ -410,7 +362,7 @@ function connectBackend() {
     backendWs.send(
       JSON.stringify({
         type: "subscribe",
-        topics: ["levels", "bubbles", "trades", "sentiment", "calendar"],
+        topics: ["levels", "candle", "bubbles", "trades", "sentiment", "calendar"],
       })
     );
   };
@@ -428,6 +380,18 @@ function connectBackend() {
         const l = frame.data;
         drawLevelsForWindow(l);
         updateLevelState(l);
+        break;
+      }
+      case "candle": {
+        const c = frame.data;
+        candleSeries.update({
+          time: Math.floor(c.time / 1000),
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+        });
+        updateLastPrice({ close: c.close });
         break;
       }
       case "bubbles":
@@ -492,7 +456,6 @@ document.querySelectorAll(".tf").forEach((btn) => {
 setStatus("initializing");
 loadHistory().then(() => {
   setStatus("live");
-  connectBinanceKline();
   connectBackend();
   fetchLevels();
 });
