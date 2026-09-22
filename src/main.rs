@@ -179,10 +179,12 @@ async fn main() -> anyhow::Result<()> {
         let exec = exec_tx.clone();
         tokio::spawn(async move {
             while let Some(ev) = kline_rx.recv().await {
+                let candle = ev.kline.to_vp_candle();
+                let _ = bc.send(WsFrame::Candle { data: candle.clone() });
+
                 if !ev.kline.is_closed {
                     continue;
                 }
-                let candle = ev.kline.to_vp_candle();
                 let mut vp_w = vp.write().await;
                 vp_w.ingest_candle(candle.clone());
                 let levels = vp_w.all_levels();
