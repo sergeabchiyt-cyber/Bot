@@ -2,92 +2,84 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>XAUUSD — Trading Terminal</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0B0E11" />
+  <title>XAUUSD Terminal</title>
   <link rel="stylesheet" href="style.css" />
-  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
-  <div class="app">
-    <header class="topbar">
-      <div class="brand">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#26A69A" stroke-width="2">
-          <path d="M3 17l6-6 4 4 8-8" />
-          <path d="M17 7h4v4" />
-        </svg>
-        <span>XAUUSD</span>
-        <span class="dot"></span>
-        <span class="status" id="status">connecting</span>
-      </div>
-      <div class="meta">
-        <span class="price" id="last-price">—</span>
-        <span class="change" id="last-change">—</span>
-      </div>
-      <div class="sentiment" id="sentiment-pill">
-        <span class="label">Sentiment</span>
-        <span class="value" id="sentiment-value">—</span>
-      </div>
-    </header>
 
-    <main class="layout">
-      <section class="chart-panel">
-        <div class="chart-header">
-          <div class="tf-tabs">
-            <button class="tf active" data-tf="15m">15M</button>
-            <button class="tf" data-tf="1h">1H</button>
-            <button class="tf" data-tf="1d">1D</button>
-          </div>
-          <div class="legend">
-            <span class="legend-item"><i class="swatch gold"></i>PW PoC</span>
-            <span class="legend-item"><i class="swatch teal"></i>PW VaH</span>
-            <span class="legend-item"><i class="swatch coral"></i>PW VaL</span>
-            <span class="legend-item"><i class="swatch blue"></i>PS PoC</span>
-            <span class="legend-item"><i class="swatch purple"></i>CW PoC</span>
-<span class="legend-item"><i class="legend-line" style="background:#A371F7"></i>CW PoC</span>
-<span class="legend-item"><i class="legend-line" style="background:#F778BA"></i>CW VaH</span>
-<span class="legend-item"><i class="legend-line" style="background:#22D3EE"></i>CW VaL</span>
-          </div>
+  <header class="topbar">
+    <div class="brand">
+      <span class="dot-live"></span>
+      <span class="brand-name">XAUUSD</span>
+      <span class="brand-live">LIVE</span>
+    </div>
+    <div class="price-wrap">
+      <span id="last-price">—</span>
+      <span class="sentiment-pill">
+        SENTIMENT&nbsp;<span id="sentiment-value">—</span>
+      </span>
+    </div>
+  </header>
+
+  <nav class="tfbar">
+    <div class="tf-tabs">
+      <button class="tf active" data-tf="15m">15M</button>
+      <button class="tf" data-tf="1h">1H</button>
+      <button class="tf" data-tf="1d">1D</button>
+    </div>
+
+    <div class="legend">
+      <span class="legend-item"><i class="legend-line" style="border-color:#F0B90B"></i>PW PoC</span>
+      <span class="legend-item"><i class="legend-line" style="border-color:#26A69A"></i>PW VaH</span>
+      <span class="legend-item"><i class="legend-line" style="border-color:#EF5350"></i>PW VaL</span>
+      <span class="legend-item"><i class="legend-line" style="border-color:#58A6FF"></i>PS PoC</span>
+      <span class="legend-item"><i class="legend-line" style="border-color:#A371F7"></i>CW PoC</span>
+      <span class="legend-item"><i class="legend-line" style="border-color:#F778BA"></i>CW VaH</span>
+      <span class="legend-item"><i class="legend-line" style="border-color:#22D3EE"></i>CW VaL</span>
+    </div>
+
+    <span id="status" class="status">—</span>
+  </nav>
+
+  <main class="layout">
+    <div id="chart"></div>
+
+    <aside class="sidebar">
+      <section class="panel">
+        <header class="panel-head">
+          <span class="panel-title">LEVELS</span>
+          <span id="levels-count" class="panel-count">0</span>
+        </header>
+        <div id="levels-list" class="panel-body">
+          <div class="empty">Awaiting data…</div>
         </div>
-        <div id="chart"></div>
       </section>
 
-      <aside class="sidebar">
-        <div class="panel">
-          <div class="panel-header">
-            <h3>Levels</h3>
-            <span class="badge" id="levels-count">0</span>
-          </div>
-          <div class="levels-list" id="levels-list">
-            <div class="empty">Awaiting data…</div>
-          </div>
+      <section class="panel">
+        <header class="panel-head">
+          <span class="panel-title">ORDER FLOW</span>
+          <span id="bubbles-count" class="panel-count">0</span>
+        </header>
+        <div id="bubbles-list" class="panel-body">
+          <div class="empty">No bubbles detected</div>
         </div>
+      </section>
 
-        <div class="panel">
-          <div class="panel-header">
-            <h3>Order Flow</h3>
-            <span class="badge" id="bubbles-count">0</span>
-          </div>
-          <div class="bubbles-list" id="bubbles-list">
-            <div class="empty">No bubbles detected</div>
-          </div>
+      <section class="panel">
+        <header class="panel-head">
+          <span class="panel-title">CALENDAR</span>
+          <span id="calendar-count" class="panel-count">0</span>
+        </header>
+        <div id="calendar-list" class="panel-body">
+          <div class="empty">No events loaded</div>
         </div>
+      </section>
+    </aside>
+  </main>
 
-        <div class="panel">
-          <div class="panel-header">
-            <h3>Calendar</h3>
-            <span class="badge" id="calendar-count">0</span>
-          </div>
-          <div class="calendar-list" id="calendar-list">
-            <div class="empty">No events loaded</div>
-          </div>
-        </div>
-      </aside>
-    </main>
-  </div>
-
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <script src="bubbles.js"></script>
   <script src="chart.js"></script>
 </body>
