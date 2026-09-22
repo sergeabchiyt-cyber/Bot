@@ -38,7 +38,6 @@ async fn main() -> anyhow::Result<()> {
     let vp = Arc::new(RwLock::new(VolumeProfileEngine::new()));
     let cached_levels = Arc::new(RwLock::new(Vec::<types::VpLevels>::new()));
 
-    // ---------- Cold start: seed VP windows from REST ----------
     match binance_rest::fetch_klines_15m("XAUUSDT", 1000).await {
         Ok(candles) => {
             info!("Seeded {} historical 15M candles", candles.len());
@@ -53,10 +52,9 @@ async fn main() -> anyhow::Result<()> {
             }
             *cached_levels.write().await = levels;
         }
-        Err(e) => tracing::warn!("Cold-start REST fetch failed: {}. Continuing without history.", e),
+        Err(e) => tracing::warn!("Cold-start REST fetch failed: {}. Continuing.", e),
     }
 
-    // ---------- Binance aggTrade + kline ----------
     {
         let url = config.binance_ws_url.clone();
         let tx = tick_tx.clone();
@@ -75,8 +73,6 @@ async fn main() -> anyhow::Result<()> {
             }
         });
     }
-
-    // ---------- Multi-exchange order flow (Bybit + OKX) ----------
     {
         let tx = tick_tx.clone();
         tokio::spawn(async move {
@@ -94,8 +90,7 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // ---------- Tick consumer: order flow + bubble detection ----------
-    // Threshold raised from 5.0 to 15.0 now that three exchanges feed the buffer.
+    // ---------- Tick consumer: detect all four event kinds ----------
     {
         let vp = vp.clone();
         let bc = bc_tx.clone();
@@ -104,16 +99,20 @@ async fn main() -> anyhow::Result<()> {
             while let Some(trade) = tick_rx.recv().await {
                 analyzer.ingest(&trade);
                 let vp_read = vp.read().await;
-                if let Some(bubble) =
-                    analyzer.detect_absorption(&vp_read, trade.price_f64(), 15.0)
-                {
-                    let _ = bc.send(WsFrame::Bubbles { data: bubble });
+                let events = analyzer.detect_events(
+                    &vp_read,
+                    trade.price_f64(),
+                    30.0,   // bubble_threshold
+                    50.0,   // absorption_threshold
+                );
+                drop(vp_read);
+                for ev in events {
+                    let _ = bc.send(WsFrame::Bubbles { data: ev });
                 }
             }
         });
     }
 
-    // ---------- Candle consumer: VP update on 15M close ----------
     {
         let vp = vp.clone();
         let cached = cached_levels.clone();
@@ -135,7 +134,6 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // ---------- HTTP + WS server ----------
     let state = AppState {
         tx: bc_tx.clone(),
         subscriptions: Arc::new(dashmap::DashMap::new()),
