@@ -9,6 +9,7 @@ mod execution;
 mod execution_deriv;
 mod execution_chelsea;
 mod mcp_client;
+mod sifting_ws;
 mod ws_server;
 
 use std::sync::Arc;
@@ -107,6 +108,17 @@ async fn main() -> anyhow::Result<()> {
         Err(e) => warn!("Cold-start REST fetch failed: {}. Continuing.", e),
     }
 
+    // ---------- Sifting spot stream (Chart price only) ----------
+    {
+        let url = format!("wss://stream.sifting.io/ws/v1?key={}", config.sifting_api_key);
+        let bc = bc_tx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = sifting_ws::run_sifting_stream(url, bc).await {
+                tracing::error!("Sifting stream terminated: {}", e);
+            }
+        });
+    }
+
     // ---------- Exchange streams ----------
     {
         let url = config.binance_ws_url.clone();
@@ -172,6 +184,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // ---------- Kline consumer (VP + execution fan-out) ----------
+    // Binance klines are now ONLY used for Volume Profile and Execution.
+    // WsFrame::Candle is strictly broadcast by the Sifting stream for the chart.
     {
         let vp = vp.clone();
         let cached = cached_levels.clone();
@@ -179,12 +193,10 @@ async fn main() -> anyhow::Result<()> {
         let exec = exec_tx.clone();
         tokio::spawn(async move {
             while let Some(ev) = kline_rx.recv().await {
-                let candle = ev.kline.to_vp_candle();
-                let _ = bc.send(WsFrame::Candle { data: candle.clone() });
-
                 if !ev.kline.is_closed {
                     continue;
                 }
+                let candle = ev.kline.to_vp_candle();
                 let mut vp_w = vp.write().await;
                 vp_w.ingest_candle(candle.clone());
                 let levels = vp_w.all_levels();
