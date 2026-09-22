@@ -146,7 +146,7 @@ function upsertPriceLine(key, price, color, title, dashed = false) {
   });
 }
 
-// Colour map per window + kind. CW uses purple for all three; dashed.
+// Colour map per window + kind. Every level has its own colour.
 const LEVEL_STYLE = {
   PW: {
     poc: { color: "#F0B90B", title: "PW PoC", dashed: false },
@@ -158,8 +158,8 @@ const LEVEL_STYLE = {
   },
   CW: {
     poc: { color: "#A371F7", title: "CW PoC", dashed: true },
-    vah: { color: "#A371F7", title: "CW VaH", dashed: true },
-    val: { color: "#A371F7", title: "CW VaL", dashed: true },
+    vah: { color: "#F778BA", title: "CW VaH", dashed: true },
+    val: { color: "#22D3EE", title: "CW VaL", dashed: true },
   },
 };
 
