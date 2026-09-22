@@ -1,7 +1,7 @@
 /* ============================================================
  * XAUUSD Terminal — Node 2
  * lightweight-charts v4.2.0 API
- * Direct Binance kline WS + multi-exchange bubbles from backend
+ * Direct Binance kline WS + multi-exchange order flow
  * ============================================================ */
 
 const BACKEND_WS = "wss://engine-southeastasia-sng-main.onrender.com/ws";
@@ -134,22 +134,29 @@ function upsertPriceLine(key, price, color, title, dashed = false) {
   });
 }
 
-// ---------- Bubble markers (v4 API) ----------
+// ---------- Order flow markers (v4 API) ----------
 let markers = [];
 
-function addBubble(bubble) {
-  const isBuy = bubble.direction === "ABS_BUY";
-  const src = (bubble.exchange || "binance").toUpperCase();
+const EVENT_STYLE = {
+  BUY_BUBBLE:  { color: "#26A69A", shape: "arrowUp",   position: "belowBar", label: "BUY" },
+  SELL_BUBBLE: { color: "#EF5350", shape: "arrowDown", position: "aboveBar", label: "SELL" },
+  ABS_BUY:     { color: "#F0B90B", shape: "circle",    position: "belowBar", label: "ABS-B" },
+  ABS_SELL:    { color: "#F0B90B", shape: "circle",    position: "aboveBar", label: "ABS-S" },
+};
+
+function addBubble(event) {
+  const style = EVENT_STYLE[event.kind] || EVENT_STYLE.BUY_BUBBLE;
   markers.push({
-    time: Math.floor(bubble.timestamp / 1000),
-    position: isBuy ? "belowBar" : "aboveBar",
-    color: isBuy ? "#26A69A" : "#EF5350",
-    shape: "circle",
-    text: (isBuy ? "ABS BUY" : "ABS SELL") + " · " + src,
-    size: Math.min(3, Math.max(1, bubble.strength / 100)),
+    time: Math.floor(event.timestamp / 1000),
+    position: style.position,
+    color: style.color,
+    shape: style.shape,
+    text: `${style.label} · ${(event.exchange || "binance").toUpperCase()}`,
+    size: Math.min(3, Math.max(1, event.strength / 100)),
   });
+  markers.sort((a, b) => a.time - b.time);
   candleSeries.setMarkers(markers);
-  renderBubbleRow(bubble);
+  renderBubbleRow(event);
 }
 
 function clearMarkers() {
@@ -157,7 +164,15 @@ function clearMarkers() {
   candleSeries.setMarkers(markers);
 }
 
-// ---------- Sidebar renderers ----------
+// ---------- Level state ----------
+const levelsState = { PW: null, PS: null, CW: null };
+
+function updateLevelState(l) {
+  levelsState[l.window] = l;
+  const arr = Object.values(levelsState).filter(Boolean);
+  renderLevels(arr);
+}
+
 function renderLevels(levels) {
   const list = document.getElementById("levels-list");
   const count = document.getElementById("levels-count");
@@ -168,7 +183,7 @@ function renderLevels(levels) {
     return;
   }
 
-  const html = levels
+  list.innerHTML = levels
     .map((l) => {
       const rows = [];
       if (l.window === "PW") {
@@ -183,8 +198,6 @@ function renderLevels(levels) {
       return rows.join("");
     })
     .join("");
-
-  list.innerHTML = html;
 }
 
 function row(windowLabel, type, price, cls) {
@@ -196,39 +209,40 @@ function row(windowLabel, type, price, cls) {
   `;
 }
 
+// ---------- Bubbles sidebar ----------
 const bubbleRows = [];
-function renderBubbleRow(bubble) {
+
+function renderBubbleRow(event) {
   const list = document.getElementById("bubbles-list");
   const count = document.getElementById("bubbles-count");
-
   if (bubbleRows.length === 0) list.innerHTML = "";
 
-  const isBuy = bubble.direction === "ABS_BUY";
-  const time = new Date(bubble.timestamp).toLocaleTimeString([], {
+  const style = EVENT_STYLE[event.kind] || EVENT_STYLE.BUY_BUBBLE;
+  const time = new Date(event.timestamp).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
   });
-  const src = (bubble.exchange || "binance").toUpperCase();
+  const src = (event.exchange || "binance").toUpperCase();
 
-  bubbleRows.unshift({ bubble, time, isBuy, src });
-  if (bubbleRows.length > 30) bubbleRows.pop();
+  bubbleRows.unshift({ event, time, style, src });
+  if (bubbleRows.length > 40) bubbleRows.pop();
 
   list.innerHTML = bubbleRows
-    .map(
-      (b) => `
+    .map((b) => `
       <div class="bubble-row">
-        <span class="bubble-dir ${b.isBuy ? "buy" : "sell"}">
-          ${b.isBuy ? "▲ ABS BUY" : "▼ ABS SELL"}
+        <span class="bubble-dir" style="color:${b.style.color}">
+          ${b.style.label}
         </span>
-        <span class="bubble-meta">${Number(b.bubble.level).toFixed(2)} · ${b.time} · <em>${b.src}</em></span>
+        <span class="bubble-meta">${Number(b.event.level).toFixed(2)} · ${b.time} · <em>${b.src}</em></span>
       </div>
-    `
-    )
+    `)
     .join("");
 
   count.textContent = bubbleRows.length;
 }
 
+// ---------- Calendar ----------
 function renderCalendar(events) {
   const list = document.getElementById("calendar-list");
   const count = document.getElementById("calendar-count");
@@ -256,6 +270,7 @@ function renderCalendar(events) {
     .join("");
 }
 
+// ---------- Top bar ----------
 function updateLastPrice(candle) {
   const priceEl = document.getElementById("last-price");
   if (priceEl) priceEl.textContent = Number(candle.close).toFixed(2);
@@ -321,6 +336,7 @@ function connectBackend() {
         } else if (l.window === "CW") {
           upsertPriceLine("CW-poc", l.poc, "#A371F7", "CW PoC", true);
         }
+        updateLevelState(l);
         break;
       }
       case "bubbles":
@@ -353,7 +369,6 @@ async function fetchLevels() {
     const res = await fetch(BACKEND_REST);
     if (!res.ok) throw new Error(`levels ${res.status}`);
     const levels = await res.json();
-    renderLevels(levels);
     for (const l of levels) {
       if (l.window === "PW") {
         upsertPriceLine("PW-poc", l.poc, "#F0B90B", "PW PoC");
@@ -364,6 +379,7 @@ async function fetchLevels() {
       } else if (l.window === "CW") {
         upsertPriceLine("CW-poc", l.poc, "#A371F7", "CW PoC", true);
       }
+      updateLevelState(l);
     }
   } catch (e) {
     console.error("Levels fetch failed:", e);
@@ -377,7 +393,6 @@ document.querySelectorAll(".tf").forEach((btn) => {
     btn.classList.add("active");
     const tf = btn.dataset.tf;
     if (tf !== "15m") {
-      // 1H / 1D not wired yet — leave 15m active
       document.querySelector('.tf[data-tf="15m"]').classList.add("active");
       btn.classList.remove("active");
       return;
@@ -402,4 +417,4 @@ const ro = new ResizeObserver(() => {
 });
 ro.observe(chartEl);
 
-console.log("XAUUSD terminal booted — direct Binance kline + multi-exchange bubbles");
+console.log("XAUUSD terminal booted — direct Binance kline + multi-exchange order flow");
