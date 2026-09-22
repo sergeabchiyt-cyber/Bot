@@ -9,6 +9,17 @@ const BACKEND_WS = "wss://engine-southeastasia-sng-main.onrender.com/ws";
 const BACKEND_REST = "https://engine-southeastasia-sng-main.onrender.com/levels";
 const BINANCE_KLINE_WS = "wss://fstream.binance.com/market/ws/xauusdt@kline_15m";
 
+// ---------- Level visibility policy ----------
+// PW -> PoC + VaH + VaL
+// PS -> PoC only
+// CW -> PoC + VaH + VaL
+function levelVisible(windowKey, kind) {
+  if (windowKey === "PW") return true;
+  if (windowKey === "PS") return kind === "poc";
+  if (windowKey === "CW") return true;
+  return false;
+}
+
 // ---------- Chart bootstrap ----------
 const chartEl = document.getElementById("chart");
 
@@ -135,6 +146,41 @@ function upsertPriceLine(key, price, color, title, dashed = false) {
   });
 }
 
+// Colour map per window + kind. CW uses purple for all three; dashed.
+const LEVEL_STYLE = {
+  PW: {
+    poc: { color: "#F0B90B", title: "PW PoC", dashed: false },
+    vah: { color: "#26A69A", title: "PW VaH", dashed: false },
+    val: { color: "#EF5350", title: "PW VaL", dashed: false },
+  },
+  PS: {
+    poc: { color: "#58A6FF", title: "PS PoC", dashed: false },
+  },
+  CW: {
+    poc: { color: "#A371F7", title: "CW PoC", dashed: true },
+    vah: { color: "#A371F7", title: "CW VaH", dashed: true },
+    val: { color: "#A371F7", title: "CW VaL", dashed: true },
+  },
+};
+
+// Draw every visible level from one window object.
+function drawLevelsForWindow(l) {
+  const styles = LEVEL_STYLE[l.window];
+  if (!styles) return;
+  const kinds = [
+    ["poc", l.poc],
+    ["vah", l.vah],
+    ["val", l.val],
+  ];
+  for (const [kind, price] of kinds) {
+    if (price === undefined || price === null) continue;
+    if (!levelVisible(l.window, kind)) continue;
+    const s = styles[kind];
+    if (!s) continue;
+    upsertPriceLine(`${l.window}-${kind}`, price, s.color, s.title, s.dashed);
+  }
+}
+
 // ---------- Order flow bubbles (custom primitive) ----------
 const EVENT_STYLE =
   typeof OrderFlowBubblesPrimitive !== "undefined"
@@ -211,10 +257,21 @@ function updateLevelState(l) {
   renderLevels(arr);
 }
 
+// Count only rows that will actually be rendered.
+function visibleRowCount(levels) {
+  let n = 0;
+  for (const l of levels) {
+    if (l.window === "PW") n += 3;
+    else if (l.window === "PS") n += 1;
+    else if (l.window === "CW") n += 3;
+  }
+  return n;
+}
+
 function renderLevels(levels) {
   const list = document.getElementById("levels-list");
   const count = document.getElementById("levels-count");
-  count.textContent = levels.length;
+  count.textContent = visibleRowCount(levels);
 
   if (!levels.length) {
     list.innerHTML = '<div class="empty">Awaiting data…</div>';
@@ -232,6 +289,8 @@ function renderLevels(levels) {
         rows.push(row("PS", "PoC", l.poc, "ps-poc"));
       } else if (l.window === "CW") {
         rows.push(row("CW", "PoC", l.poc, "cw-poc"));
+        rows.push(row("CW", "VaH", l.vah, "cw-vah"));
+        rows.push(row("CW", "VaL", l.val, "cw-val"));
       }
       return rows.join("");
     })
@@ -239,6 +298,7 @@ function renderLevels(levels) {
 }
 
 function row(windowLabel, type, price, cls) {
+  if (price === undefined || price === null) return "";
   return `
     <div class="level-row">
       <div class="level-label"><i class="${cls}"></i>${windowLabel} ${type}</div>
@@ -365,15 +425,7 @@ function connectBackend() {
     switch (frame.type) {
       case "levels": {
         const l = frame.data;
-        if (l.window === "PW") {
-          upsertPriceLine("PW-poc", l.poc, "#F0B90B", "PW PoC");
-          upsertPriceLine("PW-vah", l.vah, "#26A69A", "PW VaH");
-          upsertPriceLine("PW-val", l.val, "#EF5350", "PW VaL");
-        } else if (l.window === "PS") {
-          upsertPriceLine("PS-poc", l.poc, "#58A6FF", "PS PoC");
-        } else if (l.window === "CW") {
-          upsertPriceLine("CW-poc", l.poc, "#A371F7", "CW PoC", true);
-        }
+        drawLevelsForWindow(l);
         updateLevelState(l);
         break;
       }
@@ -408,15 +460,7 @@ async function fetchLevels() {
     if (!res.ok) throw new Error(`levels ${res.status}`);
     const levels = await res.json();
     for (const l of levels) {
-      if (l.window === "PW") {
-        upsertPriceLine("PW-poc", l.poc, "#F0B90B", "PW PoC");
-        upsertPriceLine("PW-vah", l.vah, "#26A69A", "PW VaH");
-        upsertPriceLine("PW-val", l.val, "#EF5350", "PW VaL");
-      } else if (l.window === "PS") {
-        upsertPriceLine("PS-poc", l.poc, "#58A6FF", "PS PoC");
-      } else if (l.window === "CW") {
-        upsertPriceLine("CW-poc", l.poc, "#A371F7", "CW PoC", true);
-      }
+      drawLevelsForWindow(l);
       updateLevelState(l);
     }
   } catch (e) {
