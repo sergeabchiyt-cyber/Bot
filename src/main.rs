@@ -90,29 +90,28 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // ---------- Tick consumer: detect all four event kinds ----------
-    {
-        let vp = vp.clone();
-        let bc = bc_tx.clone();
-        let mut analyzer = OrderFlowAnalyzer::new(20_000);
-        tokio::spawn(async move {
-            while let Some(trade) = tick_rx.recv().await {
-                analyzer.ingest(&trade);
-                let vp_read = vp.read().await;
-                let events = analyzer.detect_events(
-                    &vp_read,
-                    trade.price_f64(),
-                    30.0,   // bubble_threshold
-                    50.0,   // absorption_threshold
-                );
-                drop(vp_read);
-                for ev in events {
-                    let _ = bc.send(WsFrame::Bubbles { data: ev });
-                }
+    // ---------- Tick consumer ----------
+{
+    let vp = vp.clone();
+    let bc = bc_tx.clone();
+    let mut analyzer = OrderFlowAnalyzer::new(20_000);
+    tokio::spawn(async move {
+        while let Some(trade) = tick_rx.recv().await {
+            analyzer.ingest(&trade);
+            let vp_read = vp.read().await;
+            let events = analyzer.detect_events(
+                &vp_read,
+                trade.price_f64(),
+                0.90,   // bubble percentile: top 10% of recent magnitudes
+                0.97,   // absorption percentile: top 3%
+            );
+            drop(vp_read);
+            for ev in events {
+                let _ = bc.send(WsFrame::Bubbles { data: ev });
             }
-        });
-    }
-
+        }
+    });
+}
     {
         let vp = vp.clone();
         let cached = cached_levels.clone();
