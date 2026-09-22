@@ -8,6 +8,8 @@ pub struct OrderFlowAnalyzer {
     pub bubble_history: VecDeque<AbsorptionBubble>,
     pub cumulative_delta: f64,
     pub window_size: usize,
+    /// Exchange of the most recently ingested trade.
+    pub last_exchange: String,
 }
 
 impl OrderFlowAnalyzer {
@@ -17,12 +19,14 @@ impl OrderFlowAnalyzer {
             bubble_history: VecDeque::with_capacity(200),
             cumulative_delta: 0.0,
             window_size: window,
+            last_exchange: "binance".into(),
         }
     }
 
     pub fn ingest(&mut self, trade: &AggTrade) {
         let delta = trade.signed_delta();
         self.cumulative_delta += delta;
+        self.last_exchange = trade.exchange.clone();
         self.delta_history
             .push_back((trade.trade_time, trade.price_f64(), delta));
         while self.delta_history.len() > self.window_size {
@@ -74,6 +78,7 @@ impl OrderFlowAnalyzer {
                     direction: "ABS_BUY".into(),
                     strength: recent.abs(),
                     timestamp: chrono::Utc::now().timestamp_millis(),
+                    exchange: self.last_exchange.clone(),
                 };
                 self.push_bubble(bubble.clone());
                 return Some(bubble);
@@ -85,6 +90,7 @@ impl OrderFlowAnalyzer {
                     direction: "ABS_SELL".into(),
                     strength: recent,
                     timestamp: chrono::Utc::now().timestamp_millis(),
+                    exchange: self.last_exchange.clone(),
                 };
                 self.push_bubble(bubble.clone());
                 return Some(bubble);
