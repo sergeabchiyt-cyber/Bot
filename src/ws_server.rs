@@ -72,7 +72,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                 topics = t;
                                 subscribed = true;
 
-                                // Replay cached levels (PW/PS only)
+                                // Replay cached levels (PW/PS/CW)
                                 if topics.iter().any(|x| x == "levels") {
                                     let cached = state.cached_levels.read().await;
                                     for lvl in cached.iter() {
@@ -100,6 +100,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                         if !subscribed { continue; }
                         let topic = match &frame {
                             WsFrame::Levels { .. } => "levels",
+                            WsFrame::Candle { .. } => "candle",
                             WsFrame::Bubbles { .. } => "bubbles",
                             WsFrame::Trades { .. } => "trades",
                             WsFrame::Sentiment { .. } => "sentiment",
