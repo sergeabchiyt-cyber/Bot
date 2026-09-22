@@ -1,3 +1,4 @@
+#[derive(Clone)]
 pub struct Config {
     pub port: u16,
     pub binance_ws_url: String,
@@ -6,6 +7,9 @@ pub struct Config {
     pub mcp_browser_url: String,
     pub mcp_chelsea_url: Option<String>,
     pub sifting_api_key: String,
+    pub deriv_api_url: String,
+    pub deriv_app_id: String,
+    pub deriv_api_key: String,
 }
 
 impl Config {
@@ -27,6 +31,10 @@ impl Config {
                 .unwrap_or_else(|_| "http://localhost:3001".to_string()),
             mcp_chelsea_url: std::env::var("MCP_CHELSEA_URL").ok(),
             sifting_api_key: std::env::var("SIFTING_API_KEY").unwrap_or_default(),
+            deriv_api_url: std::env::var("DERIV_API_URL")
+                .unwrap_or_else(|_| "wss://ws.derivws.com/websockets/v3".to_string()),
+            deriv_app_id: std::env::var("DERIV_APP_ID").unwrap_or_default(),
+            deriv_api_key: std::env::var("DERIV_API_KEY").unwrap_or_default(),
         }
     }
 }
