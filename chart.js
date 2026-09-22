@@ -136,12 +136,38 @@ function upsertPriceLine(key, price, color, title, dashed = false) {
 }
 
 // ---------- Order flow bubbles (custom primitive) ----------
-const bubblesPrimitive = OrderFlowBubblesPrimitive.create();
-candleSeries.attachPrimitive(bubblesPrimitive);
+const EVENT_STYLE =
+  typeof OrderFlowBubblesPrimitive !== "undefined"
+    ? OrderFlowBubblesPrimitive.EVENT_STYLE
+    : {
+        BUY_BUBBLE:  { color: "#26A69A", label: "BUY"   },
+        SELL_BUBBLE: { color: "#EF5350", label: "SELL"  },
+        ABS_BUY:     { color: "#F0B90B", label: "ABS-B" },
+        ABS_SELL:    { color: "#F0B90B", label: "ABS-S" },
+      };
+
+let bubblesPrimitive;
+if (typeof OrderFlowBubblesPrimitive !== "undefined") {
+  bubblesPrimitive = OrderFlowBubblesPrimitive.create();
+  candleSeries.attachPrimitive(bubblesPrimitive);
+} else {
+  console.error("bubbles.js failed to load — chart bubbles disabled");
+  bubblesPrimitive = { updateData() {}, maxStrength: 100 };
+}
 
 const bubbleEvents = [];          // rolling window for rendering
 const MAX_BUBBLES_ON_CHART = 60;
+const MAX_SCALE_CAP = 5000;
+
 let maxStrengthSeen = 100;        // dynamic scale reference
+
+// Decay the scale reference slowly so it recovers after a spike.
+setInterval(() => {
+  if (maxStrengthSeen > 100) {
+    maxStrengthSeen = Math.max(100, maxStrengthSeen * 0.95);
+    bubblesPrimitive.maxStrength = maxStrengthSeen;
+  }
+}, 30_000);
 
 function addBubble(event) {
   bubbleEvents.push(event);
@@ -150,13 +176,13 @@ function addBubble(event) {
   }
 
   if (event.strength > maxStrengthSeen) {
-    maxStrengthSeen = event.strength;
+    maxStrengthSeen = Math.min(MAX_SCALE_CAP, event.strength);
   }
 
   bubblesPrimitive.maxStrength = maxStrengthSeen;
   bubblesPrimitive.updateData(bubbleEvents);
 
-  // Force a redraw by nudging the chart options
+  // Nudge the chart to force a repaint of the primitive layer.
   chart.applyOptions({});
   candleSeries.applyOptions({});
 
@@ -166,6 +192,13 @@ function addBubble(event) {
 function clearBubbles() {
   bubbleEvents.length = 0;
   bubblesPrimitive.updateData([]);
+
+  bubbleRows.length = 0;
+  const list = document.getElementById("bubbles-list");
+  const count = document.getElementById("bubbles-count");
+  if (list) list.innerHTML = '<div class="empty">No bubbles detected</div>';
+  if (count) count.textContent = 0;
+
   chart.applyOptions({});
 }
 
@@ -216,13 +249,6 @@ function row(windowLabel, type, price, cls) {
 
 // ---------- Bubbles sidebar ----------
 const bubbleRows = [];
-
-const EVENT_STYLE = {
-  BUY_BUBBLE:  { color: "#26A69A", label: "BUY" },
-  SELL_BUBBLE: { color: "#EF5350", label: "SELL" },
-  ABS_BUY:     { color: "#F0B90B", label: "ABS-B" },
-  ABS_SELL:    { color: "#F0B90B", label: "ABS-S" },
-};
 
 function renderBubbleRow(event) {
   const list = document.getElementById("bubbles-list");
