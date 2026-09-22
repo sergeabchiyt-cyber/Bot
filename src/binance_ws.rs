@@ -16,9 +16,10 @@ pub async fn run_agg_trade_stream(url: String, tx: mpsc::Sender<AggTrade>) -> Re
                 while let Some(msg) = read.next().await {
                     match msg {
                         Ok(m) if m.is_text() => {
-                            if let Ok(trade) =
+                            if let Ok(mut trade) =
                                 serde_json::from_str::<AggTrade>(m.to_text().unwrap_or(""))
                             {
+                                trade.exchange = "binance".into();
                                 if tx.send(trade).await.is_err() {
                                     warn!("aggTrade consumer dropped; exiting stream");
                                     return Ok(());
