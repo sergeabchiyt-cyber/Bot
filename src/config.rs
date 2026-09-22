@@ -10,6 +10,12 @@ pub struct Config {
     pub deriv_api_url: String,
     pub deriv_app_id: Option<String>,
     pub deriv_demo_api: Option<String>,
+    pub sl_min_pips: f64,
+    pub sl_max_pips: f64,
+    pub tp_min_pips: f64,
+    pub tp_max_pips: f64,
+    pub rr_min: f64,
+    pub rr_max: f64,
 }
 
 impl Config {
@@ -35,6 +41,30 @@ impl Config {
                 .unwrap_or_else(|_| "wss://ws.derivws.com/websockets/v3".to_string()),
             deriv_app_id: std::env::var("DERIV_APP_ID").ok(),
             deriv_demo_api: std::env::var("DERIV_DEMO_API").ok(),
+            sl_min_pips: std::env::var("SL_MIN_PIPS")
+                .unwrap_or_else(|_| "10.0".to_string())
+                .parse()
+                .unwrap_or(10.0),
+            sl_max_pips: std::env::var("SL_MAX_PIPS")
+                .unwrap_or_else(|_| "50.0".to_string())
+                .parse()
+                .unwrap_or(50.0),
+            tp_min_pips: std::env::var("TP_MIN_PIPS")
+                .unwrap_or_else(|_| "15.0".to_string())
+                .parse()
+                .unwrap_or(15.0),
+            tp_max_pips: std::env::var("TP_MAX_PIPS")
+                .unwrap_or_else(|_| "100.0".to_string())
+                .parse()
+                .unwrap_or(100.0),
+            rr_min: std::env::var("RR_MIN")
+                .unwrap_or_else(|_| "1.0".to_string())
+                .parse()
+                .unwrap_or(1.0),
+            rr_max: std::env::var("RR_MAX")
+                .unwrap_or_else(|_| "3.0".to_string())
+                .parse()
+                .unwrap_or(3.0),
         }
     }
 }
