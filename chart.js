@@ -2,6 +2,7 @@
  * XAUUSD Terminal — Node 2
  * lightweight-charts v4.2.0 API
  * Direct Binance kline WS + multi-exchange order flow
+ * Bubbles rendered via custom series primitive (bubbles.js)
  * ============================================================ */
 
 const BACKEND_WS = "wss://engine-southeastasia-sng-main.onrender.com/ws";
@@ -134,34 +135,38 @@ function upsertPriceLine(key, price, color, title, dashed = false) {
   });
 }
 
-// ---------- Order flow markers (v4 API) ----------
-let markers = [];
+// ---------- Order flow bubbles (custom primitive) ----------
+const bubblesPrimitive = OrderFlowBubblesPrimitive.create();
+candleSeries.attachPrimitive(bubblesPrimitive);
 
-const EVENT_STYLE = {
-  BUY_BUBBLE:  { color: "#26A69A", shape: "arrowUp",   position: "belowBar", label: "BUY" },
-  SELL_BUBBLE: { color: "#EF5350", shape: "arrowDown", position: "aboveBar", label: "SELL" },
-  ABS_BUY:     { color: "#F0B90B", shape: "circle",    position: "belowBar", label: "ABS-B" },
-  ABS_SELL:    { color: "#F0B90B", shape: "circle",    position: "aboveBar", label: "ABS-S" },
-};
+const bubbleEvents = [];          // rolling window for rendering
+const MAX_BUBBLES_ON_CHART = 60;
+let maxStrengthSeen = 100;        // dynamic scale reference
 
 function addBubble(event) {
-  const style = EVENT_STYLE[event.kind] || EVENT_STYLE.BUY_BUBBLE;
-  markers.push({
-    time: Math.floor(event.timestamp / 1000),
-    position: style.position,
-    color: style.color,
-    shape: style.shape,
-    text: `${style.label} · ${(event.exchange || "binance").toUpperCase()}`,
-    size: Math.min(3, Math.max(1, event.strength / 100)),
-  });
-  markers.sort((a, b) => a.time - b.time);
-  candleSeries.setMarkers(markers);
+  bubbleEvents.push(event);
+  while (bubbleEvents.length > MAX_BUBBLES_ON_CHART) {
+    bubbleEvents.shift();
+  }
+
+  if (event.strength > maxStrengthSeen) {
+    maxStrengthSeen = event.strength;
+  }
+
+  bubblesPrimitive.maxStrength = maxStrengthSeen;
+  bubblesPrimitive.updateData(bubbleEvents);
+
+  // Force a redraw by nudging the chart options
+  chart.applyOptions({});
+  candleSeries.applyOptions({});
+
   renderBubbleRow(event);
 }
 
-function clearMarkers() {
-  markers = [];
-  candleSeries.setMarkers(markers);
+function clearBubbles() {
+  bubbleEvents.length = 0;
+  bubblesPrimitive.updateData([]);
+  chart.applyOptions({});
 }
 
 // ---------- Level state ----------
@@ -211,6 +216,13 @@ function row(windowLabel, type, price, cls) {
 
 // ---------- Bubbles sidebar ----------
 const bubbleRows = [];
+
+const EVENT_STYLE = {
+  BUY_BUBBLE:  { color: "#26A69A", label: "BUY" },
+  SELL_BUBBLE: { color: "#EF5350", label: "SELL" },
+  ABS_BUY:     { color: "#F0B90B", label: "ABS-B" },
+  ABS_SELL:    { color: "#F0B90B", label: "ABS-S" },
+};
 
 function renderBubbleRow(event) {
   const list = document.getElementById("bubbles-list");
@@ -397,6 +409,9 @@ document.querySelectorAll(".tf").forEach((btn) => {
       btn.classList.remove("active");
       return;
     }
+    Object.values(priceLines).forEach((l) => candleSeries.removePriceLine(l));
+    Object.keys(priceLines).forEach((k) => delete priceLines[k]);
+    clearBubbles();
     loadHistory();
     fetchLevels();
   });
