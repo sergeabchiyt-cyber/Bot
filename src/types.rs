@@ -28,6 +28,14 @@ pub struct AggTrade {
     pub is_buyer_maker: bool,
     #[serde(rename = "st")]
     pub symbol_type: Option<i32>,
+
+    /// Source exchange tag: "binance", "bybit", "okx". Not part of the wire format.
+    #[serde(default = "default_exchange")]
+    pub exchange: String,
+}
+
+fn default_exchange() -> String {
+    "binance".into()
 }
 
 impl AggTrade {
@@ -131,6 +139,9 @@ pub struct AbsorptionBubble {
     pub direction: String,
     pub strength: f64,
     pub timestamp: i64,
+    /// Source exchange that triggered the bubble: "binance", "bybit", "okx".
+    #[serde(default = "default_exchange")]
+    pub exchange: String,
 }
 
 // =====================================================================
