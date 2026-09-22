@@ -196,6 +196,7 @@ let bubblesPrimitive;
 if (typeof OrderFlowBubblesPrimitive !== "undefined") {
   bubblesPrimitive = OrderFlowBubblesPrimitive.create();
   candleSeries.attachPrimitive(bubblesPrimitive);
+  console.log("Bubble primitive attached");
 } else {
   console.error("bubbles.js failed to load — chart bubbles disabled");
   bubblesPrimitive = { updateData() {}, maxStrength: 100 };
@@ -301,7 +302,7 @@ function row(windowLabel, type, price, cls) {
   if (price === undefined || price === null) return "";
   return `
     <div class="level-row">
-      <div class="level-label"><i class="${cls}"></i>${windowLabel} ${type}</div>
+      <div class="level-label"><i class="swatch ${cls}"></i>${windowLabel} ${type}</div>
       <div class="level-price">${Number(price).toFixed(2)}</div>
     </div>
   `;
