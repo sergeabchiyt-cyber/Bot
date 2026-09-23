@@ -42,5 +42,4 @@ jobs:
           sleep 4
           curl -sf http://127.0.0.1:3000/health && echo " <- /health ok"
           curl -sf http://127.0.0.1:3000/status && echo " <- /status ok"
-          curl -sf http://127.0.0.1:3000/ | grep -q "ORDERFLOW" && echo " <- dashboard served"
           kill $PID

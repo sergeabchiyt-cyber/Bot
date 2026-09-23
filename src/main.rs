@@ -439,7 +439,10 @@ async fn main() -> anyhow::Result<()> {
     };
     let app = ws_server::router(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
-    info!("Listening on 0.0.0.0:{} — dashboard at /", config.port);
+    info!(
+        "Listening on 0.0.0.0:{} — /health /status /levels /candles /ws",
+        config.port
+    );
     axum::serve(listener, app).await?;
 
     Ok(())

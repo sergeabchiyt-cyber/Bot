@@ -3,7 +3,9 @@
 Rust backend for a gold (XAUUSD) order-flow desk: it ingests live trades from
 multiple venues, detects order-flow events (bubbles / absorption), computes
 weekly volume-profile levels, scrapes the economic calendar through a browser
-MCP server, and serves everything — chart included — on one page.
+MCP server, and exposes everything over a JSON HTTP API and a WebSocket
+stream. The engine ships no frontend and serves no static files — point any
+external client (dashboard, charting app, script) at the endpoints below.
 
 ## Run
 
@@ -11,14 +13,13 @@ MCP server, and serves everything — chart included — on one page.
 cargo run            # or: docker build -t engine . && docker run -p 10000:10000 engine
 ```
 
-Then open **http://localhost:3000/** — the dashboard is served by the engine
-itself (no separate frontend process).
+Then hit **http://localhost:3000/status** for a JSON snapshot of every feed.
+There is no `/` route — the engine is API-only.
 
 ## HTTP endpoints
 
 | Route      | What                                                |
 |------------|-----------------------------------------------------|
-| `/`        | Dashboard (candles, levels, bubbles, trades, calendar, feed status) |
 | `/health`  | `ok`                                                |
 | `/status`  | JSON snapshot of every feed's liveness              |
 | `/levels`  | Current PW/PS/CW PoC/VaH/VaL levels                 |

@@ -5,7 +5,7 @@ use axum::{
         State,
     },
     http::header,
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
     routing::get,
     Json, Router,
 };
@@ -18,8 +18,6 @@ use crate::config::Config;
 use crate::status::FeedStatus;
 use crate::types::{VpLevels, VpCandle, WsFrame};
 use crate::volume_profile::VolumeProfileEngine;
-
-const DASHBOARD: &str = include_str!("../static/index.html");
 
 #[derive(Clone)]
 pub struct AppState {
@@ -34,17 +32,12 @@ pub struct AppState {
 
 pub fn router(state: AppState) -> Router {
     Router::new()
-        .route("/", get(dashboard))
         .route("/health", get(health))
         .route("/levels", get(levels_snapshot))
         .route("/candles", get(candles_snapshot))
         .route("/status", get(status_snapshot))
         .route("/ws", get(ws_handler))
         .with_state(state)
-}
-
-async fn dashboard() -> Html<&'static str> {
-    Html(DASHBOARD)
 }
 
 async fn health() -> &'static str {
@@ -114,7 +107,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                 topics = t;
                                 subscribed = true;
 
-                                // Replay cached state so the dashboard fills
+                                // Replay cached state so new clients fill
                                 // instantly (levels + recent candles + status).
                                 if topics.iter().any(|x| x == "levels") {
                                     let cached = state.cached_levels.read().await;
