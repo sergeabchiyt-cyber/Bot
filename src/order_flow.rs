@@ -44,8 +44,10 @@ impl OrderFlowAnalyzer {
     pub fn ingest(&mut self, trade: &AggTrade) {
         let price = trade.price_f64();
         let qty = trade.qty_f64();
-        let signed_qty = trade.signed_delta();
-        
+        // Feeds without a taker side (quote ticks) must not fabricate
+        // directional delta — they only count toward total volume.
+        let signed_qty = if trade.has_flow_side { trade.signed_delta() } else { 0.0 };
+
         let notional_delta = signed_qty * price;
         let notional_volume = qty * price;
         

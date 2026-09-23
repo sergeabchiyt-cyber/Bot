@@ -1,5 +1,7 @@
 mod config;
+mod status;
 mod types;
+mod binance_rest;
 mod binance_ws;
 mod sifting_rest;
 mod multi_exchange;
@@ -20,7 +22,8 @@ use tracing_subscriber::EnvFilter;
 use config::Config;
 use execution::ExecutionManager;
 use order_flow::OrderFlowAnalyzer;
-use types::{OrderflowEvent, WsFrame};
+use status::FeedStatus;
+use types::{OrderflowEvent, VpCandle, WsFrame};
 use volume_profile::VolumeProfileEngine;
 use ws_server::AppState;
 
@@ -73,89 +76,201 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env();
-    info!("Starting XAUUSD engine on port {}", config.port);
+    info!("Starting XAUUSD engine v{} on port {}", env!("CARGO_PKG_VERSION"), config.port);
 
-    let (bc_tx, _) = broadcast::channel(1024);
+    let (bc_tx, _) = broadcast::channel(4096);
     let (tick_tx, mut tick_rx) = mpsc::channel(8192);
     let (kline_tx, mut kline_rx) = mpsc::channel(256);
     // Closed-candle fan-out for the execution trigger.
     let (exec_tx, mut exec_rx) = mpsc::channel::<types::VpCandle>(64);
 
+    let status = FeedStatus::new(bc_tx.clone());
     let vp = Arc::new(RwLock::new(VolumeProfileEngine::new()));
     let cached_levels = Arc::new(RwLock::new(Vec::new()));
+    let cached_candles = Arc::new(RwLock::new(Vec::<VpCandle>::new()));
     let recent_bubbles: Arc<RwLock<Vec<OrderflowEvent>>> = Arc::new(RwLock::new(Vec::new()));
 
-    // ---------- Cold-start REST fetch (Sifting.io spot) ----------
-    match sifting_rest::fetch_sifting_klines_15m(&config.sifting_api_key, "XAUUSD", 1000).await {
-        Ok(candles) => {
-            info!("Seeded {} historical 15M candles from Sifting.io", candles.len());
-            let mut vp_w = vp.write().await;
-            for c in candles {
-                vp_w.ingest_candle(c);
+    // ---------- Cold-start history ----------
+    // Primary: Sifting.io commodities bars. Fallback: Binance futures klines,
+    // so the volume profile seeds even without a Sifting key.
+    let mut seeded = false;
+    if !config.sifting_api_key.is_empty() {
+        match sifting_rest::fetch_sifting_klines_15m(
+            &config.sifting_hist_url,
+            &config.sifting_api_key,
+            &config.sifting_symbol,
+            1000,
+        )
+        .await
+        {
+            Ok(candles) => {
+                info!("Seeded {} historical 15M candles from Sifting.io", candles.len());
+                let mut vp_w = vp.write().await;
+                for c in candles {
+                    vp_w.ingest_candle(c);
+                }
+                let levels = vp_w.all_levels();
+                drop(vp_w);
+                *cached_levels.write().await = levels;
+                seeded = true;
             }
-            let levels = vp_w.all_levels();
-            for lvl in &levels {
-                info!(
-                    "{}: poc={:.3} vah={:.3} val={:.3}",
-                    lvl.window, lvl.poc, lvl.vah, lvl.val
-                );
-            }
-            *cached_levels.write().await = levels;
+            Err(e) => warn!("Cold-start Sifting REST fetch failed: {e}. Trying Binance."),
         }
-        Err(e) => warn!("Cold-start Sifting REST fetch failed: {}. Continuing.", e),
+    } else {
+        info!("No SIFTING_API_KEY set — seeding history from Binance instead");
+    }
+    if !seeded {
+        match binance_rest::fetch_klines_15m("XAUUSDT", 1000).await {
+            Ok(candles) => {
+                info!("Seeded {} historical 15M candles from Binance", candles.len());
+                let mut vp_w = vp.write().await;
+                for c in candles {
+                    vp_w.ingest_candle(c);
+                }
+                let levels = vp_w.all_levels();
+                drop(vp_w);
+                *cached_levels.write().await = levels;
+            }
+            Err(e) => warn!("Cold-start Binance REST fetch failed: {e}. Starting empty."),
+        }
+    }
+    for lvl in cached_levels.read().await.iter() {
+        info!("{}: poc={:.3} vah={:.3} val={:.3}", lvl.window, lvl.poc, lvl.vah, lvl.val);
     }
 
-    // ---------- Sifting spot stream (Chart price only) ----------
-    {
-        let url = format!(
-            "wss://stream.sifting.io/ws/v1?key={}",
-            config.sifting_api_key
-        );
+    // ---------- Sifting spot stream (chart + remote source of truth) ----------
+    if config.feed_sifting {
+        let url = config.sifting_ws_url.clone();
+        let key = config.sifting_api_key.clone();
+        let symbol = config.sifting_symbol.clone();
         let bc = bc_tx.clone();
+        let st = status.clone();
         tokio::spawn(async move {
-            if let Err(e) = sifting_ws::run_sifting_stream(url, bc).await {
-                tracing::error!("Sifting stream terminated: {}", e);
+            if let Err(e) = sifting_ws::run_sifting_stream(url, key, symbol, bc, st).await {
+                tracing::error!("Sifting stream terminated: {e}");
             }
         });
+    } else {
+        status.set("sifting", "off (no key)");
     }
 
-    // ---------- Exchange streams ----------
-    {
-        let url = config.binance_ws_url.clone();
+    // ---------- Binance chart + order flow streams ----------
+    if config.feed_binance {
+        {
+            let url = config.binance_ws_url.clone();
+            let tx = tick_tx.clone();
+            let st = status.clone();
+            tokio::spawn(async move {
+                if let Err(e) = binance_ws::run_agg_trade_stream(url, tx, st).await {
+                    tracing::error!("aggTrade stream terminated: {e}");
+                }
+            });
+        }
+        {
+            let url = config.binance_kline_url.clone();
+            let tx = kline_tx.clone();
+            let st = status.clone();
+            tokio::spawn(async move {
+                if let Err(e) = binance_ws::run_kline_stream(url, tx, st).await {
+                    tracing::error!("kline stream terminated: {e}");
+                }
+            });
+        }
+    } else {
+        status.set("binance", "off");
+        status.set("binance_kline", "off");
+    }
+
+    // ---------- Additional order flow sources ----------
+    if config.feed_bybit {
         let tx = tick_tx.clone();
+        let st = status.clone();
         tokio::spawn(async move {
-            if let Err(e) = binance_ws::run_agg_trade_stream(url, tx).await {
-                tracing::error!("aggTrade stream terminated: {}", e);
+            if let Err(e) = multi_exchange::run_bybit_stream(tx, st).await {
+                tracing::error!("Bybit stream terminated: {e}");
             }
         });
+    } else {
+        status.set("bybit", "off");
     }
 
-    {
-        let url = config.binance_kline_url.clone();
-        let tx = kline_tx.clone();
-        tokio::spawn(async move {
-            if let Err(e) = binance_ws::run_kline_stream(url, tx).await {
-                tracing::error!("kline stream terminated: {}", e);
-            }
-        });
-    }
-
-    {
+    if config.feed_okx {
         let tx = tick_tx.clone();
+        let st = status.clone();
         tokio::spawn(async move {
-            if let Err(e) = multi_exchange::run_bybit_stream(tx).await {
-                tracing::error!("Bybit stream terminated: {}", e);
+            if let Err(e) = multi_exchange::run_okx_stream(tx, st).await {
+                tracing::error!("OKX stream terminated: {e}");
             }
         });
+    } else {
+        status.set("okx", "off");
     }
 
-    {
+    if config.feed_bitget {
         let tx = tick_tx.clone();
+        let symbol = config.bitget_symbol.clone();
+        let st = status.clone();
         tokio::spawn(async move {
-            if let Err(e) = multi_exchange::run_okx_stream(tx).await {
-                tracing::error!("OKX stream terminated: {}", e);
+            if let Err(e) = multi_exchange::run_bitget_stream(tx, symbol, st).await {
+                tracing::error!("Bitget stream terminated: {e}");
             }
         });
+    } else {
+        status.set("bitget", "off");
+    }
+
+    if config.feed_gate {
+        let tx = tick_tx.clone();
+        let symbol = config.gate_symbol.clone();
+        let st = status.clone();
+        tokio::spawn(async move {
+            if let Err(e) = multi_exchange::run_gate_stream(tx, symbol, st).await {
+                tracing::error!("Gate stream terminated: {e}");
+            }
+        });
+    } else {
+        status.set("gate", "off");
+    }
+
+    if config.feed_kraken {
+        let tx = tick_tx.clone();
+        let product = config.kraken_product.clone();
+        let st = status.clone();
+        tokio::spawn(async move {
+            if let Err(e) = multi_exchange::run_kraken_stream(tx, product, st).await {
+                tracing::error!("Kraken stream terminated: {e}");
+            }
+        });
+    } else {
+        status.set("kraken", "off");
+    }
+
+    if config.feed_alltick {
+        let tx = tick_tx.clone();
+        let url = config.alltick_ws_url.clone();
+        let code = config.alltick_code.clone();
+        let st = status.clone();
+        tokio::spawn(async move {
+            if let Err(e) = multi_exchange::run_alltick_stream(tx, url, code, st).await {
+                tracing::error!("AllTick stream terminated: {e}");
+            }
+        });
+    } else {
+        status.set("alltick", "off (no token)");
+    }
+
+    if config.feed_itick {
+        let tx = tick_tx.clone();
+        let url = config.itick_ws_url.clone();
+        let symbol = config.itick_symbol.clone();
+        let st = status.clone();
+        tokio::spawn(async move {
+            if let Err(e) = multi_exchange::run_itick_stream(tx, url, symbol, st).await {
+                tracing::error!("iTick stream terminated: {e}");
+            }
+        });
+    } else {
+        status.set("itick", "off (no token)");
     }
 
     // ---------- Tick consumer (order flow) ----------
@@ -163,9 +278,11 @@ async fn main() -> anyhow::Result<()> {
         let vp = vp.clone();
         let bc = bc_tx.clone();
         let recent = recent_bubbles.clone();
+        let st = status.clone();
         let mut analyzer = OrderFlowAnalyzer::new(20_000);
         tokio::spawn(async move {
             while let Some(trade) = tick_rx.recv().await {
+                st.mark_msg("orderflow");
                 analyzer.ingest(&trade);
                 let vp_read = vp.read().await;
                 let events = analyzer.detect_events(&vp_read, trade.price_f64(), 0.90, 0.97);
@@ -185,20 +302,34 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // ---------- Kline consumer (VP + execution fan-out) ----------
-    // Binance klines feed the Volume Profile and Execution trigger.
-    // WsFrame::Candle is broadcast by the Sifting stream for the chart.
+    // ---------- Kline consumer (chart broadcast + VP + execution fan-out) ----------
+    // Every kline update streams to the chart (Binance is the chart source);
+    // closed candles feed the Volume Profile and the execution trigger.
     {
         let vp = vp.clone();
         let cached = cached_levels.clone();
+        let cached_c = cached_candles.clone();
         let bc = bc_tx.clone();
         let exec = exec_tx.clone();
         tokio::spawn(async move {
             while let Some(ev) = kline_rx.recv().await {
+                let candle = ev.kline.to_vp_candle("binance");
+                // Live chart update (in-progress candles included).
+                {
+                    let mut buf = cached_c.write().await;
+                    buf.retain(|c| c.time != candle.time);
+                    buf.push(candle.clone());
+                    buf.sort_by_key(|c| c.time);
+                    if buf.len() > 500 {
+                        let drain = buf.len() - 500;
+                        buf.drain(0..drain);
+                    }
+                }
+                let _ = bc.send(WsFrame::Candle { data: candle.clone() });
+
                 if !ev.kline.is_closed {
                     continue;
                 }
-                let candle = ev.kline.to_vp_candle();
                 let mut vp_w = vp.write().await;
                 vp_w.ingest_candle(candle.clone());
                 let levels = vp_w.all_levels();
@@ -212,19 +343,20 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // ---------- MCP calendar scraper (every 15 min) ----------
+    // ---------- MCP browser calendar scrape ----------
     {
         let mcp = Arc::new(mcp_client::McpClient::new(
             config.mcp_browser_url.clone(),
-            config.mcp_chelsea_url.clone().unwrap_or_default(),
+            config.mcp_browser_token.clone(),
         ));
         let bc = bc_tx.clone();
+        let st = status.clone();
+        let interval_secs = config.mcp_scrape_secs.max(60);
         tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(std::time::Duration::from_secs(900));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
             loop {
                 interval.tick().await;
-                match mcp.scrape_calendar().await {
+                match mcp.scrape_calendar(&st).await {
                     Ok(md) => {
                         let events = parse_calendar_markdown(&md);
                         info!("Calendar scraped: {} events", events.len());
@@ -232,7 +364,7 @@ async fn main() -> anyhow::Result<()> {
                             data: serde_json::json!({ "events": events }),
                         });
                     }
-                    Err(e) => warn!("Calendar scrape failed: {}", e),
+                    Err(e) => warn!("Calendar scrape failed: {e}"),
                 }
             }
         });
@@ -250,7 +382,7 @@ async fn main() -> anyhow::Result<()> {
             while let Some(candle) = exec_rx.recv().await {
                 let price = candle.close;
                 let lvls = levels.read().await.clone();
-                if !near_level(&lvls, price, proximity) {
+                if lvls.is_empty() || !near_level(&lvls, price, proximity) {
                     continue;
                 }
                 let cutoff = candle.time;
@@ -281,12 +413,15 @@ async fn main() -> anyhow::Result<()> {
                     "Execution trigger: {} @ {:.3} (strength {:.1}, kind {})",
                     side, price, best.strength, best.kind
                 );
-                match exec_mgr.execute(side, 0.01, price, &lvls[0]).await {
+                match exec_mgr
+                    .execute(side, 0.01, price, &lvls[0])
+                    .await
+                {
                     Ok(ev) => {
                         info!("Trade event: {:?}", ev);
                         let _ = bc.send(WsFrame::Trades { data: ev });
                     }
-                    Err(e) => warn!("Execution failed: {}", e),
+                    Err(e) => warn!("Execution failed: {e}"),
                 }
             }
         });
@@ -297,11 +432,14 @@ async fn main() -> anyhow::Result<()> {
         tx: bc_tx.clone(),
         subscriptions: Arc::new(dashmap::DashMap::new()),
         cached_levels: cached_levels.clone(),
+        cached_candles: cached_candles.clone(),
         vp: vp.clone(),
+        status: status.clone(),
+        config: config.clone(),
     };
     let app = ws_server::router(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
-    info!("Listening on 0.0.0.0:{}", config.port);
+    info!("Listening on 0.0.0.0:{} — dashboard at /", config.port);
     axum::serve(listener, app).await?;
 
     Ok(())

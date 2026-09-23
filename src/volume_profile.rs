@@ -1,4 +1,3 @@
-use anyhow::Result;
 use chrono::{Datelike, Duration, TimeZone, Utc};
 use chrono_tz::America::New_York;
 
@@ -122,11 +121,6 @@ impl VolumeProfileEngine {
         out
     }
 
-    /// Alias kept for the REST /levels endpoint in ws_server.rs.
-    pub fn all_levels_full(&self) -> Vec<VpLevels> {
-        self.all_levels()
-    }
-
     pub fn most_recent_week_start_utc(now_ms: i64) -> i64 {
         let now = Utc.timestamp_millis_opt(now_ms).single().unwrap_or_else(Utc::now);
         let local = now.with_timezone(&New_York);
@@ -142,8 +136,4 @@ impl VolumeProfileEngine {
         sunday.with_timezone(&Utc).timestamp_millis()
     }
 
-    pub fn previous_friday_close_utc(now_ms: i64) -> i64 {
-        let week_start = Self::most_recent_week_start_utc(now_ms);
-        week_start - 49 * 60 * 60 * 1000
-    }
 }

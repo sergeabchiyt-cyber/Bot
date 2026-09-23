@@ -4,7 +4,8 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         State,
     },
-    response::IntoResponse,
+    http::header,
+    response::{Html, IntoResponse, Response},
     routing::get,
     Json, Router,
 };
@@ -13,23 +14,37 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{broadcast, RwLock};
 use tracing::info;
 
-use crate::types::{VpLevels, WsFrame};
+use crate::config::Config;
+use crate::status::FeedStatus;
+use crate::types::{VpLevels, VpCandle, WsFrame};
 use crate::volume_profile::VolumeProfileEngine;
+
+const DASHBOARD: &str = include_str!("../static/index.html");
 
 #[derive(Clone)]
 pub struct AppState {
     pub tx: broadcast::Sender<WsFrame>,
     pub subscriptions: Arc<DashMap<String, Vec<String>>>,
     pub cached_levels: Arc<RwLock<Vec<VpLevels>>>,
+    pub cached_candles: Arc<RwLock<Vec<VpCandle>>>,
     pub vp: Arc<RwLock<VolumeProfileEngine>>,
+    pub status: FeedStatus,
+    pub config: Config,
 }
 
 pub fn router(state: AppState) -> Router {
     Router::new()
+        .route("/", get(dashboard))
         .route("/health", get(health))
         .route("/levels", get(levels_snapshot))
+        .route("/candles", get(candles_snapshot))
+        .route("/status", get(status_snapshot))
         .route("/ws", get(ws_handler))
         .with_state(state)
+}
+
+async fn dashboard() -> Html<&'static str> {
+    Html(DASHBOARD)
 }
 
 async fn health() -> &'static str {
@@ -38,7 +53,25 @@ async fn health() -> &'static str {
 
 async fn levels_snapshot(State(state): State<AppState>) -> Json<Vec<VpLevels>> {
     let vp = state.vp.read().await;
-    Json(vp.all_levels_full())
+    Json(vp.all_levels())
+}
+
+async fn candles_snapshot(State(state): State<AppState>) -> Json<Vec<VpCandle>> {
+    let candles = state.cached_candles.read().await;
+    Json(candles.clone())
+}
+
+async fn status_snapshot(State(state): State<AppState>) -> Response {
+    let body = serde_json::json!({
+        "status": state.status.snapshot(),
+        "venue": format!("{:?}", state.config.execution_venue()),
+        "version": env!("CARGO_PKG_VERSION"),
+    });
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(body),
+    )
+        .into_response()
 }
 
 async fn ws_handler(
@@ -60,9 +93,18 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
     let mut topics: Vec<String> = Vec::new();
     let mut subscribed = false;
+    let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(30));
 
     loop {
         tokio::select! {
+            _ = heartbeat.tick() => {
+                let json = serde_json::to_string(&WsFrame::Heartbeat).unwrap_or_default();
+                if sender.send(Message::Text(json.into())).await.is_err() {
+                    info!("WS session {} send failed", session_id);
+                    return;
+                }
+            }
+
             msg = receiver.next() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
@@ -72,7 +114,8 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                 topics = t;
                                 subscribed = true;
 
-                                // Replay cached levels (PW/PS/CW)
+                                // Replay cached state so the dashboard fills
+                                // instantly (levels + recent candles + status).
                                 if topics.iter().any(|x| x == "levels") {
                                     let cached = state.cached_levels.read().await;
                                     for lvl in cached.iter() {
@@ -82,6 +125,21 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                             return;
                                         }
                                     }
+                                }
+                                if topics.iter().any(|x| x == "candle") {
+                                    let cached = state.cached_candles.read().await;
+                                    for c in cached.iter() {
+                                        let frame = WsFrame::Candle { data: c.clone() };
+                                        let json = serde_json::to_string(&frame).unwrap_or_default();
+                                        if sender.send(Message::Text(json.into())).await.is_err() {
+                                            return;
+                                        }
+                                    }
+                                }
+                                let frame = WsFrame::Status { data: state.status.snapshot() };
+                                let json = serde_json::to_string(&frame).unwrap_or_default();
+                                if sender.send(Message::Text(json.into())).await.is_err() {
+                                    return;
                                 }
                             }
                         }
@@ -103,12 +161,18 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             WsFrame::Candle { .. } => "candle",
                             WsFrame::Bubbles { .. } => "bubbles",
                             WsFrame::Trades { .. } => "trades",
-                            WsFrame::Sentiment { .. } => "sentiment",
-                            WsFrame::Transcript { .. } => "transcript",
                             WsFrame::Calendar { .. } => "calendar",
-                            WsFrame::Learn { .. } => "learn",
-                            WsFrame::AudioChunk { .. } => "audio_chunk",
-                            _ => continue,
+                            WsFrame::Status { .. } => "status",
+                            WsFrame::Heartbeat => {
+                                // keepalive for proxies — always forwarded
+                                let json = serde_json::to_string(&frame).unwrap_or_default();
+                                if sender.send(Message::Text(json.into())).await.is_err() {
+                                    info!("WS session {} send failed", session_id);
+                                    return;
+                                }
+                                continue;
+                            }
+                            WsFrame::Subscribe { .. } => continue,
                         };
                         if !topics.iter().any(|t| t == topic) { continue; }
 
