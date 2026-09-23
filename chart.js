@@ -5,9 +5,8 @@
  * Bubbles rendered via custom series primitive (bubbles.js)
  * ============================================================ */
 
-const ENGINE = window.ENGINE_URL || (location.protocol.startsWith("http") ? location.origin : "https://engine-southeastasia-sng-main.onrender.com");
-const BACKEND_WS = ENGINE.replace(/^http/, "ws") + "/ws";
-const BACKEND_REST = ENGINE + "/levels";
+const BACKEND_WS = "wss://engine-southeastasia-sng-main.onrender.com/ws";
+const BACKEND_REST = "https://engine-southeastasia-sng-main.onrender.com/levels";
 
 // ---------- Level visibility policy ----------
 function levelVisible(windowKey, kind) {
@@ -18,7 +17,19 @@ function levelVisible(windowKey, kind) {
 // ---------- Chart bootstrap ----------
 const chartEl = document.getElementById("chart");
 
+if (typeof LightweightCharts === "undefined") {
+  console.error("lightweight-charts failed to load");
+}
+
+function chartSize() {
+  return {
+    width: Math.max(1, chartEl.clientWidth),
+    height: Math.max(1, chartEl.clientHeight),
+  };
+}
+
 const chart = LightweightCharts.createChart(chartEl, {
+  ...chartSize(),
   layout: {
     background: { color: "#0B0E11" },
     textColor: "#7D8590",
@@ -99,17 +110,17 @@ function upsertPriceLine(key, price, color, title, dashed = false) {
 // Colour map per window + kind. Every level has its own colour.
 const LEVEL_STYLE = {
   PW: {
-    poc: { color: "#facc15", title: "PW PoC", dashed: false },
-    vah: { color: "#facc15", title: "PW VaH", dashed: true },
-    val: { color: "#facc15", title: "PW VaL", dashed: true },
+    poc: { color: "#F0B90B", title: "PW PoC", dashed: false },
+    vah: { color: "#26A69A", title: "PW VaH", dashed: false },
+    val: { color: "#EF5350", title: "PW VaL", dashed: false },
   },
   PS: {
-    poc: { color: "#fb923c", title: "PS PoC", dashed: false },
+    poc: { color: "#58A6FF", title: "PS PoC", dashed: false },
   },
   CW: {
-    poc: { color: "#22d3ee", title: "CW PoC", dashed: false },
-    vah: { color: "#22d3ee", title: "CW VaH", dashed: true },
-    val: { color: "#22d3ee", title: "CW VaL", dashed: true },
+    poc: { color: "#A371F7", title: "CW PoC", dashed: true },
+    vah: { color: "#F778BA", title: "CW VaH", dashed: true },
+    val: { color: "#22D3EE", title: "CW VaL", dashed: true },
   },
 };
 
@@ -136,10 +147,10 @@ const EVENT_STYLE =
   typeof OrderFlowBubblesPrimitive !== "undefined"
     ? OrderFlowBubblesPrimitive.EVENT_STYLE
     : {
-        BUY_BUBBLE:  { color: "#22c55e", label: "BUY"   },
-        SELL_BUBBLE: { color: "#ef4444", label: "SELL"  },
-        ABS_BUY:     { color: "#3b82f6", label: "ABS-B" },
-        ABS_SELL:    { color: "#f97316", label: "ABS-S" },
+        BUY_BUBBLE:  { color: "#26A69A", label: "BUY"   },
+        SELL_BUBBLE: { color: "#EF5350", label: "SELL"  },
+        ABS_BUY:     { color: "#F0B90B", label: "ABS-B" },
+        ABS_SELL:    { color: "#F0B90B", label: "ABS-S" },
       };
 
 let bubblesPrimitive;
@@ -267,7 +278,9 @@ function renderBubbleRow(event) {
   if (bubbleRows.length === 0) list.innerHTML = "";
 
   const style = EVENT_STYLE[event.kind] || EVENT_STYLE.BUY_BUBBLE;
-  const time = new Date(event.timestamp).toLocaleTimeString([], {
+  const ts = event.timestamp;
+  const timeMs = typeof ts === "number" && ts < 1e12 ? ts * 1000 : ts;
+  const time = new Date(timeMs).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -292,9 +305,19 @@ function renderBubbleRow(event) {
 }
 
 // ---------- Calendar ----------
-function renderCalendar(events) {
+function candleTimeSec(t) {
+  if (typeof t !== "number" || !isFinite(t)) return null;
+  return t > 1e12 ? Math.floor(t / 1000) : Math.floor(t);
+}
+
+function renderCalendar(payload) {
   const list = document.getElementById("calendar-list");
   const count = document.getElementById("calendar-count");
+  const events = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload && payload.events)
+      ? payload.events
+      : [];
   count.textContent = events.length;
 
   if (!events.length) {
@@ -351,12 +374,34 @@ function setStatus(text) {
 // ---------- Backend WebSocket ----------
 let backendWs;
 let backendReconnect = 1000;
+let reconnectTimer = null;
+let opening = false;
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  setStatus("reconnecting");
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectBackend();
+  }, backendReconnect);
+  backendReconnect = Math.min(backendReconnect * 2, 30000);
+}
 
 function connectBackend() {
+  if (opening) return;
+  opening = true;
+  if (backendWs && (backendWs.readyState === WebSocket.OPEN || backendWs.readyState === WebSocket.CONNECTING)) {
+    opening = false;
+    return;
+  }
+
   backendWs = new WebSocket(BACKEND_WS);
 
   backendWs.onopen = () => {
+    opening = false;
+    backendReconnect = 1000;
     console.log("Backend WS connected");
+    setStatus("live");
     backendWs.send(
       JSON.stringify({
         type: "subscribe",
@@ -374,16 +419,21 @@ function connectBackend() {
     }
 
     switch (frame.type) {
+      case "heartbeat":
+        break;
       case "levels": {
         const l = frame.data;
+        if (!l || !l.window) break;
         drawLevelsForWindow(l);
         updateLevelState(l);
         break;
       }
       case "candle": {
         const c = frame.data;
+        const time = candleTimeSec(c && c.time);
+        if (time == null) break;
         candleSeries.update({
-          time: Math.floor(c.time / 1000),
+          time,
           open: c.open,
           high: c.high,
           low: c.low,
@@ -393,10 +443,10 @@ function connectBackend() {
         break;
       }
       case "bubbles":
-        addBubble(frame.data);
+        if (frame.data) addBubble(frame.data);
         break;
       case "sentiment":
-        updateSentiment(frame.data);
+        updateSentiment(frame.data || {});
         break;
       case "calendar":
         renderCalendar(frame.data);
@@ -405,12 +455,12 @@ function connectBackend() {
   };
 
   backendWs.onclose = () => {
-    setStatus("reconnecting");
-    setTimeout(connectBackend, backendReconnect);
-    backendReconnect = Math.min(backendReconnect * 2, 30000);
+    opening = false;
+    scheduleReconnect();
   };
 
   backendWs.onerror = (e) => {
+    opening = false;
     setStatus("ws error");
     console.error("Backend WS error:", e);
   };
@@ -453,14 +503,13 @@ document.querySelectorAll(".tf").forEach((btn) => {
 // ---------- Boot ----------
 setStatus("initializing");
 loadHistory().then(() => {
-  setStatus("live");
   connectBackend();
   fetchLevels();
 });
 
 // ---------- Resize ----------
 const ro = new ResizeObserver(() => {
-  chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
+  chart.applyOptions(chartSize());
 });
 ro.observe(chartEl);
 

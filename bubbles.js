@@ -10,10 +10,10 @@
   "use strict";
 
   const EVENT_STYLE = {
-    BUY_BUBBLE:  { color: "#22c55e", label: "BUY"   },
-    SELL_BUBBLE: { color: "#ef4444", label: "SELL"  },
-    ABS_BUY:     { color: "#3b82f6", label: "ABS-B" },
-    ABS_SELL:    { color: "#f97316", label: "ABS-S" },
+    BUY_BUBBLE:  { color: "#26A69A", label: "BUY"   },
+    SELL_BUBBLE: { color: "#EF5350", label: "SELL"  },
+    ABS_BUY:     { color: "#F0B90B", label: "ABS-B" },
+    ABS_SELL:    { color: "#F0B90B", label: "ABS-S" },
   };
 
   function eventTimeToSeconds(ev) {
