@@ -6,7 +6,7 @@ use tokio::sync::broadcast;
 use tracing::debug;
 
 /// Tracks the liveness of every upstream feed and broadcasts changes
-/// as `WsFrame::Status` so the dashboard can show what is connected.
+/// as `WsFrame::Status` so clients can see what is connected.
 #[derive(Clone)]
 pub struct FeedStatus {
     inner: Arc<FeedStatusInner>,
