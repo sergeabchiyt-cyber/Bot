@@ -239,7 +239,7 @@ pub async fn run_bitget_stream(tx: mpsc::Sender<AggTrade>, symbol: String, statu
                 while let Some(msg) = read.next().await {
                     match msg {
                         Ok(Message::Text(text)) => {
-                            if text == "pong" {
+                            if text.as_str() == "pong" {
                                 continue;
                             }
                             status.mark_msg("bitget");
