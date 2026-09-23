@@ -17,7 +17,19 @@ function levelVisible(windowKey, kind) {
 // ---------- Chart bootstrap ----------
 const chartEl = document.getElementById("chart");
 
+if (typeof LightweightCharts === "undefined") {
+  console.error("lightweight-charts failed to load");
+}
+
+function chartSize() {
+  return {
+    width: Math.max(1, chartEl.clientWidth),
+    height: Math.max(1, chartEl.clientHeight),
+  };
+}
+
 const chart = LightweightCharts.createChart(chartEl, {
+  ...chartSize(),
   layout: {
     background: { color: "#0B0E11" },
     textColor: "#7D8590",
@@ -266,7 +278,9 @@ function renderBubbleRow(event) {
   if (bubbleRows.length === 0) list.innerHTML = "";
 
   const style = EVENT_STYLE[event.kind] || EVENT_STYLE.BUY_BUBBLE;
-  const time = new Date(event.timestamp).toLocaleTimeString([], {
+  const ts = event.timestamp;
+  const timeMs = typeof ts === "number" && ts < 1e12 ? ts * 1000 : ts;
+  const time = new Date(timeMs).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -291,9 +305,19 @@ function renderBubbleRow(event) {
 }
 
 // ---------- Calendar ----------
-function renderCalendar(events) {
+function candleTimeSec(t) {
+  if (typeof t !== "number" || !isFinite(t)) return null;
+  return t > 1e12 ? Math.floor(t / 1000) : Math.floor(t);
+}
+
+function renderCalendar(payload) {
   const list = document.getElementById("calendar-list");
   const count = document.getElementById("calendar-count");
+  const events = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload && payload.events)
+      ? payload.events
+      : [];
   count.textContent = events.length;
 
   if (!events.length) {
@@ -350,12 +374,34 @@ function setStatus(text) {
 // ---------- Backend WebSocket ----------
 let backendWs;
 let backendReconnect = 1000;
+let reconnectTimer = null;
+let opening = false;
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  setStatus("reconnecting");
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectBackend();
+  }, backendReconnect);
+  backendReconnect = Math.min(backendReconnect * 2, 30000);
+}
 
 function connectBackend() {
+  if (opening) return;
+  opening = true;
+  if (backendWs && (backendWs.readyState === WebSocket.OPEN || backendWs.readyState === WebSocket.CONNECTING)) {
+    opening = false;
+    return;
+  }
+
   backendWs = new WebSocket(BACKEND_WS);
 
   backendWs.onopen = () => {
+    opening = false;
+    backendReconnect = 1000;
     console.log("Backend WS connected");
+    setStatus("live");
     backendWs.send(
       JSON.stringify({
         type: "subscribe",
@@ -373,16 +419,21 @@ function connectBackend() {
     }
 
     switch (frame.type) {
+      case "heartbeat":
+        break;
       case "levels": {
         const l = frame.data;
+        if (!l || !l.window) break;
         drawLevelsForWindow(l);
         updateLevelState(l);
         break;
       }
       case "candle": {
         const c = frame.data;
+        const time = candleTimeSec(c && c.time);
+        if (time == null) break;
         candleSeries.update({
-          time: Math.floor(c.time / 1000),
+          time,
           open: c.open,
           high: c.high,
           low: c.low,
@@ -392,10 +443,10 @@ function connectBackend() {
         break;
       }
       case "bubbles":
-        addBubble(frame.data);
+        if (frame.data) addBubble(frame.data);
         break;
       case "sentiment":
-        updateSentiment(frame.data);
+        updateSentiment(frame.data || {});
         break;
       case "calendar":
         renderCalendar(frame.data);
@@ -404,12 +455,12 @@ function connectBackend() {
   };
 
   backendWs.onclose = () => {
-    setStatus("reconnecting");
-    setTimeout(connectBackend, backendReconnect);
-    backendReconnect = Math.min(backendReconnect * 2, 30000);
+    opening = false;
+    scheduleReconnect();
   };
 
   backendWs.onerror = (e) => {
+    opening = false;
     setStatus("ws error");
     console.error("Backend WS error:", e);
   };
@@ -452,14 +503,13 @@ document.querySelectorAll(".tf").forEach((btn) => {
 // ---------- Boot ----------
 setStatus("initializing");
 loadHistory().then(() => {
-  setStatus("live");
   connectBackend();
   fetchLevels();
 });
 
 // ---------- Resize ----------
 const ro = new ResizeObserver(() => {
-  chart.applyOptions({ width: chartEl.clientWidth, height: chartEl.clientHeight });
+  chart.applyOptions(chartSize());
 });
 ro.observe(chartEl);
 
