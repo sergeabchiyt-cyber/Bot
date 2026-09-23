@@ -1,6 +1,6 @@
 [package]
 name = "xauusd-engine"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.94"
 
@@ -16,9 +16,5 @@ chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-rill-ml = { version = "1.5", features = ["serde"] }
-tokio-stream = "0.1"
 dashmap = "6"
 anyhow = "1"
-thiserror = "2"
-dotenvy = "0.15"

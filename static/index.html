@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XAUUSD OrderFlow Engine</title>
+<style>
+  :root {
+    --bg: #0b0e14; --panel: #11151f; --panel2: #161b28; --line: #232a3b;
+    --text: #d7dce6; --dim: #7b8499;
+    --green: #22c55e; --red: #ef4444; --blue: #3b82f6; --orange: #f97316;
+    --pw: #facc15; --ps: #fb923c; --cw: #22d3ee;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font: 13px/1.45 "SF Mono", ui-monospace, Menlo, Consolas, monospace; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 10; }
+  .logo { font-weight: 700; letter-spacing: 1px; color: var(--cw); }
+  .price { font-size: 22px; font-weight: 700; }
+  .price.up { color: var(--green); } .price.down { color: var(--red); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+  .chip { padding: 3px 9px; border-radius: 20px; border: 1px solid var(--line); background: var(--panel2); color: var(--dim); font-size: 11px; white-space: nowrap; }
+  .chip.connected { color: #0b0e14; background: var(--green); border-color: var(--green); font-weight: 700; }
+  .chip.connecting { color: #0b0e14; background: var(--pw); border-color: var(--pw); }
+  .chip.off, .chip.disconnected { color: var(--dim); }
+  .chip.error { color: #0b0e14; background: var(--red); border-color: var(--red); }
+  .wsdot { width: 9px; height: 9px; border-radius: 50%; background: var(--red); display: inline-block; }
+  .wsdot.on { background: var(--green); }
+  main { display: grid; grid-template-columns: 1fr 340px; gap: 10px; padding: 10px; }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .panel h2 { font-size: 11px; letter-spacing: 1.5px; color: var(--dim); padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--panel2); display: flex; align-items: center; gap: 8px; }
+  .panel h2 .swatches { margin-left: auto; display: flex; gap: 4px; }
+  .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  #chartwrap { position: relative; }
+  canvas { display: block; width: 100%; height: 520px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--dim); }
+  .stat { padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel2); }
+  .stat b { color: var(--text); }
+  .side { display: flex; flex-direction: column; gap: 10px; }
+  .list { max-height: 300px; overflow-y: auto; }
+  .row { display: flex; gap: 8px; align-items: baseline; padding: 6px 12px; border-bottom: 1px solid #1a2030; }
+  .row .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; align-self: center; }
+  .row .grow { flex: 1; min-width: 0; }
+  .row .sub { color: var(--dim); font-size: 11px; }
+  .row b.buy { color: var(--green); } .row b.sell { color: var(--red); }
+  .empty { color: var(--dim); padding: 14px 12px; font-size: 12px; }
+  .imp-High { color: var(--red); } .imp-Medium { color: var(--orange); } .imp-Low { color: var(--pw); } .imp-Holiday { color: var(--dim); }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--line); font-size: 11px; color: var(--dim); }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">XAUUSD · ORDERFLOW ENGINE</span>
+  <span class="price" id="price">—</span>
+  <span class="sub" id="priceSrc" style="color:var(--dim);font-size:11px"></span>
+  <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
+    <span class="wsdot" id="wsdot"></span><span id="wslabel" style="color:var(--dim);font-size:11px">disconnected</span>
+  </span>
+  <div class="chips" id="chips"></div>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>GOLD · 15M CANDLES + VOLUME PROFILE LEVELS
+      <span class="swatches">
+        <span class="sw" style="background:var(--pw)" title="PW"></span>
+        <span class="sw" style="background:var(--ps)" title="PS"></span>
+        <span class="sw" style="background:var(--cw)" title="CW"></span>
+      </span>
+    </h2>
+    <div id="chartwrap"><canvas id="chart"></canvas></div>
+    <div class="legend">
+      <span><span class="sw" style="background:var(--green)"></span> BUY bubble</span>
+      <span><span class="sw" style="background:var(--red)"></span> SELL bubble</span>
+      <span><span class="sw" style="background:var(--blue)"></span> ABS buy (absorption)</span>
+      <span><span class="sw" style="background:var(--orange)"></span> ABS sell (absorption)</span>
+      <span><span class="sw" style="background:var(--pw)"></span> PW PoC/VaH/VaL</span>
+      <span><span class="sw" style="background:var(--ps)"></span> PS</span>
+      <span><span class="sw" style="background:var(--cw)"></span> CW</span>
+    </div>
+    <div class="stats" id="stats"></div>
+  </section>
+
+  <aside class="side">
+    <div class="panel">
+      <h2>ORDER FLOW · BUBBLES
+        <span class="swatches">
+          <span class="sw" style="background:var(--green)"></span>
+          <span class="sw" style="background:var(--red)"></span>
+          <span class="sw" style="background:var(--blue)"></span>
+          <span class="sw" style="background:var(--orange)"></span>
+        </span>
+      </h2>
+      <div class="list" id="bubbles"><div class="empty">waiting for flow…</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>TRADES / SIGNALS</h2>
+      <div class="list" id="trades"><div class="empty">no executions yet</div></div>
+    </div>
+
+    <div class="panel">
+      <h2>ECONOMIC CALENDAR <span style="margin-left:auto;color:var(--dim)" id="calCount"></span></h2>
+      <div class="list" id="calendar"><div class="empty">MCP browser scrape pending…</div></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+"use strict";
+const KIND_COLORS = {
+  BUY_BUBBLE: "#22c55e",
+  SELL_BUBBLE: "#ef4444",
+  ABS_BUY: "#3b82f6",
+  ABS_SELL: "#f97316",
+};
+const WINDOW_COLORS = { PW: "#facc15", PS: "#fb923c", CW: "#22d3ee" };
+const MAX_BUBBLES = 300, MAX_TRADES = 60, MAX_EVENTS = 80;
+
+const state = {
+  candles: new Map(),   // time -> candle (binance preferred)
+  levels: [],           // VpLevels
+  bubbles: [],          // newest last
+  trades: [],
+  events: [],
+  feeds: {},
+  lastPrice: null, prevPrice: null, lastSource: "",
+  lastFrame: Date.now(),
+};
+
+// ---------------- websocket ----------------
+let sock = null;
+function connect() {
+  const proto = location.protocol === "https:" ? "wss://" : "ws://";
+  sock = new WebSocket(proto + location.host + "/ws");
+  sock.onopen = () => {
+    setWs(true);
+    send({ type: "subscribe", topics: ["candle", "levels", "bubbles", "trades", "calendar", "status"] });
+    fetch("/candles").then(r => r.json()).then(rows => {
+      (rows || []).forEach(c => addCandle(c));
+      draw();
+    }).catch(() => {});
+  };
+  sock.onmessage = (e) => {
+    state.lastFrame = Date.now();
+    let f; try { f = JSON.parse(e.data); } catch { return; }
+    switch (f.type) {
+      case "candle":   addCandle(f.data); draw(); break;
+      case "levels":   addLevel(f.data); draw(); break;
+      case "bubbles":  addBubble(f.data); draw(); break;
+      case "trades":   addTrade(f.data); break;
+      case "calendar": setCalendar(f.data); break;
+      case "status":   state.feeds = (f.data && f.data.feeds) || {}; renderChips(); break;
+      case "heartbeat": break;
+    }
+  };
+  sock.onclose = () => { setWs(false); setTimeout(connect, 3000); };
+  sock.onerror = () => { try { sock.close(); } catch {} };
+}
+function setWs(on) {
+  document.getElementById("wsdot").className = "wsdot" + (on ? " on" : "");
+  document.getElementById("wslabel").textContent = on ? "live" : "disconnected";
+}
+function send(o) { if (sock && sock.readyState === 1) sock.send(JSON.stringify(o)); }
+
+// watchdog: no frames for 90s → reconnect
+setInterval(() => {
+  if (sock && Date.now() - state.lastFrame > 90000) { try { sock.close(); } catch {} }
+}, 15000);
+
+// status backup poll
+setInterval(() => fetch("/status").then(r => r.json())
+  .then(s => { if (s && s.status) { state.feeds = s.status.feeds || {}; renderChips(); } })
+  .catch(() => {}), 10000);
+
+// ---------------- data handlers ----------------
+function addCandle(c) {
+  if (!c || !c.time || !c.close) return;
+  const prev = state.candles.get(c.time);
+  if (prev && c.source !== "binance" && prev.source === "binance") return; // binance is the chart source
+  state.candles.set(c.time, c);
+  state.prevPrice = state.lastPrice && state.lastPrice !== c.close ? state.lastPrice : state.prevPrice;
+  state.lastPrice = c.close;
+  state.lastSource = c.source || "";
+  const el = document.getElementById("price");
+  const up = state.prevPrice == null || c.close >= state.prevPrice;
+  el.textContent = "$" + Number(c.close).toFixed(2);
+  el.className = "price " + (up ? "up" : "down");
+  document.getElementById("priceSrc").textContent = (state.lastSource || "") + " · 15m";
+  renderStats();
+}
+function addLevel(l) {
+  const i = state.levels.findIndex(x => x.window === l.window);
+  if (i >= 0) state.levels[i] = l; else state.levels.push(l);
+  state.levels.sort((a, b) => "PWCWPS".indexOf(a.window[0]) - "PWCWPS".indexOf(b.window[0]));
+}
+function addBubble(b) {
+  state.bubbles.push(b);
+  if (state.bubbles.length > MAX_BUBBLES) state.bubbles.splice(0, state.bubbles.length - MAX_BUBBLES);
+  renderBubbles();
+}
+function addTrade(t) {
+  state.trades.unshift(t);
+  if (state.trades.length > MAX_TRADES) state.trades.pop();
+  renderTrades();
+}
+function setCalendar(d) {
+  state.events = (d && d.events) || [];
+  renderCalendar();
+}
+
+// ---------------- renders ----------------
+function fmtAge(ts) {
+  const s = Math.max(0, (Date.now() - ts) / 1000) | 0;
+  if (s < 60) return s + "s";
+  if (s < 3600) return (s / 60 | 0) + "m";
+  return (s / 3600 | 0) + "h";
+}
+function fmtK(n) { return "$" + (Math.abs(n) >= 1000 ? (n / 1000).toFixed(0) + "k" : n.toFixed(0)); }
+
+function renderBubbles() {
+  const el = document.getElementById("bubbles");
+  if (!state.bubbles.length) return;
+  el.innerHTML = "";
+  [...state.bubbles].reverse().slice(0, 80).forEach(b => {
+    const color = KIND_COLORS[b.kind] || "#888";
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML =
+      '<span class="dot" style="background:' + color + '"></span>' +
+      '<span class="grow"><b class="' + (b.kind.includes("BUY") && !b.kind.includes("SELL") ? "buy" : (b.kind.includes("SELL") && !b.kind.includes("BUY") ? "sell" : "")) + '" style="color:' + color + '">' + b.kind + '</b>' +
+      '<div class="sub">level ' + Number(b.level).toFixed(2) + ' · ' + fmtK(b.strength) + ' · ' + (b.exchange || "?") + '</div></span>' +
+      '<span class="sub">' + fmtAge(b.timestamp) + ' ago</span>';
+    el.appendChild(row);
+  });
+}
+
+function renderTrades() {
+  const el = document.getElementById("trades");
+  if (!state.trades.length) return;
+  el.innerHTML = "";
+  state.trades.slice(0, 30).forEach(t => {
+    const buy = t.side === "buy";
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML =
+      '<span class="dot" style="background:' + (buy ? "#22c55e" : "#ef4444") + '"></span>' +
+      '<span class="grow"><b class="' + (buy ? "buy" : "sell") + '">' + (t.side || "?").toUpperCase() + '</b>' +
+      '<div class="sub">' + (t.status || "") + " · " + (t.symbol || "") + ' @ ' + (t.entry ? Number(t.entry).toFixed(2) : "—") + '</div></span>' +
+      '<span class="sub">sl ' + (t.sl ? Number(t.sl).toFixed(2) : "—") + '<br>tp ' + (t.tp ? Number(t.tp).toFixed(2) : "—") + '</span>';
+    el.appendChild(row);
+  });
+}
+
+function renderCalendar() {
+  const el = document.getElementById("calendar");
+  document.getElementById("calCount").textContent = state.events.length ? state.events.length + " events" : "";
+  if (!state.events.length) return;
+  el.innerHTML = "";
+  state.events.slice(0, MAX_EVENTS).forEach(ev => {
+    const impact = ev.impact || "Low";
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML =
+      '<span class="grow"><b class="imp-' + impact.replace(/[^A-Za-z]/g, "") + '">' + impact + '</b>' +
+      '<div class="sub">' + (ev.currency || "") + " · " + (ev.event || "") + '</div></span>' +
+      '<span class="sub">' + (ev.time || "") + '</span>';
+    el.appendChild(row);
+  });
+}
+
+function renderChips() {
+  const el = document.getElementById("chips");
+  const names = Object.keys(state.feeds).sort();
+  if (!names.length) return;
+  el.innerHTML = "";
+  names.forEach(n => {
+    const f = state.feeds[n];
+    let cls = "off";
+    if (String(f.state).startsWith("error")) cls = "error";
+    else if (f.state === "connected") cls = "connected";
+    else if (f.state === "connecting") cls = "connecting";
+    const stale = f.last_msg && Date.now() - f.last_msg > 120000;
+    const chip = document.createElement("span");
+    chip.className = "chip " + cls;
+    chip.title = "msgs: " + f.msgs + " · last: " + (f.last_msg ? new Date(f.last_msg).toLocaleTimeString() : "—");
+    chip.textContent = n + (stale && cls === "connected" ? " ⚠" : "");
+    el.appendChild(chip);
+  });
+  renderStats();
+}
+
+function renderStats() {
+  const cutoff = Date.now() - 300000;
+  const recent = state.bubbles.filter(b => b.timestamp >= cutoff);
+  const count = (k) => recent.filter(b => b.kind === k).length;
+  const kinds = ["BUY_BUBBLE", "SELL_BUBBLE", "ABS_BUY", "ABS_SELL"];
+  const chips = kinds.map(k =>
+    '<span class="stat"><b style="color:' + KIND_COLORS[k] + '">' + k + '</b> ' + count(k) + '</span>').join("");
+  document.getElementById("stats").innerHTML =
+    '<span class="stat">candles <b>' + state.candles.size + '</b></span>' +
+    '<span class="stat">levels <b>' + state.levels.length + '</b></span>' +
+    '<span class="stat">bubbles/5m ' + chips + '</span>';
+}
+
+// ---------------- chart ----------------
+const canvas = document.getElementById("chart");
+const ctx = canvas.getContext("2d");
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  const r = canvas.getBoundingClientRect();
+  canvas.width = r.width * dpr; canvas.height = r.height * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  draw();
+}
+window.addEventListener("resize", resize);
+
+function draw() {
+  const r = canvas.getBoundingClientRect();
+  const W = r.width, H = r.height;
+  const padR = 64, padB = 22, padT = 10;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = "#0b0e14"; ctx.fillRect(0, 0, W, H);
+
+  const candles = [...state.candles.values()].sort((a, b) => a.time - b.time).slice(-140);
+  if (!candles.length) {
+    ctx.fillStyle = "#7b8499"; ctx.font = "13px monospace";
+    ctx.fillText("waiting for Binance chart data…", 20, H / 2);
+    return;
+  }
+
+  let lo = Infinity, hi = -Infinity;
+  candles.forEach(c => { lo = Math.min(lo, c.low); hi = Math.max(hi, c.high); });
+  state.levels.forEach(l => [l.poc, l.vah, l.val].forEach(v => {
+    if (v > candles[0].low - 20 && v < candles[candles.length - 1].close + 20) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  }));
+  const span = (hi - lo) || 1; lo -= span * 0.04; hi += span * 0.04;
+  const plotW = W - padR, plotH = H - padB - padT;
+  const x = i => padR * 0 + (i + 0.5) * (plotW / candles.length);
+  const y = p => padT + (hi - p) / (hi - lo) * plotH;
+
+  // grid + price axis
+  ctx.strokeStyle = "#161b28"; ctx.fillStyle = "#7b8499"; ctx.font = "10px monospace";
+  for (let g = 0; g <= 5; g++) {
+    const p = lo + (hi - lo) * g / 5, yy = y(p);
+    ctx.beginPath(); ctx.moveTo(0, yy); ctx.lineTo(plotW, yy); ctx.stroke();
+    ctx.fillText(p.toFixed(2), plotW + 6, yy + 3);
+  }
+  // time axis
+  candles.forEach((c, i) => {
+    if (i % Math.ceil(candles.length / 8) !== 0) return;
+    ctx.fillText(new Date(c.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), x(i) - 20, H - 6);
+  });
+
+  // levels
+  state.levels.forEach(l => {
+    const color = WINDOW_COLORS[l.window] || "#888";
+    [[l.poc, false], [l.vah, true], [l.val, true]].forEach(([v, dashed]) => {
+      if (v < lo || v > hi) return;
+      ctx.strokeStyle = color; ctx.globalAlpha = dashed ? 0.45 : 0.9;
+      ctx.setLineDash(dashed ? [5, 5] : []);
+      ctx.beginPath(); ctx.moveTo(0, y(v)); ctx.lineTo(plotW, y(v)); ctx.stroke();
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    });
+    if (l.poc >= lo && l.poc <= hi) {
+      ctx.fillStyle = color; ctx.font = "bold 10px monospace";
+      ctx.fillText(l.window + " PoC " + l.poc.toFixed(2), 6, y(l.poc) - 4);
+    }
+  });
+
+  // candles
+  const cw = Math.max(2, plotW / candles.length * 0.62);
+  candles.forEach((c, i) => {
+    const up = c.close >= c.open;
+    ctx.strokeStyle = up ? "#22c55e" : "#ef4444";
+    ctx.fillStyle = up ? "#16a34a" : "#dc2626";
+    const cx = x(i);
+    ctx.beginPath(); ctx.moveTo(cx, y(c.high)); ctx.lineTo(cx, y(c.low)); ctx.stroke();
+    const yo = y(c.open), yc = y(c.close);
+    ctx.fillRect(cx - cw / 2, Math.min(yo, yc), cw, Math.max(1, Math.abs(yc - yo)));
+    ctx.strokeRect(cx - cw / 2, Math.min(yo, yc), cw, Math.max(1, Math.abs(yc - yo)));
+  });
+
+  // bubbles overlaid on their level & time
+  const t0 = candles[0].time, tN = candles[candles.length - 1].time, dt = candles.length > 1 ? (candles[1].time - candles[0].time) : 900000;
+  state.bubbles.forEach(b => {
+    if (b.timestamp < t0 - dt || b.timestamp > tN + dt) return;
+    if (b.level < lo || b.level > hi) return;
+    const idx = Math.min(candles.length - 1, Math.max(0, Math.round((b.timestamp - t0) / dt)));
+    const ageMin = (Date.now() - b.timestamp) / 60000;
+    const alpha = Math.max(0.25, 1 - ageMin / 12);
+    const rad = Math.min(15, 4 + Math.sqrt(Math.abs(b.strength)) / 28);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = KIND_COLORS[b.kind] || "#888";
+    ctx.beginPath(); ctx.arc(x(idx), y(b.level), rad, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "#0b0e14"; ctx.stroke();
+  });
+
+  // last price line + tag
+  const last = candles[candles.length - 1].close;
+  if (last >= lo && last <= hi) {
+    ctx.strokeStyle = "#d7dce6"; ctx.setLineDash([2, 4]);
+    ctx.beginPath(); ctx.moveTo(0, y(last)); ctx.lineTo(plotW, y(last)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#d7dce6";
+    ctx.fillRect(plotW + 2, y(last) - 8, padR - 4, 16);
+    ctx.fillStyle = "#0b0e14"; ctx.font = "bold 10px monospace";
+    ctx.fillText(last.toFixed(2), plotW + 6, y(last) + 3);
+  }
+}
+
+connect();
+resize();
+setInterval(draw, 5000); // redraw periodically so bubbles fade/age
+</script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.0"
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release
+      - name: Smoke test (boot + endpoints)
+        run: |
+          ./target/release/xauusd-engine &
+          PID=$!
+          sleep 4
+          curl -sf http://127.0.0.1:3000/health && echo " <- /health ok"
+          curl -sf http://127.0.0.1:3000/status && echo " <- /status ok"
+          curl -sf http://127.0.0.1:3000/ | grep -q "ORDERFLOW" && echo " <- dashboard served"
+          kill $PID

@@ -1,43 +1,81 @@
 use serde::{Deserialize, Serialize};
 
 // =====================================================================
-// Binance market data
+// Normalized trade tick (all order flow sources funnel into this)
 // =====================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AggTrade {
-    #[serde(rename = "e")]
+    #[serde(rename = "e", default)]
     pub event_type: String,
-    #[serde(rename = "E")]
+    #[serde(rename = "E", default)]
     pub event_time: i64,
-    #[serde(rename = "s")]
+    #[serde(rename = "s", default)]
     pub symbol: String,
-    #[serde(rename = "a")]
+    #[serde(rename = "a", default)]
     pub agg_id: u64,
     #[serde(rename = "p")]
     pub price: String,
     #[serde(rename = "q")]
     pub quantity: String,
-    #[serde(rename = "f")]
+    #[serde(rename = "f", default)]
     pub first_trade_id: u64,
-    #[serde(rename = "l")]
+    #[serde(rename = "l", default)]
     pub last_trade_id: u64,
     #[serde(rename = "T")]
     pub trade_time: i64,
     #[serde(rename = "m")]
     pub is_buyer_maker: bool,
-    #[serde(rename = "st")]
+    #[serde(rename = "st", skip_serializing, default)]
     pub symbol_type: Option<i32>,
 
     #[serde(default = "default_exchange")]
     pub exchange: String,
+    /// False for feeds that publish no taker side (quote ticks).
+    /// Those count toward volume but never toward delta, so a
+    /// direction-less feed cannot fabricate directional flow.
+    #[serde(default = "default_true")]
+    pub has_flow_side: bool,
 }
 
 fn default_exchange() -> String {
     "binance".into()
 }
 
+fn default_true() -> bool {
+    true
+}
+
 impl AggTrade {
+    /// Constructor used by the exchange adapters (Bybit/OKX/Bitset/Gate/Kraken/...).
+    /// `taker_buy` = the aggressive side was the buyer.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        exchange: &str,
+        symbol: &str,
+        price: &str,
+        qty: &str,
+        ts: i64,
+        taker_buy: bool,
+        has_flow_side: bool,
+    ) -> Self {
+        Self {
+            event_type: "trade".into(),
+            event_time: ts,
+            symbol: symbol.into(),
+            agg_id: 0,
+            price: price.into(),
+            quantity: qty.into(),
+            first_trade_id: 0,
+            last_trade_id: 0,
+            trade_time: ts,
+            is_buyer_maker: !taker_buy,
+            symbol_type: None,
+            exchange: exchange.into(),
+            has_flow_side,
+        }
+    }
+
     pub fn price_f64(&self) -> f64 {
         self.price.parse().unwrap_or(0.0)
     }
@@ -54,6 +92,10 @@ impl AggTrade {
         }
     }
 }
+
+// =====================================================================
+// Binance market data
+// =====================================================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KlineEvent {
@@ -92,7 +134,7 @@ pub struct Kline {
 }
 
 impl Kline {
-    pub fn to_vp_candle(&self) -> VpCandle {
+    pub fn to_vp_candle(&self, source: &str) -> VpCandle {
         VpCandle {
             time: self.start_time,
             open: self.open.parse().unwrap_or(0.0),
@@ -100,6 +142,7 @@ impl Kline {
             low: self.low.parse().unwrap_or(0.0),
             close: self.close.parse().unwrap_or(0.0),
             volume: self.volume.parse().unwrap_or(0.0),
+            source: source.into(),
         }
     }
 }
@@ -116,6 +159,9 @@ pub struct VpCandle {
     pub low: f64,
     pub close: f64,
     pub volume: f64,
+    /// Which feed produced this candle: "binance" | "sifting" | ...
+    #[serde(default)]
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,19 +186,6 @@ pub struct OrderflowEvent {
     pub timestamp: i64,
     #[serde(default = "default_exchange")]
     pub exchange: String,
-}
-
-// =====================================================================
-// AI / sentiment
-// =====================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SentimentFrame {
-    pub hawkish: f64,
-    pub dovish: f64,
-    pub neutral: f64,
-    pub confidence: f64,
-    pub ts: i64,
 }
 
 // =====================================================================
@@ -191,23 +224,14 @@ pub enum WsFrame {
     #[serde(rename = "trades")]
     Trades { data: TradeEvent },
 
-    #[serde(rename = "sentiment")]
-    Sentiment { data: SentimentFrame },
-
-    #[serde(rename = "transcript")]
-    Transcript { data: serde_json::Value },
-
     #[serde(rename = "calendar")]
     Calendar { data: serde_json::Value },
 
+    #[serde(rename = "status")]
+    Status { data: serde_json::Value },
+
     #[serde(rename = "subscribe")]
     Subscribe { topics: Vec<String> },
-
-    #[serde(rename = "learn")]
-    Learn { features: Vec<f64>, target: f64 },
-
-    #[serde(rename = "audio_chunk")]
-    AudioChunk { data: String },
 
     #[serde(rename = "heartbeat")]
     Heartbeat,

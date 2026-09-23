@@ -2,29 +2,20 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use crate::types::VpCandle;
 
-/// The Sifting.io API base URL for historical data.
-const SIFTING_BASE_URL: &str = "https://api.sifting.io";
-
-/// A single OHLC bar from the Sifting.io forex historical endpoint.
-/// The API returns bars with a `t` (timestamp in milliseconds), `o`, `h`, `l`, `c` fields.
+/// A single OHLC bar from the Sifting.io commodities historical endpoint.
+/// The API returns bars with `t` (timestamp ms), `o`, `h`, `l`, `c` fields.
 #[derive(Debug, Deserialize)]
 struct SiftingBar {
-    /// Timestamp in milliseconds
     #[serde(rename = "t")]
     time: i64,
-    /// Open price
     #[serde(rename = "o")]
     open: f64,
-    /// High price
     #[serde(rename = "h")]
     high: f64,
-    /// Low price
     #[serde(rename = "l")]
     low: f64,
-    /// Close price
     #[serde(rename = "c")]
     close: f64,
-    /// Volume (always 0 for OTC spot forex)
     #[serde(rename = "v", default)]
     volume: f64,
 }
@@ -35,28 +26,31 @@ struct SiftingBarsResponse {
     data: Vec<SiftingBar>,
 }
 
-/// Fetch the last `limit` 15-minute candles for `symbol` from Sifting.io spot forex.
+/// Fetch the last `limit` 15-minute candles for `symbol` from Sifting.io
+/// spot commodities (XAUUSD streams under the `com` product).
 ///
 /// # Arguments
-/// * `api_key` - Your Sifting.io API key (starts with `sft_`).
-/// * `symbol`  - The forex pair, e.g. `"XAUUSD"`.
-/// * `limit`   - Maximum number of bars to return.
+/// * `base_url` - Sifting.io API base (default `https://api.sifting.io`).
+/// * `api_key`  - Your Sifting.io API key (starts with `sft_`).
+/// * `symbol`   - The commodity, e.g. `"XAUUSD"`.
+/// * `limit`    - Maximum number of bars to return.
 pub async fn fetch_sifting_klines_15m(
+    base_url: &str,
     api_key: &str,
     symbol: &str,
     limit: usize,
 ) -> Result<Vec<VpCandle>> {
-    // The Sifting.io forex historical endpoint: /v1/hist/forex/bars
+    // Historical bars endpoint per docs: /v1/hist/commodities/{symbol}/bars
     let url = format!(
-        "{}/v1/hist/forex/bars?pair={}&interval=15m&limit={}",
-        SIFTING_BASE_URL, symbol, limit
+        "{}/v1/hist/commodities/{}/bars?interval=15m&limit={}",
+        base_url.trim_end_matches('/'), symbol, limit
     );
 
     let client = reqwest::Client::new();
     let resp = client
         .get(&url)
         .header("X-API-Key", api_key)
-        .header("Accept-Encoding", "gzip") // Required to avoid 406 on heavy endpoints
+        .header("Accept-Encoding", "gzip") // bars endpoints require gzip
         .send()
         .await
         .context("Failed to send request to Sifting.io")?;
@@ -64,7 +58,7 @@ pub async fn fetch_sifting_klines_15m(
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Sifting.io API returned {}: {}", status, body);
+        anyhow::bail!("Sifting.io API returned {status}: {}", body);
     }
 
     let parsed: SiftingBarsResponse = resp
@@ -82,6 +76,7 @@ pub async fn fetch_sifting_klines_15m(
             low: bar.low,
             close: bar.close,
             volume: bar.volume,
+            source: "sifting".into(),
         })
         .collect();
 
