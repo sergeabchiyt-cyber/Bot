@@ -19,24 +19,17 @@ jobs:
         run: |
           set -o pipefail
           cargo check --all-targets 2>&1 | tee /tmp/check.log
-      - name: Emit errors as annotations
+      - name: Save error log to branch
         if: failure() && steps.check.outcome == 'failure'
         run: |
-          python3 - <<'PY'
-          import re
-          text = open('/tmp/check.log', encoding='utf-8', errors='replace').read()
-          lines = text.splitlines()
-          out, cur = [], None
-          for line in lines:
-              if line.startswith('error'):
-                  cur = [line]; out.append(cur)
-              elif cur is not None:
-                  cur.append(line)
-                  if len(cur) >= 9:
-                      cur = None
-          msg = '\n'.join(l for b in out[:12] for l in b)[:1200]
-          print("::error::" + msg.replace('\n', '%0A').replace('\r', ''))
-          PY
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          tail -c 60000 /tmp/check.log > build-errors.log
+          git add build-errors.log
+          git commit -m "ci: build error log [skip ci]"
+          git push origin ${{ github.ref_name }}
       - name: Build
         run: cargo build --release
       - name: Smoke test (boot + endpoints)
