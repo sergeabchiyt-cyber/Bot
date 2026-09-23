@@ -25,8 +25,6 @@ use volume_profile::VolumeProfileEngine;
 use ws_server::AppState;
 
 /// Parses the Forex Factory markdown table into structured events.
-/// The browser agent returns markdown with a table like:
-/// | Time | Currency | Impact | Event |
 fn parse_calendar_markdown(md: &str) -> Vec<serde_json::Value> {
     let mut out = Vec::new();
     for line in md.lines() {
@@ -42,7 +40,6 @@ fn parse_calendar_markdown(md: &str) -> Vec<serde_json::Value> {
         if cols.len() < 4 {
             continue;
         }
-        // Skip header and separator rows.
         if cols[0].eq_ignore_ascii_case("time") || cols[0].starts_with(':') {
             continue;
         }
@@ -82,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
     let (tick_tx, mut tick_rx) = mpsc::channel(8192);
     let (kline_tx, mut kline_rx) = mpsc::channel(256);
     // Closed-candle fan-out for the execution trigger.
-    let (exec_tx, mut exec_rx) = mpsc::channel::<(types::VpLevels, f64)>(64);
+    let (exec_tx, mut exec_rx) = mpsc::channel::<types::VpCandle>(64);
 
     let vp = Arc::new(RwLock::new(VolumeProfileEngine::new()));
     let cached_levels = Arc::new(RwLock::new(Vec::new()));
@@ -174,7 +171,6 @@ async fn main() -> anyhow::Result<()> {
                 let events = analyzer.detect_events(&vp_read, trade.price_f64(), 0.90, 0.97);
                 drop(vp_read);
                 for ev in events {
-                    // Keep a rolling window for the execution trigger.
                     {
                         let mut buf = recent.write().await;
                         buf.push(ev.clone());
@@ -190,8 +186,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // ---------- Kline consumer (VP + execution fan-out) ----------
-    // Binance klines are now ONLY used for Volume Profile and Execution.
-    // WsFrame::Candle is strictly broadcast by the Sifting stream for the chart.
+    // Binance klines feed the Volume Profile and Execution trigger.
+    // WsFrame::Candle is broadcast by the Sifting stream for the chart.
     {
         let vp = vp.clone();
         let cached = cached_levels.clone();
@@ -250,8 +246,6 @@ async fn main() -> anyhow::Result<()> {
         let proximity = config.level_proximity_pips;
         let bc = bc_tx.clone();
         tokio::spawn(async move {
-            // Minimum bubble strength required to act. Tune this once
-            // you see the live distribution in the dashboard sidebar.
             const MIN_CONFIRM_STRENGTH: f64 = 15.0;
             while let Some(candle) = exec_rx.recv().await {
                 let price = candle.close;
@@ -259,7 +253,6 @@ async fn main() -> anyhow::Result<()> {
                 if !near_level(&lvls, price, proximity) {
                     continue;
                 }
-                // Snapshot bubbles that arrived since this candle opened.
                 let cutoff = candle.time;
                 let candidates: Vec<OrderflowEvent> = {
                     let buf = bubbles.read().await;
@@ -275,7 +268,6 @@ async fn main() -> anyhow::Result<()> {
                     );
                     continue;
                 }
-                // Strongest qualifying event wins.
                 let best = candidates
                     .iter()
                     .max_by(|a, b| a.strength.partial_cmp(&b.strength).unwrap())
@@ -289,9 +281,6 @@ async fn main() -> anyhow::Result<()> {
                     "Execution trigger: {} @ {:.3} (strength {:.1}, kind {})",
                     side, price, best.strength, best.kind
                 );
-                // Size is a placeholder until the Deriv risk-per-trade
-                // sizing logic is added. 0.01 lots keeps the first live
-                // test minimal.
                 match exec_mgr.execute(side, 0.01, price, &lvls[0]).await {
                     Ok(ev) => {
                         info!("Trade event: {:?}", ev);
