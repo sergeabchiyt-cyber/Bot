@@ -1,4 +1,3 @@
-use anyhow::Result;
 use chrono::{Datelike, Duration, TimeZone, Utc};
 use chrono_tz::America::New_York;
 

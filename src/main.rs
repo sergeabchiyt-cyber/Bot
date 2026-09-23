@@ -23,7 +23,7 @@ use config::Config;
 use execution::ExecutionManager;
 use order_flow::OrderFlowAnalyzer;
 use status::FeedStatus;
-use types::{OrderflowEvent, WsFrame};
+use types::{OrderflowEvent, VpCandle, WsFrame};
 use volume_profile::VolumeProfileEngine;
 use ws_server::AppState;
 
@@ -87,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
     let status = FeedStatus::new(bc_tx.clone());
     let vp = Arc::new(RwLock::new(VolumeProfileEngine::new()));
     let cached_levels = Arc::new(RwLock::new(Vec::new()));
-    let cached_candles = Arc::new(RwLock::new(Vec::new()));
+    let cached_candles = Arc::new(RwLock::new(Vec::<VpCandle>::new()));
     let recent_bubbles: Arc<RwLock<Vec<OrderflowEvent>>> = Arc::new(RwLock::new(Vec::new()));
 
     // ---------- Cold-start history ----------

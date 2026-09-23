@@ -91,6 +91,7 @@ fn env_switch(key: &str, has_credentials: bool) -> bool {
 impl Config {
     pub fn from_env() -> Self {
         let sifting_api_key = env_opt("SIFTING_API_KEY").unwrap_or_default();
+        let has_sifting_key = !sifting_api_key.is_empty();
         let alltick_token = env_opt("ALLTICK_TOKEN");
         let itick_token = env_opt("ITICK_TOKEN");
 
@@ -118,7 +119,7 @@ impl Config {
             feed_kraken: env_switch("FEED_KRAKEN", true),
             feed_alltick: env_switch("FEED_ALLTICK", alltick_token.is_some()),
             feed_itick: env_switch("FEED_ITICK", itick_token.is_some()),
-            feed_sifting: env_switch("FEED_SIFTING", !sifting_api_key.is_empty()),
+            feed_sifting: env_switch("FEED_SIFTING", has_sifting_key),
 
             bitget_symbol: env_str("BITGET_SYMBOL", "XAUTUSDT"),
             gate_symbol: env_str("GATE_SYMBOL", "XAUT_USDT"),

@@ -584,23 +584,36 @@ pub async fn run_itick_stream(tx: mpsc::Sender<AggTrade>, url: String, symbol: S
 
         match connect_async(req).await {
             Ok((ws, _)) => {
-                let (mut write, mut read) = ws.split();
-                let mut subscribed = false;
+                let (write, mut read) = ws.split();
                 info!("iTick stream connected ({symbol})");
                 status.set("itick", "connected");
 
-                let ping_task = tokio::spawn(async move {
-                    let mut iv = tokio::time::interval(std::time::Duration::from_secs(25));
-                    iv.tick().await;
+                // Single writer task: owns the sink, forwards outbound
+                // messages (subscribe, keepalive) and pings every 25s.
+                let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Message>();
+                let writer = tokio::spawn(async move {
+                    let mut write = write;
+                    let mut ping = tokio::time::interval(std::time::Duration::from_secs(25));
+                    ping.tick().await; // skip immediate tick
                     loop {
-                        iv.tick().await;
-                        let ping = json!({"ac": "ping"});
-                        if write.send(Message::Text(ping.to_string().into())).await.is_err() {
-                            break;
+                        tokio::select! {
+                            _ = ping.tick() => {
+                                let msg = Message::Text(json!({"ac": "ping"}).to_string().into());
+                                if write.send(msg).await.is_err() { break; }
+                            }
+                            msg = out_rx.recv() => {
+                                match msg {
+                                    Some(m) => {
+                                        if write.send(m).await.is_err() { break; }
+                                    }
+                                    None => break,
+                                }
+                            }
                         }
                     }
                 });
 
+                let mut subscribed = false;
                 while let Some(msg) = read.next().await {
                     if let Ok(Message::Text(text)) = msg {
                         status.mark_msg("itick");
@@ -613,7 +626,7 @@ pub async fn run_itick_stream(tx: mpsc::Sender<AggTrade>, url: String, symbol: S
                                 || v["code"].as_i64() == Some(1);
                             if ac == "auth" && ok && !subscribed {
                                 let sub = json!({"ac": "subscribe", "params": format!("{symbol},tick")});
-                                if write.send(Message::Text(sub.to_string().into())).await.is_ok() {
+                                if out_tx.send(Message::Text(sub.to_string().into())).is_ok() {
                                     subscribed = true;
                                     info!("iTick subscribed to {symbol} ticks");
                                 }
@@ -655,7 +668,8 @@ pub async fn run_itick_stream(tx: mpsc::Sender<AggTrade>, url: String, symbol: S
                     }
                 }
 
-                ping_task.abort();
+                drop(out_tx);
+                let _ = writer.await;
                 status.set("itick", "disconnected");
             }
             Err(e) => {
