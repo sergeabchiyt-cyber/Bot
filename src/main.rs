@@ -25,6 +25,8 @@ use volume_profile::VolumeProfileEngine;
 use ws_server::AppState;
 
 /// Parses the Forex Factory markdown table into structured events.
+/// The browser agent returns markdown with a table like:
+/// | Time | Currency | Impact | Event |
 fn parse_calendar_markdown(md: &str) -> Vec<serde_json::Value> {
     let mut out = Vec::new();
     for line in md.lines() {
@@ -40,6 +42,7 @@ fn parse_calendar_markdown(md: &str) -> Vec<serde_json::Value> {
         if cols.len() < 4 {
             continue;
         }
+        // Skip header and separator rows.
         if cols[0].eq_ignore_ascii_case("time") || cols[0].starts_with(':') {
             continue;
         }
@@ -78,6 +81,7 @@ async fn main() -> anyhow::Result<()> {
     let (bc_tx, _) = broadcast::channel(1024);
     let (tick_tx, mut tick_rx) = mpsc::channel(8192);
     let (kline_tx, mut kline_rx) = mpsc::channel(256);
+    // Closed-candle fan-out for the execution trigger.
     let (exec_tx, mut exec_rx) = mpsc::channel::<(types::VpLevels, f64)>(64);
 
     let vp = Arc::new(RwLock::new(VolumeProfileEngine::new()));
@@ -104,10 +108,212 @@ async fn main() -> anyhow::Result<()> {
         Err(e) => warn!("Cold-start Sifting REST fetch failed: {}. Continuing.", e),
     }
 
-    // ... (rest of main.rs remains exactly as before) ...
-    // The full file continues with the Sifting spot WebSocket stream,
-    // Binance WebSocket streams, order flow analysis, execution manager,
-    // and the Axum WebSocket server setup.
+    // ---------- Sifting spot stream (Chart price only) ----------
+    {
+        let url = format!(
+            "wss://stream.sifting.io/ws/v1?key={}",
+            config.sifting_api_key
+        );
+        let bc = bc_tx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = sifting_ws::run_sifting_stream(url, bc).await {
+                tracing::error!("Sifting stream terminated: {}", e);
+            }
+        });
+    }
+
+    // ---------- Exchange streams ----------
+    {
+        let url = config.binance_ws_url.clone();
+        let tx = tick_tx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = binance_ws::run_agg_trade_stream(url, tx).await {
+                tracing::error!("aggTrade stream terminated: {}", e);
+            }
+        });
+    }
+
+    {
+        let url = config.binance_kline_url.clone();
+        let tx = kline_tx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = binance_ws::run_kline_stream(url, tx).await {
+                tracing::error!("kline stream terminated: {}", e);
+            }
+        });
+    }
+
+    {
+        let tx = tick_tx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = multi_exchange::run_bybit_stream(tx).await {
+                tracing::error!("Bybit stream terminated: {}", e);
+            }
+        });
+    }
+
+    {
+        let tx = tick_tx.clone();
+        tokio::spawn(async move {
+            if let Err(e) = multi_exchange::run_okx_stream(tx).await {
+                tracing::error!("OKX stream terminated: {}", e);
+            }
+        });
+    }
+
+    // ---------- Tick consumer (order flow) ----------
+    {
+        let vp = vp.clone();
+        let bc = bc_tx.clone();
+        let recent = recent_bubbles.clone();
+        let mut analyzer = OrderFlowAnalyzer::new(20_000);
+        tokio::spawn(async move {
+            while let Some(trade) = tick_rx.recv().await {
+                analyzer.ingest(&trade);
+                let vp_read = vp.read().await;
+                let events = analyzer.detect_events(&vp_read, trade.price_f64(), 0.90, 0.97);
+                drop(vp_read);
+                for ev in events {
+                    // Keep a rolling window for the execution trigger.
+                    {
+                        let mut buf = recent.write().await;
+                        buf.push(ev.clone());
+                        if buf.len() > 200 {
+                            let drain = buf.len() - 200;
+                            buf.drain(0..drain);
+                        }
+                    }
+                    let _ = bc.send(WsFrame::Bubbles { data: ev });
+                }
+            }
+        });
+    }
+
+    // ---------- Kline consumer (VP + execution fan-out) ----------
+    // Binance klines are now ONLY used for Volume Profile and Execution.
+    // WsFrame::Candle is strictly broadcast by the Sifting stream for the chart.
+    {
+        let vp = vp.clone();
+        let cached = cached_levels.clone();
+        let bc = bc_tx.clone();
+        let exec = exec_tx.clone();
+        tokio::spawn(async move {
+            while let Some(ev) = kline_rx.recv().await {
+                if !ev.kline.is_closed {
+                    continue;
+                }
+                let candle = ev.kline.to_vp_candle();
+                let mut vp_w = vp.write().await;
+                vp_w.ingest_candle(candle.clone());
+                let levels = vp_w.all_levels();
+                drop(vp_w);
+                *cached.write().await = levels.clone();
+                for lvl in levels {
+                    let _ = bc.send(WsFrame::Levels { data: lvl });
+                }
+                let _ = exec.send(candle).await;
+            }
+        });
+    }
+
+    // ---------- MCP calendar scraper (every 15 min) ----------
+    {
+        let mcp = Arc::new(mcp_client::McpClient::new(
+            config.mcp_browser_url.clone(),
+            config.mcp_chelsea_url.clone().unwrap_or_default(),
+        ));
+        let bc = bc_tx.clone();
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(900));
+            loop {
+                interval.tick().await;
+                match mcp.scrape_calendar().await {
+                    Ok(md) => {
+                        let events = parse_calendar_markdown(&md);
+                        info!("Calendar scraped: {} events", events.len());
+                        let _ = bc.send(WsFrame::Calendar {
+                            data: serde_json::json!({ "events": events }),
+                        });
+                    }
+                    Err(e) => warn!("Calendar scrape failed: {}", e),
+                }
+            }
+        });
+    }
+
+    // ---------- Execution trigger loop ----------
+    {
+        let levels = cached_levels.clone();
+        let bubbles = recent_bubbles.clone();
+        let exec_mgr = Arc::new(ExecutionManager::new(config.clone()));
+        let proximity = config.level_proximity_pips;
+        let bc = bc_tx.clone();
+        tokio::spawn(async move {
+            // Minimum bubble strength required to act. Tune this once
+            // you see the live distribution in the dashboard sidebar.
+            const MIN_CONFIRM_STRENGTH: f64 = 15.0;
+            while let Some(candle) = exec_rx.recv().await {
+                let price = candle.close;
+                let lvls = levels.read().await.clone();
+                if !near_level(&lvls, price, proximity) {
+                    continue;
+                }
+                // Snapshot bubbles that arrived since this candle opened.
+                let cutoff = candle.time;
+                let candidates: Vec<OrderflowEvent> = {
+                    let buf = bubbles.read().await;
+                    buf.iter()
+                        .filter(|b| b.timestamp >= cutoff && b.strength >= MIN_CONFIRM_STRENGTH)
+                        .cloned()
+                        .collect()
+                };
+                if candidates.is_empty() {
+                    info!(
+                        "Price {:.3} near level but no qualifying bubble — skipping",
+                        price
+                    );
+                    continue;
+                }
+                // Strongest qualifying event wins.
+                let best = candidates
+                    .iter()
+                    .max_by(|a, b| a.strength.partial_cmp(&b.strength).unwrap())
+                    .unwrap();
+                let side = match best.kind.as_str() {
+                    "BUY_BUBBLE" | "ABS_BUY" => "buy",
+                    "SELL_BUBBLE" | "ABS_SELL" => "sell",
+                    _ => continue,
+                };
+                info!(
+                    "Execution trigger: {} @ {:.3} (strength {:.1}, kind {})",
+                    side, price, best.strength, best.kind
+                );
+                // Size is a placeholder until the Deriv risk-per-trade
+                // sizing logic is added. 0.01 lots keeps the first live
+                // test minimal.
+                match exec_mgr.execute(side, 0.01, price, &lvls[0]).await {
+                    Ok(ev) => {
+                        info!("Trade event: {:?}", ev);
+                        let _ = bc.send(WsFrame::Trades { data: ev });
+                    }
+                    Err(e) => warn!("Execution failed: {}", e),
+                }
+            }
+        });
+    }
+
+    // ---------- HTTP + WS server ----------
+    let state = AppState {
+        tx: bc_tx.clone(),
+        subscriptions: Arc::new(dashmap::DashMap::new()),
+        cached_levels: cached_levels.clone(),
+        vp: vp.clone(),
+    };
+    let app = ws_server::router(state);
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
+    info!("Listening on 0.0.0.0:{}", config.port);
+    axum::serve(listener, app).await?;
 
     Ok(())
 }
