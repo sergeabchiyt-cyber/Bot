@@ -3,185 +3,185 @@ commit: 3cbe54bdab75b89de505f0f8d5f1f3631fafd964
 generated: 2026-09-23T15:44:26Z
 
 ## Unit tests
-[1m[92m   Compiling[0m cfg-if v1.0.5
-[1m[92m   Compiling[0m smallvec v1.16.1
-[1m[92m   Compiling[0m libc v0.2.189
-[1m[92m   Compiling[0m bytes v1.12.1
-[1m[92m   Compiling[0m pin-project-lite v0.2.17
-[1m[92m   Compiling[0m itoa v1.0.18
-[1m[92m   Compiling[0m once_cell v1.21.4
-[1m[92m   Compiling[0m scopeguard v1.2.0
-[1m[92m   Compiling[0m lock_api v0.4.14
-[1m[92m   Compiling[0m zerofrom v0.1.8
-[1m[92m   Compiling[0m stable_deref_trait v1.2.1
-[1m[92m   Compiling[0m futures-core v0.3.34
-[1m[92m   Compiling[0m yoke v0.8.3
-[1m[92m   Compiling[0m log v0.4.34
-[1m[92m   Compiling[0m http v1.5.0
-[1m[92m   Compiling[0m zerovec v0.11.8
-[1m[92m   Compiling[0m tracing-core v0.1.36
-[1m[92m   Compiling[0m parking_lot_core v0.9.12
-[1m[92m   Compiling[0m errno v0.3.14
-[1m[92m   Compiling[0m signal-hook-registry v1.4.8
-[1m[92m   Compiling[0m parking_lot v0.12.5
-[1m[92m   Compiling[0m socket2 v0.6.5
-[1m[92m   Compiling[0m mio v1.2.3
-[1m[92m   Compiling[0m zeroize v1.9.0
-[1m[92m   Compiling[0m futures-sink v0.3.34
-[1m[92m   Compiling[0m typenum v1.20.1
-[1m[92m   Compiling[0m tokio v1.53.1
-[1m[92m   Compiling[0m rustls-pki-types v1.15.1
-[1m[92m   Compiling[0m tinystr v0.8.4
-[1m[92m   Compiling[0m httparse v1.10.1
-[1m[92m   Compiling[0m slab v0.4.12
-[1m[92m   Compiling[0m futures-task v0.3.34
-[1m[92m   Compiling[0m writeable v0.6.4
-[1m[92m   Compiling[0m litemap v0.8.3
-[1m[92m   Compiling[0m generic-array v0.14.7
-[1m[92m   Compiling[0m icu_locale_core v2.3.0
-[1m[92m   Compiling[0m futures-util v0.3.34
-[1m[92m   Compiling[0m tracing v0.1.44
-[1m[92m   Compiling[0m serde_core v1.0.229
-[1m[92m   Compiling[0m zerocopy v0.8.57
-[1m[92m   Compiling[0m getrandom v0.3.4
-[1m[92m   Compiling[0m http-body v1.1.0
-[1m[92m   Compiling[0m potential_utf v0.1.6
-[1m[92m   Compiling[0m getrandom v0.2.17
-[1m[92m   Compiling[0m zerotrie v0.2.5
-[1m[92m   Compiling[0m untrusted v0.9.0
-[1m[92m   Compiling[0m utf8_iter v1.0.4
-[1m[92m   Compiling[0m percent-encoding v2.3.2
-[1m[92m   Compiling[0m icu_collections v2.3.0
-[1m[92m   Compiling[0m icu_provider v2.3.1
-[1m[92m   Compiling[0m ring v0.17.14
-[1m[92m   Compiling[0m rand_core v0.9.5
-[1m[92m   Compiling[0m block-buffer v0.10.4
-[1m[92m   Compiling[0m crypto-common v0.1.7
-[1m[92m   Compiling[0m tower-service v0.3.3
-[1m[92m   Compiling[0m alloc-no-stdlib v2.0.4
-[1m[92m   Compiling[0m alloc-stdlib v0.2.4
-[1m[92m   Compiling[0m digest v0.10.7
-[1m[92m   Compiling[0m icu_normalizer_data v2.3.0
-[1m[92m   Compiling[0m icu_properties_data v2.3.0
-[1m[92m   Compiling[0m cpufeatures v0.2.17
-[1m[92m   Compiling[0m memchr v2.8.3
-[1m[92m   Compiling[0m ppv-lite86 v0.2.21
-[1m[92m   Compiling[0m rustls-webpki v0.103.15
-[1m[92m   Compiling[0m rand_chacha v0.9.0
-[1m[92m   Compiling[0m simd-adler32 v0.3.10
-[1m[92m   Compiling[0m try-lock v0.2.5
-[1m[92m   Compiling[0m subtle v2.6.1
-[1m[92m   Compiling[0m adler2 v2.0.1
-[1m[92m   Compiling[0m rustls v0.23.45
-[1m[92m   Compiling[0m miniz_oxide v0.9.1
-[1m[92m   Compiling[0m want v0.3.1
-[1m[92m   Compiling[0m rand v0.9.5
-[1m[92m   Compiling[0m sha1 v0.10.7
-[1m[92m   Compiling[0m serde v1.0.229
-[1m[92m   Compiling[0m thiserror v2.0.20
-[1m[92m   Compiling[0m icu_properties v2.3.0
-[1m[92m   Compiling[0m icu_normalizer v2.3.0
-[1m[92m   Compiling[0m brotli-decompressor v5.0.3
-[1m[92m   Compiling[0m crc32fast v1.5.2
-[1m[92m   Compiling[0m form_urlencoded v1.2.2
-[1m[92m   Compiling[0m futures-channel v0.3.34
-[1m[92m   Compiling[0m sync_wrapper v1.0.2
-[1m[92m   Compiling[0m httpdate v1.0.3
-[1m[92m   Compiling[0m data-encoding v2.11.1
-[1m[92m   Compiling[0m tower-layer v0.3.3
-[1m[92m   Compiling[0m atomic-waker v1.1.2
-[1m[92m   Compiling[0m hyper v1.11.1
-[1m[92m   Compiling[0m idna_adapter v1.2.2
-[1m[92m   Compiling[0m brotli v8.0.4
-[1m[92m   Compiling[0m flate2 v1.1.10
-[1m[92m   Compiling[0m http-body-util v0.1.5
-[1m[92m   Compiling[0m webpki-roots v1.0.9
-[1m[92m   Compiling[0m ipnet v2.12.2
-[1m[92m   Compiling[0m base64 v0.22.1
-[1m[92m   Compiling[0m compression-core v0.4.33
-[1m[92m   Compiling[0m hyper-util v0.1.20
-[1m[92m   Compiling[0m tokio-rustls v0.26.5
-[1m[92m   Compiling[0m idna v1.1.0
-[1m[92m   Compiling[0m compression-codecs v0.4.43
-[1m[92m   Compiling[0m zmij v1.0.23
-[1m[92m   Compiling[0m tower v0.5.3
-[1m[92m   Compiling[0m ryu v1.0.23
-[1m[92m   Compiling[0m regex-syntax v0.8.11
-[1m[92m   Compiling[0m siphasher v1.0.3
-[1m[92m   Compiling[0m phf_shared v0.12.1
-[1m[92m   Compiling[0m serde_urlencoded v0.7.1
-[1m[92m   Compiling[0m serde_json v1.0.151
-[1m[92m   Compiling[0m async-compression v0.4.48
-[1m[92m   Compiling[0m num-traits v0.2.19
-[1m[92m   Compiling[0m url v2.5.8
-[1m[92m   Compiling[0m regex-automata v0.4.18
-[1m[92m   Compiling[0m tungstenite v0.29.0
-[1m[92m   Compiling[0m tokio-util v0.7.19
-[1m[92m   Compiling[0m mime v0.3.17
-[1m[92m   Compiling[0m utf-8 v0.7.6
-[1m[92m   Compiling[0m lazy_static v1.5.0
-[1m[92m   Compiling[0m bitflags v2.13.2
-[1m[92m   Compiling[0m iana-time-zone v0.1.65
-[1m[92m   Compiling[0m chrono v0.4.45
-[1m[92m   Compiling[0m tower-http v0.6.11
-[1m[92m   Compiling[0m sharded-slab v0.1.7
-[1m[92m   Compiling[0m matchers v0.2.0
-[1m[92m   Compiling[0m axum-core v0.5.6
-[1m[92m   Compiling[0m tungstenite v0.26.2
-[1m[92m   Compiling[0m tokio-tungstenite v0.29.0
-[1m[92m   Compiling[0m crossbeam-utils v0.8.23
-[1m[92m   Compiling[0m phf v0.12.1
-[1m[92m   Compiling[0m hyper-rustls v0.27.10
-[1m[92m   Compiling[0m webpki-roots v0.26.11
-[1m[92m   Compiling[0m serde_path_to_error v0.1.20
-[1m[92m   Compiling[0m tracing-log v0.2.0
-[1m[92m   Compiling[0m thread_local v1.1.10
-[1m[92m   Compiling[0m matchit v0.8.4
-[1m[92m   Compiling[0m nu-ansi-term v0.50.3
-[1m[92m   Compiling[0m hashbrown v0.14.5
-[1m[92m   Compiling[0m axum v0.8.9
-[1m[92m   Compiling[0m tracing-subscriber v0.3.23
-[1m[92m   Compiling[0m tokio-tungstenite v0.26.2
-[1m[92m   Compiling[0m reqwest v0.12.28
-[1m[92m   Compiling[0m dashmap v6.2.1
-[1m[92m   Compiling[0m chrono-tz v0.10.4
-[1m[92m   Compiling[0m anyhow v1.0.104
-[1m[92m   Compiling[0m xauusd-engine v0.2.0 (/home/runner/work/Bot/Bot)
-[1m[33mwarning[0m[1m: field `symbol_type` is never read[0m
-  [1m[94m--> [0msrc/types.rs:30:9
-   [1m[94m|[0m
-[1m[94m 8[0m [1m[94m|[0m pub struct AggTrade {
-   [1m[94m|[0m            [1m[94m--------[0m [1m[94mfield in this struct[0m
-[1m[94m...[0m
-[1m[94m30[0m [1m[94m|[0m     pub symbol_type: Option<i32>,
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mnote[0m: `AggTrade` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
-   [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+   Compiling cfg-if v1.0.5
+   Compiling smallvec v1.16.1
+   Compiling libc v0.2.189
+   Compiling bytes v1.12.1
+   Compiling pin-project-lite v0.2.17
+   Compiling itoa v1.0.18
+   Compiling once_cell v1.21.4
+   Compiling scopeguard v1.2.0
+   Compiling lock_api v0.4.14
+   Compiling zerofrom v0.1.8
+   Compiling stable_deref_trait v1.2.1
+   Compiling futures-core v0.3.34
+   Compiling yoke v0.8.3
+   Compiling log v0.4.34
+   Compiling http v1.5.0
+   Compiling zerovec v0.11.8
+   Compiling tracing-core v0.1.36
+   Compiling parking_lot_core v0.9.12
+   Compiling errno v0.3.14
+   Compiling signal-hook-registry v1.4.8
+   Compiling parking_lot v0.12.5
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.3
+   Compiling zeroize v1.9.0
+   Compiling futures-sink v0.3.34
+   Compiling typenum v1.20.1
+   Compiling tokio v1.53.1
+   Compiling rustls-pki-types v1.15.1
+   Compiling tinystr v0.8.4
+   Compiling httparse v1.10.1
+   Compiling slab v0.4.12
+   Compiling futures-task v0.3.34
+   Compiling writeable v0.6.4
+   Compiling litemap v0.8.3
+   Compiling generic-array v0.14.7
+   Compiling icu_locale_core v2.3.0
+   Compiling futures-util v0.3.34
+   Compiling tracing v0.1.44
+   Compiling serde_core v1.0.229
+   Compiling zerocopy v0.8.57
+   Compiling getrandom v0.3.4
+   Compiling http-body v1.1.0
+   Compiling potential_utf v0.1.6
+   Compiling getrandom v0.2.17
+   Compiling zerotrie v0.2.5
+   Compiling untrusted v0.9.0
+   Compiling utf8_iter v1.0.4
+   Compiling percent-encoding v2.3.2
+   Compiling icu_collections v2.3.0
+   Compiling icu_provider v2.3.1
+   Compiling ring v0.17.14
+   Compiling rand_core v0.9.5
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling tower-service v0.3.3
+   Compiling alloc-no-stdlib v2.0.4
+   Compiling alloc-stdlib v0.2.4
+   Compiling digest v0.10.7
+   Compiling icu_normalizer_data v2.3.0
+   Compiling icu_properties_data v2.3.0
+   Compiling cpufeatures v0.2.17
+   Compiling memchr v2.8.3
+   Compiling ppv-lite86 v0.2.21
+   Compiling rustls-webpki v0.103.15
+   Compiling rand_chacha v0.9.0
+   Compiling simd-adler32 v0.3.10
+   Compiling try-lock v0.2.5
+   Compiling subtle v2.6.1
+   Compiling adler2 v2.0.1
+   Compiling rustls v0.23.45
+   Compiling miniz_oxide v0.9.1
+   Compiling want v0.3.1
+   Compiling rand v0.9.5
+   Compiling sha1 v0.10.7
+   Compiling serde v1.0.229
+   Compiling thiserror v2.0.20
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+   Compiling brotli-decompressor v5.0.3
+   Compiling crc32fast v1.5.2
+   Compiling form_urlencoded v1.2.2
+   Compiling futures-channel v0.3.34
+   Compiling sync_wrapper v1.0.2
+   Compiling httpdate v1.0.3
+   Compiling data-encoding v2.11.1
+   Compiling tower-layer v0.3.3
+   Compiling atomic-waker v1.1.2
+   Compiling hyper v1.11.1
+   Compiling idna_adapter v1.2.2
+   Compiling brotli v8.0.4
+   Compiling flate2 v1.1.10
+   Compiling http-body-util v0.1.5
+   Compiling webpki-roots v1.0.9
+   Compiling ipnet v2.12.2
+   Compiling base64 v0.22.1
+   Compiling compression-core v0.4.33
+   Compiling hyper-util v0.1.20
+   Compiling tokio-rustls v0.26.5
+   Compiling idna v1.1.0
+   Compiling compression-codecs v0.4.43
+   Compiling zmij v1.0.23
+   Compiling tower v0.5.3
+   Compiling ryu v1.0.23
+   Compiling regex-syntax v0.8.11
+   Compiling siphasher v1.0.3
+   Compiling phf_shared v0.12.1
+   Compiling serde_urlencoded v0.7.1
+   Compiling serde_json v1.0.151
+   Compiling async-compression v0.4.48
+   Compiling num-traits v0.2.19
+   Compiling url v2.5.8
+   Compiling regex-automata v0.4.18
+   Compiling tungstenite v0.29.0
+   Compiling tokio-util v0.7.19
+   Compiling mime v0.3.17
+   Compiling utf-8 v0.7.6
+   Compiling lazy_static v1.5.0
+   Compiling bitflags v2.13.2
+   Compiling iana-time-zone v0.1.65
+   Compiling chrono v0.4.45
+   Compiling tower-http v0.6.11
+   Compiling sharded-slab v0.1.7
+   Compiling matchers v0.2.0
+   Compiling axum-core v0.5.6
+   Compiling tungstenite v0.26.2
+   Compiling tokio-tungstenite v0.29.0
+   Compiling crossbeam-utils v0.8.23
+   Compiling phf v0.12.1
+   Compiling hyper-rustls v0.27.10
+   Compiling webpki-roots v0.26.11
+   Compiling serde_path_to_error v0.1.20
+   Compiling tracing-log v0.2.0
+   Compiling thread_local v1.1.10
+   Compiling matchit v0.8.4
+   Compiling nu-ansi-term v0.50.3
+   Compiling hashbrown v0.14.5
+   Compiling axum v0.8.9
+   Compiling tracing-subscriber v0.3.23
+   Compiling tokio-tungstenite v0.26.2
+   Compiling reqwest v0.12.28
+   Compiling dashmap v6.2.1
+   Compiling chrono-tz v0.10.4
+   Compiling anyhow v1.0.104
+   Compiling xauusd-engine v0.2.0 (/home/runner/work/Bot/Bot)
+warning: field `symbol_type` is never read
+  --> src/types.rs:30:9
+   |
+ 8 | pub struct AggTrade {
+   |            -------- field in this struct
+...
+30 |     pub symbol_type: Option<i32>,
+   |         ^^^^^^^^^^^
+   |
+   = note: `AggTrade` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
-[1m[33mwarning[0m[1m: method `candle_count` is never used[0m
-   [1m[94m--> [0msrc/volume_profile.rs:164:12
-    [1m[94m|[0m
-[1m[94m 31[0m [1m[94m|[0m impl VolumeProfileEngine {
-    [1m[94m|[0m [1m[94m------------------------[0m [1m[94mmethod in this implementation[0m
-[1m[94m...[0m
-[1m[94m164[0m [1m[94m|[0m     pub fn candle_count(&self) -> usize {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^[0m
+warning: method `candle_count` is never used
+   --> src/volume_profile.rs:164:12
+    |
+ 31 | impl VolumeProfileEngine {
+    | ------------------------ method in this implementation
+...
+164 |     pub fn candle_count(&self) -> usize {
+    |            ^^^^^^^^^^^^
 
-[1m[33mwarning[0m[1m: field `subscriptions` is never read[0m
-  [1m[94m--> [0msrc/ws_server.rs:25:9
-   [1m[94m|[0m
-[1m[94m23[0m [1m[94m|[0m pub struct AppState {
-   [1m[94m|[0m            [1m[94m--------[0m [1m[94mfield in this struct[0m
-[1m[94m24[0m [1m[94m|[0m     pub tx: broadcast::Sender<WsFrame>,
-[1m[94m25[0m [1m[94m|[0m     pub subscriptions: Arc<DashMap<String, Vec<String>>>,
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mnote[0m: `AppState` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+warning: field `subscriptions` is never read
+  --> src/ws_server.rs:25:9
+   |
+23 | pub struct AppState {
+   |            -------- field in this struct
+24 |     pub tx: broadcast::Sender<WsFrame>,
+25 |     pub subscriptions: Arc<DashMap<String, Vec<String>>>,
+   |         ^^^^^^^^^^^^^
+   |
+   = note: `AppState` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
 
-[1m[33mwarning[0m: `xauusd-engine` (bin "xauusd-engine" test) generated 3 warnings
-[1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 23.11s
-[1m[92m     Running[0m unittests src/main.rs (target/debug/deps/xauusd_engine-3dd6ab6111217d80)
+warning: `xauusd-engine` (bin "xauusd-engine" test) generated 3 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 23.11s
+     Running unittests src/main.rs (target/debug/deps/xauusd_engine-3dd6ab6111217d80)
 
 running 13 tests
 test calendar::live_tests::real_forexfactory_feed_returns_events ... ignored, requires network
@@ -202,41 +202,41 @@ test result: ok. 12 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fin
 
 
 ## Live calendar feed test
-[1m[33mwarning[0m[1m: field `symbol_type` is never read[0m
-  [1m[94m--> [0msrc/types.rs:30:9
-   [1m[94m|[0m
-[1m[94m 8[0m [1m[94m|[0m pub struct AggTrade {
-   [1m[94m|[0m            [1m[94m--------[0m [1m[94mfield in this struct[0m
-[1m[94m...[0m
-[1m[94m30[0m [1m[94m|[0m     pub symbol_type: Option<i32>,
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mnote[0m: `AggTrade` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
-   [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+warning: field `symbol_type` is never read
+  --> src/types.rs:30:9
+   |
+ 8 | pub struct AggTrade {
+   |            -------- field in this struct
+...
+30 |     pub symbol_type: Option<i32>,
+   |         ^^^^^^^^^^^
+   |
+   = note: `AggTrade` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
-[1m[33mwarning[0m[1m: method `candle_count` is never used[0m
-   [1m[94m--> [0msrc/volume_profile.rs:164:12
-    [1m[94m|[0m
-[1m[94m 31[0m [1m[94m|[0m impl VolumeProfileEngine {
-    [1m[94m|[0m [1m[94m------------------------[0m [1m[94mmethod in this implementation[0m
-[1m[94m...[0m
-[1m[94m164[0m [1m[94m|[0m     pub fn candle_count(&self) -> usize {
-    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^[0m
+warning: method `candle_count` is never used
+   --> src/volume_profile.rs:164:12
+    |
+ 31 | impl VolumeProfileEngine {
+    | ------------------------ method in this implementation
+...
+164 |     pub fn candle_count(&self) -> usize {
+    |            ^^^^^^^^^^^^
 
-[1m[33mwarning[0m[1m: field `subscriptions` is never read[0m
-  [1m[94m--> [0msrc/ws_server.rs:25:9
-   [1m[94m|[0m
-[1m[94m23[0m [1m[94m|[0m pub struct AppState {
-   [1m[94m|[0m            [1m[94m--------[0m [1m[94mfield in this struct[0m
-[1m[94m24[0m [1m[94m|[0m     pub tx: broadcast::Sender<WsFrame>,
-[1m[94m25[0m [1m[94m|[0m     pub subscriptions: Arc<DashMap<String, Vec<String>>>,
-   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mnote[0m: `AppState` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+warning: field `subscriptions` is never read
+  --> src/ws_server.rs:25:9
+   |
+23 | pub struct AppState {
+   |            -------- field in this struct
+24 |     pub tx: broadcast::Sender<WsFrame>,
+25 |     pub subscriptions: Arc<DashMap<String, Vec<String>>>,
+   |         ^^^^^^^^^^^^^
+   |
+   = note: `AppState` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
 
-[1m[33mwarning[0m: `xauusd-engine` (bin "xauusd-engine" test) generated 3 warnings
-[1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 0.08s
-[1m[92m     Running[0m unittests src/main.rs (target/debug/deps/xauusd_engine-3dd6ab6111217d80)
+warning: `xauusd-engine` (bin "xauusd-engine" test) generated 3 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running unittests src/main.rs (target/debug/deps/xauusd_engine-3dd6ab6111217d80)
 
 running 1 test
 LIVE CALENDAR: 80 events
@@ -296,10 +296,10 @@ GOLD-RELEVANT (high-impact USD): 0
 CALENDAR CHECK PASSED
 
 --- engine log: session/level/calendar lines ---
-[2m2026-09-23T15:44:23.448813Z[0m [32m INFO[0m [2mxauusd_engine[0m[2m:[0m PW: poc=3333.750 vah=3343.500 val=3302.500
-[2m2026-09-23T15:44:23.448836Z[0m [32m INFO[0m [2mxauusd_engine[0m[2m:[0m PS: poc=3349.750 vah=3370.500 val=3346.500
-[2m2026-09-23T15:44:23.448839Z[0m [32m INFO[0m [2mxauusd_engine[0m[2m:[0m CW: poc=3356.750 vah=3373.500 val=3348.500
-[2m2026-09-23T15:44:23.449057Z[0m [32m INFO[0m [2mxauusd_engine[0m[2m:[0m Listening on 0.0.0.0:3000 — /health /status /levels /candles /calendar /ws
-[2m2026-09-23T15:44:23.497014Z[0m [32m INFO[0m [2mxauusd_engine::calendar[0m[2m:[0m Calendar: 80 events from direct feed
+2026-09-23T15:44:23.448813Z  INFO xauusd_engine: PW: poc=3333.750 vah=3343.500 val=3302.500
+2026-09-23T15:44:23.448836Z  INFO xauusd_engine: PS: poc=3349.750 vah=3370.500 val=3346.500
+2026-09-23T15:44:23.448839Z  INFO xauusd_engine: CW: poc=3356.750 vah=3373.500 val=3348.500
+2026-09-23T15:44:23.449057Z  INFO xauusd_engine: Listening on 0.0.0.0:3000 — /health /status /levels /candles /calendar /ws
+2026-09-23T15:44:23.497014Z  INFO xauusd_engine::calendar: Calendar: 80 events from direct feed
 
 SMOKE TEST PASSED

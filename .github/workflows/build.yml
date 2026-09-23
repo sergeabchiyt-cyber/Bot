@@ -79,7 +79,7 @@ jobs:
             echo
             echo '## Runtime smoke test'
             cat /tmp/proof.log 2>/dev/null || echo "(missing)"
-          } > ci/PROOF.md
+          } | sed -r 's/\x1b\[[0-9;]*m//g' > ci/PROOF.md
           git add ci/PROOF.md
           git diff --cached --quiet || git commit -m "ci: proof log [skip ci]"
           git push origin ${{ github.ref_name }}
