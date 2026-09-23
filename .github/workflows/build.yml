@@ -17,11 +17,13 @@ jobs:
         with:
           toolchain: "1.94.0"
       - uses: Swatinem/rust-cache@v2
+
       - name: Check
         id: check
         run: |
           set -o pipefail
           cargo check --all-targets 2>&1 | tee /tmp/check.log
+
       - name: Save error log to branch
         if: failure() && steps.check.outcome == 'failure'
         run: |
@@ -33,13 +35,51 @@ jobs:
           git add build-errors.log
           git commit -m "ci: build error log [skip ci]"
           git push origin ${{ github.ref_name }}
+
+      # Proof 1 — PS rolls at every 17:00 NY session close (deterministic tests).
+      # Proof 2 — calendar parsing is correct (fixture tests).
+      - name: Unit tests
+        run: |
+          set -o pipefail
+          cargo test --all-targets -- --nocapture 2>&1 | tee /tmp/unit.log
+
+      # Proof 2 (live) — the real ForexFactory feed returns parseable events.
+      - name: Live calendar feed test
+        run: |
+          set -o pipefail
+          cargo test --all-targets -- --ignored --nocapture 2>&1 | tee /tmp/live.log
+
       - name: Build
         run: cargo build --release
-      - name: Smoke test (boot + endpoints)
+
+      - name: Smoke test (boot + /levels + /calendar against the live process)
+        id: smoke
         run: |
-          ./target/release/xauusd-engine &
-          PID=$!
-          sleep 4
-          curl -sf http://127.0.0.1:3000/health && echo " <- /health ok"
-          curl -sf http://127.0.0.1:3000/status && echo " <- /status ok"
-          kill $PID
+          set -o pipefail
+          bash ci/smoke.sh 2>&1 | tee /tmp/proof.log
+
+      - name: Publish proof log to branch
+        if: always()
+        run: |
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          mkdir -p ci
+          {
+            echo "# CI proof — run ${{ github.run_id }}"
+            echo "commit: ${{ github.sha }}"
+            echo "generated: $(date -u +%FT%TZ)"
+            echo
+            echo '## Unit tests'
+            cat /tmp/unit.log 2>/dev/null || echo "(missing)"
+            echo
+            echo '## Live calendar feed test'
+            cat /tmp/live.log 2>/dev/null || echo "(missing)"
+            echo
+            echo '## Runtime smoke test'
+            cat /tmp/proof.log 2>/dev/null || echo "(missing)"
+          } | sed -r 's/\x1b\[[0-9;]*m//g' > ci/PROOF.md
+          git add ci/PROOF.md
+          git diff --cached --quiet || git commit -m "ci: proof log [skip ci]"
+          git push origin ${{ github.ref_name }}

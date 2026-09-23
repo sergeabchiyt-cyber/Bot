@@ -25,6 +25,7 @@ pub struct AppState {
     pub subscriptions: Arc<DashMap<String, Vec<String>>>,
     pub cached_levels: Arc<RwLock<Vec<VpLevels>>>,
     pub cached_candles: Arc<RwLock<Vec<VpCandle>>>,
+    pub cached_calendar: Arc<RwLock<serde_json::Value>>,
     pub vp: Arc<RwLock<VolumeProfileEngine>>,
     pub status: FeedStatus,
     pub config: Config,
@@ -35,6 +36,7 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/levels", get(levels_snapshot))
         .route("/candles", get(candles_snapshot))
+        .route("/calendar", get(calendar_snapshot))
         .route("/status", get(status_snapshot))
         .route("/ws", get(ws_handler))
         .with_state(state)
@@ -52,6 +54,10 @@ async fn levels_snapshot(State(state): State<AppState>) -> Json<Vec<VpLevels>> {
 async fn candles_snapshot(State(state): State<AppState>) -> Json<Vec<VpCandle>> {
     let candles = state.cached_candles.read().await;
     Json(candles.clone())
+}
+
+async fn calendar_snapshot(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(state.cached_calendar.read().await.clone())
 }
 
 async fn status_snapshot(State(state): State<AppState>) -> Response {
@@ -127,6 +133,14 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                         if sender.send(Message::Text(json.into())).await.is_err() {
                                             return;
                                         }
+                                    }
+                                }
+                                if topics.iter().any(|x| x == "calendar") {
+                                    let cached = state.cached_calendar.read().await.clone();
+                                    let frame = WsFrame::Calendar { data: cached };
+                                    let json = serde_json::to_string(&frame).unwrap_or_default();
+                                    if sender.send(Message::Text(json.into())).await.is_err() {
+                                        return;
                                     }
                                 }
                                 let frame = WsFrame::Status { data: state.status.snapshot() };
