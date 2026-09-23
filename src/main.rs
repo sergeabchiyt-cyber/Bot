@@ -1,3 +1,4 @@
+mod calendar;
 mod config;
 mod status;
 mod types;
@@ -26,35 +27,6 @@ use status::FeedStatus;
 use types::{OrderflowEvent, VpCandle, WsFrame};
 use volume_profile::VolumeProfileEngine;
 use ws_server::AppState;
-
-/// Parses the Forex Factory markdown table into structured events.
-fn parse_calendar_markdown(md: &str) -> Vec<serde_json::Value> {
-    let mut out = Vec::new();
-    for line in md.lines() {
-        let trimmed = line.trim();
-        if !trimmed.starts_with('|') {
-            continue;
-        }
-        let cols: Vec<&str> = trimmed
-            .trim_matches('|')
-            .split('|')
-            .map(|s| s.trim())
-            .collect();
-        if cols.len() < 4 {
-            continue;
-        }
-        if cols[0].eq_ignore_ascii_case("time") || cols[0].starts_with(':') {
-            continue;
-        }
-        out.push(serde_json::json!({
-            "time": cols[0],
-            "currency": cols[1],
-            "impact": cols[2],
-            "event": cols[3],
-        }));
-    }
-    out
-}
 
 /// Returns true if `price` is within `pips` of any PoC/VaH/VaL across all windows.
 fn near_level(levels: &[types::VpLevels], price: f64, pips: f64) -> bool {
@@ -89,6 +61,11 @@ async fn main() -> anyhow::Result<()> {
     let cached_levels = Arc::new(RwLock::new(Vec::new()));
     let cached_candles = Arc::new(RwLock::new(Vec::<VpCandle>::new()));
     let recent_bubbles: Arc<RwLock<Vec<OrderflowEvent>>> = Arc::new(RwLock::new(Vec::new()));
+    let cached_calendar = Arc::new(RwLock::new(serde_json::json!({
+        "source": "pending",
+        "count": 0,
+        "events": [],
+    })));
 
     // ---------- Cold-start history ----------
     // Primary: Sifting.io commodities bars. Fallback: Binance futures klines,
@@ -343,28 +320,79 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // ---------- MCP browser calendar scrape ----------
+    // ---------- Economic calendar ----------
+    // Direct ForexFactory weekly feed (no browser needed); the browser MCP
+    // server is only used as a fallback when the feed fails.
     {
-        let mcp = Arc::new(mcp_client::McpClient::new(
-            config.mcp_browser_url.clone(),
-            config.mcp_browser_token.clone(),
-        ));
+        let source = Arc::new(calendar::CalendarSource::new(config.calendar_url.clone()));
+        let mcp = if config.calendar_use_mcp {
+            Some(Arc::new(mcp_client::McpClient::new(
+                config.mcp_browser_url.clone(),
+                config.mcp_browser_token.clone(),
+            )))
+        } else {
+            None
+        };
         let bc = bc_tx.clone();
         let st = status.clone();
+        let cal_cache = cached_calendar.clone();
         let interval_secs = config.mcp_scrape_secs.max(60);
+        st.set("calendar", "starting");
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
             loop {
+                // Ticks immediately on the first pass, so the calendar is
+                // populated at boot instead of after the first interval.
                 interval.tick().await;
-                match mcp.scrape_calendar(&st).await {
-                    Ok(md) => {
-                        let events = parse_calendar_markdown(&md);
-                        info!("Calendar scraped: {} events", events.len());
-                        let _ = bc.send(WsFrame::Calendar {
-                            data: serde_json::json!({ "events": events }),
+                match source.fetch(mcp.as_deref(), &st).await {
+                    Ok((events, origin)) => {
+                        let payload = serde_json::json!({
+                            "source": origin,
+                            "count": events.len(),
+                            "updated": chrono::Utc::now().timestamp_millis(),
+                            "events": events,
                         });
+                        *cal_cache.write().await = payload.clone();
+                        let _ = bc.send(WsFrame::Calendar { data: payload });
                     }
-                    Err(e) => warn!("Calendar scrape failed: {e}"),
+                    Err(e) => warn!("Calendar update failed: {e}"),
+                }
+            }
+        });
+    }
+
+    // ---------- Session-close level refresh ----------
+    // PS (previous session) must roll forward at every 17:00 New York close,
+    // not stay frozen at whatever it was when the process booted. Candles
+    // alone cannot be relied on to trigger this (quiet feed, weekend gap), so
+    // a timer checks the boundary every 30s and recomputes when it moves.
+    {
+        let vp = vp.clone();
+        let cached = cached_levels.clone();
+        let bc = bc_tx.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(30));
+            loop {
+                tick.tick().await;
+                let now = chrono::Utc::now().timestamp_millis();
+                let mut vp_w = vp.write().await;
+                if !vp_w.refresh_on_session_close(now) {
+                    continue;
+                }
+                let levels = vp_w.all_levels();
+                let session_end = vp_w.ps_session_end();
+                drop(vp_w);
+                info!(
+                    "Session close — levels refreshed (PS session ends {:?})",
+                    session_end
+                );
+                *cached.write().await = levels.clone();
+                for lvl in levels {
+                    info!(
+                        "{}: poc={:.3} vah={:.3} val={:.3}",
+                        lvl.window, lvl.poc, lvl.vah, lvl.val
+                    );
+                    let _ = bc.send(WsFrame::Levels { data: lvl });
                 }
             }
         });
@@ -433,6 +461,7 @@ async fn main() -> anyhow::Result<()> {
         subscriptions: Arc::new(dashmap::DashMap::new()),
         cached_levels: cached_levels.clone(),
         cached_candles: cached_candles.clone(),
+        cached_calendar: cached_calendar.clone(),
         vp: vp.clone(),
         status: status.clone(),
         config: config.clone(),
@@ -440,7 +469,7 @@ async fn main() -> anyhow::Result<()> {
     let app = ws_server::router(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
     info!(
-        "Listening on 0.0.0.0:{} — /health /status /levels /candles /ws",
+        "Listening on 0.0.0.0:{} — /health /status /levels /candles /calendar /ws",
         config.port
     );
     axum::serve(listener, app).await?;

@@ -170,6 +170,14 @@ pub struct VpLevels {
     pub poc: f64,
     pub vah: f64,
     pub val: f64,
+    /// Inclusive start of the window this profile was computed over (ms).
+    #[serde(default)]
+    pub start: i64,
+    /// Exclusive end of the window this profile was computed over (ms).
+    /// For PS this is the session close, so clients can see it roll.
+    #[serde(default)]
+    pub end: i64,
+    /// When this profile was last recomputed (ms).
     pub timestamp: i64,
 }
 

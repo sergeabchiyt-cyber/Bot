@@ -46,6 +46,13 @@ pub struct Config {
     pub mcp_browser_token: Option<String>,
     pub mcp_scrape_secs: u64,
 
+    // ---- Economic calendar ----
+    /// Override the direct calendar feed URL (defaults to the ForexFactory
+    /// weekly export). Set empty to rely on the defaults.
+    pub calendar_url: Option<String>,
+    /// Use the browser MCP server as a fallback when the direct feed fails.
+    pub calendar_use_mcp: bool,
+
     // ---- Execution ----
     pub mcp_chelsea_url: Option<String>,
     pub deriv_api_url: String,
@@ -72,6 +79,16 @@ fn env_opt(key: &str) -> Option<String> {
 
 fn env_f64(key: &str, default: f64) -> f64 {
     env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
+fn env_bool(key: &str, default: bool) -> bool {
+    match env::var(key) {
+        Ok(v) => matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        Err(_) => default,
+    }
 }
 
 fn env_u64(key: &str, default: u64) -> u64 {
@@ -134,6 +151,9 @@ impl Config {
             mcp_browser_url: env_str("MCP_BROWSER_URL", "http://localhost:3001"),
             mcp_browser_token: env_opt("MCP_BROWSER_TOKEN"),
             mcp_scrape_secs: env_u64("MCP_SCRAPE_SECS", 900),
+
+            calendar_url: env_opt("CALENDAR_URL"),
+            calendar_use_mcp: env_bool("CALENDAR_USE_MCP", true),
 
             mcp_chelsea_url: env_opt("MCP_CHELSEA_URL"),
             deriv_api_url: env_str("DERIV_API_URL", "wss://ws.derivws.com/websockets/v3"),

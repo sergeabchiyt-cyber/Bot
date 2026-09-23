@@ -17,11 +17,13 @@ jobs:
         with:
           toolchain: "1.94.0"
       - uses: Swatinem/rust-cache@v2
+
       - name: Check
         id: check
         run: |
           set -o pipefail
           cargo check --all-targets 2>&1 | tee /tmp/check.log
+
       - name: Save error log to branch
         if: failure() && steps.check.outcome == 'failure'
         run: |
@@ -33,13 +35,18 @@ jobs:
           git add build-errors.log
           git commit -m "ci: build error log [skip ci]"
           git push origin ${{ github.ref_name }}
+
+      # Proof 1 — PS rolls at every 17:00 NY session close (deterministic tests).
+      # Proof 2 — calendar parsing is correct (fixture tests).
+      - name: Unit tests
+        run: cargo test --all-targets -- --nocapture
+
+      # Proof 2 (live) — the real ForexFactory feed returns parseable events.
+      - name: Live calendar feed test
+        run: cargo test --all-targets -- --ignored --nocapture
+
       - name: Build
         run: cargo build --release
-      - name: Smoke test (boot + endpoints)
-        run: |
-          ./target/release/xauusd-engine &
-          PID=$!
-          sleep 4
-          curl -sf http://127.0.0.1:3000/health && echo " <- /health ok"
-          curl -sf http://127.0.0.1:3000/status && echo " <- /status ok"
-          kill $PID
+
+      - name: Smoke test (boot + /levels + /calendar against the live process)
+        run: bash ci/smoke.sh
