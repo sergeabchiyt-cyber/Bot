@@ -53,6 +53,11 @@ pub struct Config {
     /// Use the browser MCP server as a fallback when the direct feed fails.
     pub calendar_use_mcp: bool,
 
+    /// CI/offline only: if no historical candles could be fetched from any
+    /// upstream, seed a deterministic synthetic series so the volume-profile
+    /// endpoints are exercisable. Never enabled by default.
+    pub seed_synthetic_candles: bool,
+
     // ---- Execution ----
     pub mcp_chelsea_url: Option<String>,
     pub deriv_api_url: String,
@@ -154,6 +159,7 @@ impl Config {
 
             calendar_url: env_opt("CALENDAR_URL"),
             calendar_use_mcp: env_bool("CALENDAR_USE_MCP", true),
+            seed_synthetic_candles: env_bool("SEED_SYNTHETIC_CANDLES", false),
 
             mcp_chelsea_url: env_opt("MCP_CHELSEA_URL"),
             deriv_api_url: env_str("DERIV_API_URL", "wss://ws.derivws.com/websockets/v3"),

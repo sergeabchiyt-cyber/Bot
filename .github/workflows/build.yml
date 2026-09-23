@@ -39,14 +39,47 @@ jobs:
       # Proof 1 — PS rolls at every 17:00 NY session close (deterministic tests).
       # Proof 2 — calendar parsing is correct (fixture tests).
       - name: Unit tests
-        run: cargo test --all-targets -- --nocapture
+        run: |
+          set -o pipefail
+          cargo test --all-targets -- --nocapture 2>&1 | tee /tmp/unit.log
 
       # Proof 2 (live) — the real ForexFactory feed returns parseable events.
       - name: Live calendar feed test
-        run: cargo test --all-targets -- --ignored --nocapture
+        run: |
+          set -o pipefail
+          cargo test --all-targets -- --ignored --nocapture 2>&1 | tee /tmp/live.log
 
       - name: Build
         run: cargo build --release
 
       - name: Smoke test (boot + /levels + /calendar against the live process)
-        run: bash ci/smoke.sh
+        id: smoke
+        run: |
+          set -o pipefail
+          bash ci/smoke.sh 2>&1 | tee /tmp/proof.log
+
+      - name: Publish proof log to branch
+        if: always()
+        run: |
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          mkdir -p ci
+          {
+            echo "# CI proof — run ${{ github.run_id }}"
+            echo "commit: ${{ github.sha }}"
+            echo "generated: $(date -u +%FT%TZ)"
+            echo
+            echo '## Unit tests'
+            cat /tmp/unit.log 2>/dev/null || echo "(missing)"
+            echo
+            echo '## Live calendar feed test'
+            cat /tmp/live.log 2>/dev/null || echo "(missing)"
+            echo
+            echo '## Runtime smoke test'
+            cat /tmp/proof.log 2>/dev/null || echo "(missing)"
+          } > ci/PROOF.md
+          git add ci/PROOF.md
+          git diff --cached --quiet || git commit -m "ci: proof log [skip ci]"
+          git push origin ${{ github.ref_name }}

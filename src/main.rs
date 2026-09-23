@@ -28,6 +28,35 @@ use types::{OrderflowEvent, VpCandle, WsFrame};
 use volume_profile::VolumeProfileEngine;
 use ws_server::AppState;
 
+/// Deterministic 15m candle history covering the last ~10 days, used only
+/// when `SEED_SYNTHETIC_CANDLES=1` and every upstream history fetch failed.
+/// Each session gets its own price band so the PS window is clearly distinct.
+fn synthetic_history(now_ms: i64) -> Vec<VpCandle> {
+    const FIFTEEN_MIN: i64 = 15 * 60 * 1000;
+    let bars = 10 * 24 * 4; // 10 days of 15m bars
+    let start = now_ms - bars * FIFTEEN_MIN;
+    let mut out = Vec::with_capacity(bars as usize);
+    for i in 0..bars {
+        let t = start + i * FIFTEEN_MIN;
+        // A slow drift plus an intraday wave -> realistic-looking profile.
+        let day = (i / 96) as f64;
+        let phase = (i % 96) as f64 / 96.0 * std::f64::consts::TAU;
+        let base = 3300.0 + day * 7.5 + phase.sin() * 12.0;
+        let low = base - 1.5;
+        let high = base + 1.5;
+        out.push(VpCandle {
+            time: t,
+            open: base,
+            high,
+            low,
+            close: base + 0.25,
+            volume: 100.0 + ((i % 17) as f64) * 3.0,
+            source: "synthetic".into(),
+        });
+    }
+    out
+}
+
 /// Returns true if `price` is within `pips` of any PoC/VaH/VaL across all windows.
 fn near_level(levels: &[types::VpLevels], price: f64, pips: f64) -> bool {
     let dollars = pips * 0.01;
@@ -98,7 +127,7 @@ async fn main() -> anyhow::Result<()> {
     }
     if !seeded {
         match binance_rest::fetch_klines_15m("XAUUSDT", 1000).await {
-            Ok(candles) => {
+            Ok(candles) if !candles.is_empty() => {
                 info!("Seeded {} historical 15M candles from Binance", candles.len());
                 let mut vp_w = vp.write().await;
                 for c in candles {
@@ -107,9 +136,31 @@ async fn main() -> anyhow::Result<()> {
                 let levels = vp_w.all_levels();
                 drop(vp_w);
                 *cached_levels.write().await = levels;
+                seeded = true;
             }
-            Err(e) => warn!("Cold-start Binance REST fetch failed: {e}. Starting empty."),
+            Ok(_) => warn!("Cold-start Binance REST returned no candles."),
+            Err(e) => warn!("Cold-start Binance REST fetch failed: {e}."),
         }
+    }
+    // CI / air-gapped fallback: upstream history is geo-blocked on hosted
+    // runners, so allow a deterministic synthetic seed purely so the
+    // volume-profile endpoints remain verifiable. Off unless asked for.
+    if !seeded && config.seed_synthetic_candles {
+        let candles = synthetic_history(chrono::Utc::now().timestamp_millis());
+        warn!(
+            "No upstream history available — seeding {} SYNTHETIC candles (SEED_SYNTHETIC_CANDLES=1)",
+            candles.len()
+        );
+        let mut vp_w = vp.write().await;
+        for c in candles {
+            vp_w.ingest_candle(c);
+        }
+        let levels = vp_w.all_levels();
+        drop(vp_w);
+        *cached_levels.write().await = levels;
+    }
+    if !seeded && !config.seed_synthetic_candles {
+        warn!("Starting with an empty volume profile.");
     }
     for lvl in cached_levels.read().await.iter() {
         info!("{}: poc={:.3} vah={:.3} val={:.3}", lvl.window, lvl.poc, lvl.vah, lvl.val);
