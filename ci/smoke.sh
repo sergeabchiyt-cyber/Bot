@@ -2,6 +2,8 @@
 # Boots the release binary and proves, against the live process:
 #   1. /levels exposes a bounded PS window ending on a 17:00 NY session close
 #   2. /calendar is actually populated with real ForexFactory events
+#   3. CORS lets the Node2 static origin (and only that origin) read the REST API
+#   4. /ws still upgrades and replays levels + candles through the CORS layer
 set -uo pipefail
 
 BIN=${BIN:-./target/release/xauusd-engine}
@@ -53,8 +55,74 @@ curl -sf "$BASE/calendar" -o /tmp/cal.json || fail "/calendar request failed"
 python3 ci/verify_calendar.py /tmp/cal.json || fail "/calendar verification failed"
 
 echo
-echo "--- engine log: session/level/calendar lines ---"
-grep -Ei "session|poc=|Calendar|Seeded" "$ENGINE_LOG" | head -40 || true
+echo "--- /candles payload shape (must be untouched by the CORS layer) ---"
+curl -sf "$BASE/candles" -o /tmp/candles.json || fail "/candles request failed"
+python3 ci/verify_candles.py /tmp/candles.json || fail "/candles verification failed"
+
+echo
+echo "--- CORS: only the Node2 origin may read the REST API ---"
+CORS_ALLOWED=${CORS_ALLOWED_ORIGIN:-https://static-dash-frontend.onrender.com}
+CORS_FOREIGN=https://evil.example
+
+# Response headers of a request, CR stripped:
+#   cors_headers <method> <path> [extra curl args...]
+cors_headers() {
+  local method=$1 path=$2
+  shift 2
+  curl -sS -o /dev/null -D - -X "$method" "$@" "$BASE$path" | tr -d '\r'
+}
+
+one_line() { printf '%s' "$1" | tr '\n' '|'; }
+
+echo "1) allowed origin gets access-control-allow-origin on every route"
+for r in /health /levels /candles /calendar /status; do
+  h=$(cors_headers GET "$r" -H "Origin: $CORS_ALLOWED")
+  printf '%s\n' "$h" | head -n1 | grep -q " 200" \
+    || fail "$r: expected 200, got '$(printf '%s\n' "$h" | head -n1)'"
+  printf '%s\n' "$h" | grep -qi "^access-control-allow-origin: $CORS_ALLOWED\$" \
+    || fail "$r: missing/wrong allow-origin [$(one_line "$h")]"
+  printf '%s\n' "$h" | grep -qi "^vary:.*origin" \
+    || fail "$r: missing 'vary: origin' [$(one_line "$h")]"
+  echo "  $r -> $(printf '%s\n' "$h" | grep -i '^access-control-allow-origin' | head -n1)"
+done
+
+echo "2) preflight (OPTIONS) is authorised for that origin"
+h=$(cors_headers OPTIONS /candles -H "Origin: $CORS_ALLOWED" -H "Access-Control-Request-Method: GET")
+printf '%s\n' "$h" | grep -qi "^access-control-allow-methods:.*GET" \
+  || fail "preflight: GET not in allow-methods [$(one_line "$h")]"
+printf '%s\n' "$h" | grep -qi "^access-control-allow-origin: $CORS_ALLOWED\$" \
+  || fail "preflight: missing allow-origin [$(one_line "$h")]"
+printf '%s\n' "$h" | grep -qi "^access-control-max-age: 600\$" \
+  || fail "preflight: missing max-age 600 [$(one_line "$h")]"
+printf '  %s\n' "$(one_line "$(printf '%s\n' "$h" | grep -Ei '^(HTTP/|access-control|vary)')")"
+
+echo "3) every other origin gets NO allow-header"
+for r in /health /levels /candles /calendar /status; do
+  h=$(cors_headers GET "$r" -H "Origin: $CORS_FOREIGN")
+  printf '%s\n' "$h" | grep -qi "^access-control-allow-origin" \
+    && fail "$r: leaked an allow-header to $CORS_FOREIGN [$(one_line "$h")]"
+  echo "  $r (foreign) -> $(printf '%s\n' "$h" | head -n1), no CORS grant"
+done
+h=$(cors_headers OPTIONS /candles -H "Origin: $CORS_FOREIGN" -H "Access-Control-Request-Method: GET")
+printf '%s\n' "$h" | grep -qi "^access-control-allow-origin" \
+  && fail "preflight from $CORS_FOREIGN was authorised [$(one_line "$h")]"
+echo "  OPTIONS /candles (foreign) -> $(printf '%s\n' "$h" | head -n1), no CORS grant"
+
+echo "4) no wildcard, no credentials, no secrets in the response"
+h=$(cors_headers GET /levels -H "Origin: $CORS_ALLOWED")
+printf '%s\n' "$h" | grep -qi "^access-control-allow-origin: \*" && fail "wildcard origin in use"
+printf '%s\n' "$h" | grep -qi "^access-control-allow-credentials" && fail "allow-credentials is enabled"
+printf '%s\n' "$h" | grep -qiE "^(set-cookie|authorization|x-api-key|.*api-key)" && fail "a credential header was exposed"
+grep -qiE "sifting_api_key|api_?key|token" /tmp/levels.json /tmp/candles.json \
+  && fail "a key-like field appeared in a response body"
+echo "  headers are CORS-only"
+
+echo "5) /ws still upgrades and replays frames through the layer"
+python3 ci/verify_ws.py "${BASE#*://}" "$CORS_ALLOWED" || fail "/ws no longer streams through the CORS layer"
+
+echo
+echo "--- engine log: session/level/calendar/CORS lines ---"
+grep -Ei "session|poc=|Calendar|Seeded|CORS" "$ENGINE_LOG" | head -40 || true
 
 echo
 echo "SMOKE TEST PASSED"

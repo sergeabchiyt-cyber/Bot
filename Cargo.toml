@@ -18,3 +18,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dashmap = "6"
 anyhow = "1"
+# CORS for the Node2 static frontend. 0.6 is the line that matches axum 0.8
+# (both use the `http` 1.x types); tower-http 0.4 -> axum 0.6, 0.5 -> axum 0.7.
+tower-http = { version = "0.6", features = ["cors"] }
+
+[dev-dependencies]
+# `ServiceExt::oneshot` — drives the router in unit tests without a socket.
+tower = { version = "0.5", features = ["util"] }

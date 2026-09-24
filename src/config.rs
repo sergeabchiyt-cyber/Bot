@@ -1,5 +1,17 @@
 use std::env;
 
+/// The Node2 static dashboard, deployed separately from the engine. Override
+/// with `CORS_ALLOWED_ORIGIN` when the site moves (or to disable browser CORS
+/// entirely by setting it to an origin that can never match, e.g. empty).
+const DEFAULT_CORS_ALLOWED_ORIGIN: &str = "https://static-dash-frontend.onrender.com";
+
+/// An `Origin` header never carries whitespace or a trailing slash, so a
+/// configured `https://host/` could never match a browser request. Normalising
+/// here keeps a stray slash in the Render dashboard from silently disabling CORS.
+fn normalize_origin(raw: &str) -> String {
+    raw.trim().trim_end_matches('/').to_string()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExecutionVenue {
     DerivDemo,
@@ -41,6 +53,12 @@ pub struct Config {
 
     // ---- Strategy ----
     pub level_proximity_pips: f64,
+
+    // ---- Browser API ----
+    /// The only origin allowed to call the REST API from a browser (the Node2
+    /// static site). Compared against the request's `Origin` header
+    /// byte-for-byte, so it carries no trailing slash.
+    pub cors_allowed_origin: String,
 
     // ---- Browser MCP ----
     pub mcp_browser_url: String,
@@ -151,6 +169,11 @@ impl Config {
 
             level_proximity_pips: env_f64("LEVEL_PROXIMITY_PIPS", 5.0),
 
+            cors_allowed_origin: normalize_origin(&env_str(
+                "CORS_ALLOWED_ORIGIN",
+                DEFAULT_CORS_ALLOWED_ORIGIN,
+            )),
+
             mcp_browser_url: env_str("MCP_BROWSER_URL", "http://localhost:3001"),
             mcp_browser_token: env_opt("MCP_BROWSER_TOKEN"),
             mcp_scrape_secs: env_u64("MCP_SCRAPE_SECS", 900),
@@ -180,5 +203,44 @@ impl Config {
         } else {
             ExecutionVenue::None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cors_origin_is_normalized_for_header_comparison() {
+        // A browser `Origin` header has no trailing slash and no padding, so
+        // anything configured has to be reduced to that same form.
+        assert_eq!(
+            normalize_origin("https://static-dash-frontend.onrender.com"),
+            "https://static-dash-frontend.onrender.com"
+        );
+        assert_eq!(
+            normalize_origin("  https://static-dash-frontend.onrender.com/  "),
+            "https://static-dash-frontend.onrender.com"
+        );
+        assert_eq!(normalize_origin(""), "");
+    }
+
+    #[test]
+    fn default_origin_is_already_in_header_form() {
+        // The comparison with the browser's `Origin` is byte-for-byte, so the
+        // built-in default must not need normalising at all.
+        assert_eq!(
+            normalize_origin(DEFAULT_CORS_ALLOWED_ORIGIN),
+            DEFAULT_CORS_ALLOWED_ORIGIN
+        );
+    }
+
+    #[test]
+    fn from_env_falls_back_to_the_node2_site() {
+        if std::env::var_os("CORS_ALLOWED_ORIGIN").is_some() {
+            print!("CORS_ALLOWED_ORIGIN is set in the environment; skipping");
+            return;
+        }
+        assert_eq!(Config::from_env().cors_allowed_origin, DEFAULT_CORS_ALLOWED_ORIGIN);
     }
 }

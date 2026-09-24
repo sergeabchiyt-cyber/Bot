@@ -31,6 +31,31 @@ WebSocket frames are tagged with `type`: `candle`, `levels`, `bubbles`,
 `trades`, `calendar`, `status`, `heartbeat`. The four order-flow colors:
 `BUY_BUBBLE` green, `SELL_BUBBLE` red, `ABS_BUY` blue, `ABS_SELL` orange.
 
+### CORS (browser clients)
+
+The dashboard (Node2, `https://static-dash-frontend.onrender.com`) is a static
+site on its own origin, so it reads these routes cross-origin. `CorsLayer` is
+applied to the whole router and allows **exactly one origin**, `CORS_ALLOWED_ORIGIN`:
+
+* `GET /health|/levels|/candles|/calendar|/status` from that origin get
+  `access-control-allow-origin: <origin>`, plus `vary: origin, ...` so a shared
+  cache can never hand our grant to a different requester.
+* Any other `Origin` (and requests with no `Origin`, e.g. curl or another
+  server) gets the payload with **no** CORS grant, so no other page can read it.
+* Preflight is limited to `GET, OPTIONS` and `content-type, accept, origin`,
+  cached for 600s. No wildcard, no `Any`, and no `allow_credentials` — nothing
+  here is cookie/token authenticated, so no key ever rides along with a request
+  or a response.
+* `/ws` is not subject to CORS; the layer passes the upgrade through untouched.
+
+Set `CORS_ALLOWED_ORIGIN` in Render when the site moves — the value is compared
+byte-for-byte with the browser's `Origin` header, so it must have no trailing
+slash (a stray one is stripped at startup). If the dashboard is ever served
+through a same-origin reverse proxy on the engine's own domain, no grant is
+needed: point the frontend at relative paths (`/candles`,
+`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`) and
+the layer simply never matches.
+
 ## Data sources
 
 | Feed    | What it provides | Needs |
@@ -66,6 +91,7 @@ MCP_BROWSER_URL=http://localhost:3001     MCP_BROWSER_TOKEN=
 MCP_BROWSER_TOOL_NAVIGATE=  MCP_BROWSER_TOOL_READ=      MCP_SCRAPE_SECS=900
 CALENDAR_URL=               CALENDAR_USE_MCP=true
 LEVEL_PROXIMITY_PIPS=5      SL_MIN_PIPS=10  SL_MAX_PIPS=50  TP_MIN_PIPS=15  TP_MAX_PIPS=100
+CORS_ALLOWED_ORIGIN=https://static-dash-frontend.onrender.com   # only origin allowed to call the REST API from a browser
 RR_MIN=1 RR_MAX=3           DERIV_DEMO_API=  DERIV_APP_ID=  DERIV_API_URL=
 MCP_CHELSEA_URL=            (set to route orders through the ChelseaAI MCP tool)
 ```
@@ -138,9 +164,16 @@ served at `/calendar`, and replayed to WebSocket clients that subscribe to the
 ## Verifying
 
 ```bash
-cargo test                         # session-rollover + calendar parsing
+cargo test                         # session-rollover, calendar parsing, CORS policy
 cargo test -- --ignored --nocapture  # hits the live ForexFactory feed
-bash ci/smoke.sh                   # boots the binary, asserts /levels + /calendar
+bash ci/smoke.sh                   # boots the binary and asserts:
+                                   #   /levels window bounds, /calendar contents,
+                                   #   /candles payload shape, the CORS allow-list
+                                   #   (allowed / preflight / foreign origin) and
+                                   #   that /ws still upgrades and replays frames
 ```
 
-CI runs all three on every push.
+CI runs all three on every push. The CORS probes in `ci/smoke.sh` are the
+authoritative proof of the allow-list, since they run against the real release
+binary; `ci/verify_ws.py` does the WebSocket handshake on a raw socket so no
+websocket client library is needed.
