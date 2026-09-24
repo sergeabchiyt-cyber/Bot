@@ -2,8 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0B0E11" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>XAUUSD Terminal</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -13,74 +15,93 @@
     <div class="brand">
       <span class="dot-live"></span>
       <span class="brand-name">XAUUSD</span>
-      <span class="brand-live">LIVE</span>
+      <span id="status" class="status">—</span>
     </div>
     <div class="price-wrap">
       <span id="last-price">—</span>
-      <span class="sentiment-pill">
-        SENTIMENT&nbsp;<span id="sentiment-value">—</span>
+      <span class="sentiment-pill" title="Fed sentiment">
+        <span class="sentiment-label">FED</span>
+        <span id="sentiment-value">—</span>
       </span>
     </div>
   </header>
 
+  <!-- Next upcoming USD event (filled by calendar.js) -->
+  <div id="next-event" class="next-event" hidden></div>
+
   <nav class="tfbar">
-    <div class="tf-tabs">
+    <div class="tf-tabs" role="tablist" aria-label="Timeframe">
       <button class="tf active" data-tf="15m">15M</button>
-      <button class="tf" data-tf="1h">1H</button>
-      <button class="tf" data-tf="1d">1D</button>
+      <button class="tf" data-tf="1h" disabled title="Coming soon">1H</button>
+      <button class="tf" data-tf="1d" disabled title="Coming soon">1D</button>
     </div>
 
     <div class="legend">
-      <span class="legend-item"><i class="legend-line" style="border-color:#F0B90B"></i>PW PoC</span>
-      <span class="legend-item"><i class="legend-line" style="border-color:#26A69A"></i>PW VaH</span>
-      <span class="legend-item"><i class="legend-line" style="border-color:#EF5350"></i>PW VaL</span>
-      <span class="legend-item"><i class="legend-line" style="border-color:#58A6FF"></i>PS PoC</span>
-      <span class="legend-item"><i class="legend-line" style="border-color:#A371F7"></i>CW PoC</span>
-      <span class="legend-item"><i class="legend-line" style="border-color:#F778BA"></i>CW VaH</span>
-      <span class="legend-item"><i class="legend-line" style="border-color:#22D3EE"></i>CW VaL</span>
+      <span class="legend-item"><i class="swatch poc"></i>PW PoC</span>
+      <span class="legend-item"><i class="swatch vah"></i>PW VaH</span>
+      <span class="legend-item"><i class="swatch val"></i>PW VaL</span>
+      <span class="legend-item"><i class="swatch ps-poc"></i>PS PoC</span>
+      <span class="legend-item"><i class="swatch cw-poc"></i>CW PoC</span>
+      <span class="legend-item"><i class="swatch cw-vah"></i>CW VaH</span>
+      <span class="legend-item"><i class="swatch cw-val"></i>CW VaL</span>
     </div>
-
-    <span id="status" class="status">—</span>
   </nav>
 
   <main class="layout">
     <div id="chart"></div>
 
     <aside class="sidebar">
-      <section class="panel">
-        <header class="panel-head">
-          <span class="panel-title">LEVELS</span>
-          <span id="levels-count" class="panel-count">0</span>
-        </header>
+      <!-- Panel tabs: one panel visible at a time -->
+      <div class="panel-tabs" role="tablist">
+        <button class="panel-tab" data-panel="panel-calendar" role="tab">
+          USD Calendar <span id="calendar-count" class="panel-count">0</span>
+        </button>
+        <button class="panel-tab" data-panel="panel-levels" role="tab">
+          Levels <span id="levels-count" class="panel-count">0</span>
+        </button>
+        <button class="panel-tab" data-panel="panel-bubbles" role="tab">
+          Flow <span id="bubbles-count" class="panel-count">0</span>
+        </button>
+      </div>
+
+      <section id="panel-levels" class="panel panel-levels">
         <div id="levels-list" class="panel-body">
           <div class="empty">Awaiting data…</div>
         </div>
       </section>
 
-      <section class="panel">
+      <section id="panel-calendar" class="panel panel-calendar">
         <header class="panel-head">
-          <span class="panel-title">ORDER FLOW</span>
-          <span id="bubbles-count" class="panel-count">0</span>
+          <span class="panel-title">Impact</span>
+          <div id="calendar-filter" class="chips" role="group" aria-label="Minimum impact">
+            <button class="chip active" data-impact="low">All</button>
+            <button class="chip" data-impact="medium">Med+</button>
+            <button class="chip" data-impact="high">High</button>
+          </div>
         </header>
-        <div id="bubbles-list" class="panel-body">
-          <div class="empty">No bubbles detected</div>
+        <div id="calendar-list" class="panel-body">
+          <div class="empty">Loading events…</div>
         </div>
       </section>
 
-      <section class="panel">
-        <header class="panel-head">
-          <span class="panel-title">CALENDAR</span>
-          <span id="calendar-count" class="panel-count">0</span>
-        </header>
-        <div id="calendar-list" class="panel-body">
-          <div class="empty">No events loaded</div>
+      <section id="panel-bubbles" class="panel panel-bubbles">
+        <div id="bubbles-list" class="panel-body">
+          <div class="empty">No bubbles detected</div>
         </div>
       </section>
     </aside>
   </main>
 
   <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="bubbles.js"></script>
-  <script src="chart.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/bubbles.js"></script>
+  <script src="js/chart.js"></script>
+  <script src="js/levels.js"></script>
+  <script src="js/orderflow.js"></script>
+  <script src="js/calendar.js"></script>
+  <script src="js/sentiment.js"></script>
+  <script src="js/socket.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
