@@ -340,6 +340,12 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
 .swatch.cw-poc { background: var(--violet); }
 .swatch.cw-vah { background: var(--pink); }
 .swatch.cw-val { background: var(--cyan); }
+.swatch.swing-bull-poc { background: #26A69A; }
+.swatch.swing-bull-vah { background: #22C55E; }
+.swatch.swing-bull-val { background: #86EFAC; }
+.swatch.swing-bear-poc { background: #EF5350; }
+.swatch.swing-bear-vah { background: #F97316; }
+.swatch.swing-bear-val { background: #FDBA74; }
 
 /* ---------- Level rows ---------- */
 .level-row {
@@ -357,6 +363,20 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
   color: var(--text-muted);
 }
 .level-price { font-variant-numeric: tabular-nums; color: var(--text); }
+
+/* Swing anchor metadata row: "Bear Swing  3381.00 → 3354.00" */
+.level-anchor {
+  background: var(--bg-2);
+  padding: 6px 10px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.level-meta {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
 
 /* ---------- Bubble rows ---------- */
 .bubble-row {
