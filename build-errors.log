@@ -1,0 +1,89 @@
+[1m[92m    Updating[0m crates.io index
+[1m[92m     Locking[0m 216 packages to latest Rust 1.94 compatible versions
+[1m[92m      Adding[0m generic-array v0.14.7 [1m[33m(available: v0.14.9)[0m
+[1m[92m      Adding[0m matchit v0.8.4 [1m[33m(available: v0.8.6)[0m
+[1m[92m      Adding[0m reqwest v0.12.28 [1m[33m(available: v0.13.5)[0m
+[1m[92m      Adding[0m tokio-tungstenite v0.26.2 [1m[33m(available: v0.30.0)[0m
+[1m[92m      Adding[0m tower-http v0.6.11 [1m[33m(available: v0.7.1)[0m
+[1m[92m Downloading[0m crates ...
+[1m[92m  Downloaded[0m thiserror v2.0.21
+[1m[92m  Downloaded[0m thiserror-impl v2.0.21
+[1m[92m  Downloaded[0m zerocopy v0.8.58
+[1m[92m   Compiling[0m zerocopy v0.8.58
+[1m[92m   Compiling[0m thiserror v2.0.21
+[1m[92m   Compiling[0m thiserror-impl v2.0.21
+[1m[92m    Checking[0m tower-http v0.6.11
+[1m[92m    Checking[0m reqwest v0.12.28
+[1m[92m    Checking[0m ppv-lite86 v0.2.21
+[1m[92m    Checking[0m rand_chacha v0.9.0
+[1m[92m    Checking[0m rand v0.9.5
+[1m[92m    Checking[0m tungstenite v0.29.0
+[1m[92m    Checking[0m tungstenite v0.26.2
+[1m[92m    Checking[0m tokio-tungstenite v0.29.0
+[1m[92m    Checking[0m tokio-tungstenite v0.26.2
+[1m[92m    Checking[0m axum v0.8.9
+[1m[92m    Checking[0m xauusd-engine v0.3.0 (/home/runner/work/Bot/Bot)
+[1m[91merror[E0599][0m[1m: no method named `map` found for struct `GetAll<'_, HeaderValue>` in the current scope[0m
+   [1m[94m--> [0msrc/ws_server.rs:326:18
+    [1m[94m|[0m
+[1m[94m323[0m [1m[94m|[0m               let vary = res
+    [1m[94m|[0m [1m[94m ________________________-[0m
+[1m[94m324[0m [1m[94m|[0m [1m[94m|[0m                 .headers()
+[1m[94m325[0m [1m[94m|[0m [1m[94m|[0m                 .get_all(header::VARY)
+[1m[94m326[0m [1m[94m|[0m [1m[94m|[0m                 .map(|v| v.to_str().unwrap().to_lowercase())
+    [1m[94m|[0m [1m[94m|[0m                 [1m[94m-[0m[1m[91m^^^[0m [1m[91m`GetAll<'_, HeaderValue>` is not an iterator[0m
+    [1m[94m|[0m [1m[94m|_________________|[0m
+    [1m[94m|[0m
+    [1m[94m|[0m
+[1m[96mhelp[0m: call `.into_iter()` first
+    [1m[94m|[0m
+[1m[94m326[0m [1m[94m| [0m                .[92minto_iter().[0mmap(|v| v.to_str().unwrap().to_lowercase())
+    [1m[94m|[0m                  [92m++++++++++++[0m
+
+[1m[91merror[E0282][0m[1m: type annotations needed[0m
+   [1m[94m--> [0msrc/ws_server.rs:326:23
+    [1m[94m|[0m
+[1m[94m326[0m [1m[94m|[0m                 .map(|v| v.to_str().unwrap().to_lowercase())
+    [1m[94m|[0m                       [1m[91m^[0m  [1m[94m-[0m [1m[94mtype must be known at this point[0m
+    [1m[94m|[0m
+[1m[96mhelp[0m: consider giving this closure parameter an explicit type
+    [1m[94m|[0m
+[1m[94m326[0m [1m[94m| [0m                .map(|v[92m: /* Type */[0m| v.to_str().unwrap().to_lowercase())
+    [1m[94m|[0m                        [92m++++++++++++[0m
+
+[1m[33mwarning[0m[1m: field `symbol_type` is never read[0m
+  [1m[94m--> [0msrc/types.rs:30:9
+   [1m[94m|[0m
+[1m[94m 8[0m [1m[94m|[0m pub struct AggTrade {
+   [1m[94m|[0m            [1m[94m--------[0m [1m[94mfield in this struct[0m
+[1m[94m...[0m
+[1m[94m30[0m [1m[94m|[0m     pub symbol_type: Option<i32>,
+   [1m[94m|[0m         [1m[33m^^^^^^^^^^^[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mnote[0m: `AggTrade` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+   [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+[1m[33mwarning[0m[1m: method `candle_count` is never used[0m
+   [1m[94m--> [0msrc/volume_profile.rs:509:12
+    [1m[94m|[0m
+[1m[94m 81[0m [1m[94m|[0m impl VolumeProfileEngine {
+    [1m[94m|[0m [1m[94m------------------------[0m [1m[94mmethod in this implementation[0m
+[1m[94m...[0m
+[1m[94m509[0m [1m[94m|[0m     pub fn candle_count(&self) -> usize {
+    [1m[94m|[0m            [1m[33m^^^^^^^^^^^^[0m
+
+[1m[33mwarning[0m[1m: field `subscriptions` is never read[0m
+  [1m[94m--> [0msrc/ws_server.rs:27:9
+   [1m[94m|[0m
+[1m[94m25[0m [1m[94m|[0m pub struct AppState {
+   [1m[94m|[0m            [1m[94m--------[0m [1m[94mfield in this struct[0m
+[1m[94m26[0m [1m[94m|[0m     pub tx: broadcast::Sender<WsFrame>,
+[1m[94m27[0m [1m[94m|[0m     pub subscriptions: Arc<DashMap<String, Vec<String>>>,
+   [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^[0m
+   [1m[94m|[0m
+   [1m[94m= [0m[1mnote[0m: `AppState` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+[1m[33mwarning[0m: `xauusd-engine` (bin "xauusd-engine") generated 3 warnings
+[1mSome errors have detailed explanations: E0282, E0599.[0m
+[1mFor more information about an error, try `rustc --explain E0282`.[0m
+[1m[91merror[0m: could not compile `xauusd-engine` (bin "xauusd-engine" test) due to 2 previous errors
