@@ -323,6 +323,7 @@ mod tests {
             let vary = res
                 .headers()
                 .get_all(header::VARY)
+                .into_iter()
                 .map(|v| v.to_str().unwrap().to_lowercase())
                 .collect::<Vec<_>>()
                 .join(", ");
