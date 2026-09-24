@@ -27,12 +27,12 @@ use types::{OrderflowEvent, VpCandle, WsFrame};
 use volume_profile::VolumeProfileEngine;
 use ws_server::AppState;
 
-/// Deterministic 15m candle history covering the last ~10 days, used only
-/// when `SEED_SYNTHETIC_CANDLES=1` and every upstream history fetch failed.
+/// Deterministic 15m candle history covering the same fixed 2,000-bar span,
+/// used only when `SEED_SYNTHETIC_CANDLES=1` and SiftingIO history failed.
 /// Each session gets its own price band so the PS window is clearly distinct.
 fn synthetic_history(now_ms: i64) -> Vec<VpCandle> {
     const FIFTEEN_MIN: i64 = 15 * 60 * 1000;
-    let bars = 10 * 24 * 4; // 10 days of 15m bars
+    let bars = sifting_rest::SIFTING_HISTORY_CANDLE_LIMIT as i64;
     let start = now_ms - bars * FIFTEEN_MIN;
     let mut out = Vec::with_capacity(bars as usize);
     for i in 0..bars {
