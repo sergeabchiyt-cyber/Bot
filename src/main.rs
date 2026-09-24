@@ -2,7 +2,6 @@ mod calendar;
 mod config;
 mod status;
 mod types;
-mod binance_rest;
 mod binance_ws;
 mod sifting_rest;
 mod multi_exchange;
@@ -28,12 +27,12 @@ use types::{OrderflowEvent, VpCandle, WsFrame};
 use volume_profile::VolumeProfileEngine;
 use ws_server::AppState;
 
-/// Deterministic 15m candle history covering the last ~10 days, used only
-/// when `SEED_SYNTHETIC_CANDLES=1` and every upstream history fetch failed.
+/// Deterministic 15m candle history covering the same fixed 2,000-bar span,
+/// used only when `SEED_SYNTHETIC_CANDLES=1` and SiftingIO history failed.
 /// Each session gets its own price band so the PS window is clearly distinct.
 fn synthetic_history(now_ms: i64) -> Vec<VpCandle> {
     const FIFTEEN_MIN: i64 = 15 * 60 * 1000;
-    let bars = 10 * 24 * 4; // 10 days of 15m bars
+    let bars = sifting_rest::SIFTING_HISTORY_CANDLE_LIMIT as i64;
     let start = now_ms - bars * FIFTEEN_MIN;
     let mut out = Vec::with_capacity(bars as usize);
     for i in 0..bars {
@@ -81,7 +80,9 @@ async fn main() -> anyhow::Result<()> {
 
     let (bc_tx, _) = broadcast::channel(4096);
     let (tick_tx, mut tick_rx) = mpsc::channel(8192);
-    let (kline_tx, mut kline_rx) = mpsc::channel(256);
+    // Sifting is the sole live price/candle source. Binance remains on the
+    // separate aggTrade channel below for order flow only.
+    let (sifting_candle_tx, mut sifting_candle_rx) = mpsc::channel::<VpCandle>(256);
     // Closed-candle fan-out for the execution trigger.
     let (exec_tx, mut exec_rx) = mpsc::channel::<types::VpCandle>(64);
 
@@ -97,73 +98,67 @@ async fn main() -> anyhow::Result<()> {
     })));
 
     // ---------- Cold-start history ----------
-    // Primary: Sifting.io commodities bars. Fallback: Binance futures klines,
-    // so the volume profile seeds even without a Sifting key.
+    // SiftingIO is the only historical price source. The REST adapter rejects
+    // any response other than exactly 2,000 15m candles, so Binance's futures
+    // price series can never leak into the VP calculation.
     let mut seeded = false;
     if !config.sifting_api_key.is_empty() {
         match sifting_rest::fetch_sifting_klines_15m(
             &config.sifting_hist_url,
             &config.sifting_api_key,
             &config.sifting_symbol,
-            1000,
         )
         .await
         {
             Ok(candles) => {
-                info!("Seeded {} historical 15M candles from Sifting.io", candles.len());
+                debug_assert_eq!(
+                    candles.len(),
+                    sifting_rest::SIFTING_HISTORY_CANDLE_LIMIT
+                );
+                info!(
+                    "Seeded exactly {} historical 15M candles from SiftingIO",
+                    candles.len()
+                );
+                *cached_candles.write().await = candles.clone();
                 let mut vp_w = vp.write().await;
-                for c in candles {
-                    vp_w.ingest_candle(c);
-                }
+                vp_w.ingest_candles(candles);
                 let levels = vp_w.all_levels();
                 drop(vp_w);
                 *cached_levels.write().await = levels;
                 seeded = true;
             }
-            Err(e) => warn!("Cold-start Sifting REST fetch failed: {e}. Trying Binance."),
+            Err(e) => warn!(
+                "SiftingIO REST history fetch failed; refusing Binance price fallback: {e}"
+            ),
         }
     } else {
-        info!("No SIFTING_API_KEY set — seeding history from Binance instead");
+        warn!("No SIFTING_API_KEY set — historical VP seed is unavailable");
     }
-    if !seeded {
-        match binance_rest::fetch_klines_15m("XAUUSDT", 1000).await {
-            Ok(candles) if !candles.is_empty() => {
-                info!("Seeded {} historical 15M candles from Binance", candles.len());
-                let mut vp_w = vp.write().await;
-                for c in candles {
-                    vp_w.ingest_candle(c);
-                }
-                let levels = vp_w.all_levels();
-                drop(vp_w);
-                *cached_levels.write().await = levels;
-                seeded = true;
-            }
-            Ok(_) => warn!("Cold-start Binance REST returned no candles."),
-            Err(e) => warn!("Cold-start Binance REST fetch failed: {e}."),
-        }
-    }
-    // CI / air-gapped fallback: upstream history is geo-blocked on hosted
-    // runners, so allow a deterministic synthetic seed purely so the
-    // volume-profile endpoints remain verifiable. Off unless asked for.
+    // CI / air-gapped fallback: upstream history is unavailable on hosted
+    // runners, so allow deterministic synthetic candles only when explicitly
+    // requested. This is never enabled by default and is not a Binance path.
     if !seeded && config.seed_synthetic_candles {
         let candles = synthetic_history(chrono::Utc::now().timestamp_millis());
         warn!(
-            "No upstream history available — seeding {} SYNTHETIC candles (SEED_SYNTHETIC_CANDLES=1)",
+            "No SiftingIO history available — seeding {} SYNTHETIC candles (SEED_SYNTHETIC_CANDLES=1)",
             candles.len()
         );
+        *cached_candles.write().await = candles.clone();
         let mut vp_w = vp.write().await;
-        for c in candles {
-            vp_w.ingest_candle(c);
-        }
+        vp_w.ingest_candles(candles);
         let levels = vp_w.all_levels();
         drop(vp_w);
         *cached_levels.write().await = levels;
+        seeded = true;
     }
-    if !seeded && !config.seed_synthetic_candles {
+    if !seeded {
         warn!("Starting with an empty volume profile.");
     }
     for lvl in cached_levels.read().await.iter() {
-        info!("{}: poc={:.3} vah={:.3} val={:.3}", lvl.window, lvl.poc, lvl.vah, lvl.val);
+        info!(
+            "{}: poc={:.3} vah={:.3} val={:.3} direction={}",
+            lvl.window, lvl.poc, lvl.vah, lvl.val, lvl.direction
+        );
     }
 
     // ---------- Sifting spot stream (chart + remote source of truth) ----------
@@ -172,9 +167,12 @@ async fn main() -> anyhow::Result<()> {
         let key = config.sifting_api_key.clone();
         let symbol = config.sifting_symbol.clone();
         let bc = bc_tx.clone();
+        let candle_tx = sifting_candle_tx.clone();
         let st = status.clone();
         tokio::spawn(async move {
-            if let Err(e) = sifting_ws::run_sifting_stream(url, key, symbol, bc, st).await {
+            if let Err(e) =
+                sifting_ws::run_sifting_stream(url, key, symbol, bc, candle_tx, st).await
+            {
                 tracing::error!("Sifting stream terminated: {e}");
             }
         });
@@ -182,31 +180,20 @@ async fn main() -> anyhow::Result<()> {
         status.set("sifting", "off (no key)");
     }
 
-    // ---------- Binance chart + order flow streams ----------
+    // ---------- Binance order flow (kept deliberately) ----------
+    // Binance aggTrade is used for directional order flow only. It must not
+    // feed candles or volume-profile prices, which all come from SiftingIO.
     if config.feed_binance {
-        {
-            let url = config.binance_ws_url.clone();
-            let tx = tick_tx.clone();
-            let st = status.clone();
-            tokio::spawn(async move {
-                if let Err(e) = binance_ws::run_agg_trade_stream(url, tx, st).await {
-                    tracing::error!("aggTrade stream terminated: {e}");
-                }
-            });
-        }
-        {
-            let url = config.binance_kline_url.clone();
-            let tx = kline_tx.clone();
-            let st = status.clone();
-            tokio::spawn(async move {
-                if let Err(e) = binance_ws::run_kline_stream(url, tx, st).await {
-                    tracing::error!("kline stream terminated: {e}");
-                }
-            });
-        }
+        let url = config.binance_ws_url.clone();
+        let tx = tick_tx.clone();
+        let st = status.clone();
+        tokio::spawn(async move {
+            if let Err(e) = binance_ws::run_agg_trade_stream(url, tx, st).await {
+                tracing::error!("aggTrade stream terminated: {e}");
+            }
+        });
     } else {
         status.set("binance", "off");
-        status.set("binance_kline", "off");
     }
 
     // ---------- Additional order flow sources ----------
@@ -330,9 +317,10 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // ---------- Kline consumer (chart broadcast + VP + execution fan-out) ----------
-    // Every kline update streams to the chart (Binance is the chart source);
-    // closed candles feed the Volume Profile and the execution trigger.
+    // ---------- Sifting candle consumer (chart + VP + execution fan-out) ----------
+    // SiftingIO broadcasts in-progress candles directly from the WS adapter;
+    // completed candles arrive here and are the only live price candles that
+    // can update the VP. No Binance kline/REST price path remains.
     {
         let vp = vp.clone();
         let cached = cached_levels.clone();
@@ -340,24 +328,18 @@ async fn main() -> anyhow::Result<()> {
         let bc = bc_tx.clone();
         let exec = exec_tx.clone();
         tokio::spawn(async move {
-            while let Some(ev) = kline_rx.recv().await {
-                let candle = ev.kline.to_vp_candle("binance");
-                // Live chart update (in-progress candles included).
+            while let Some(candle) = sifting_candle_rx.recv().await {
                 {
                     let mut buf = cached_c.write().await;
                     buf.retain(|c| c.time != candle.time);
                     buf.push(candle.clone());
                     buf.sort_by_key(|c| c.time);
-                    if buf.len() > 500 {
-                        let drain = buf.len() - 500;
+                    if buf.len() > sifting_rest::SIFTING_HISTORY_CANDLE_LIMIT {
+                        let drain = buf.len() - sifting_rest::SIFTING_HISTORY_CANDLE_LIMIT;
                         buf.drain(0..drain);
                     }
                 }
-                let _ = bc.send(WsFrame::Candle { data: candle.clone() });
 
-                if !ev.kline.is_closed {
-                    continue;
-                }
                 let mut vp_w = vp.write().await;
                 vp_w.ingest_candle(candle.clone());
                 let levels = vp_w.all_levels();

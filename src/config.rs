@@ -12,8 +12,9 @@ pub struct Config {
     pub port: u16,
 
     // ---- Chart / candles ----
+    /// Binance is retained for order flow only; price history/live candles
+    /// come from SiftingIO so VP calculations use one price domain.
     pub binance_ws_url: String,
-    pub binance_kline_url: String,
     pub sifting_ws_url: String,
     pub sifting_hist_url: String,
     pub sifting_api_key: String,
@@ -124,9 +125,6 @@ impl Config {
 
             binance_ws_url: env::var("BINANCE_WS_URL").unwrap_or_else(|_| {
                 format!("wss://fstream.binance.com/ws/{binance_symbol}@aggTrade")
-            }),
-            binance_kline_url: env::var("BINANCE_KLINE_URL").unwrap_or_else(|_| {
-                format!("wss://fstream.binance.com/ws/{binance_symbol}@kline_15m")
             }),
             sifting_ws_url: env_str("SIFTING_WS_URL", "wss://stream.sifting.io/ws/v1"),
             sifting_hist_url: env_str("SIFTING_HIST_URL", "https://api.sifting.io"),

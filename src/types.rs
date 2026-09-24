@@ -94,60 +94,6 @@ impl AggTrade {
 }
 
 // =====================================================================
-// Binance market data
-// =====================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KlineEvent {
-    #[serde(rename = "e")]
-    pub event_type: String,
-    #[serde(rename = "E")]
-    pub event_time: i64,
-    #[serde(rename = "s")]
-    pub symbol: String,
-    #[serde(rename = "k")]
-    pub kline: Kline,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Kline {
-    #[serde(rename = "t")]
-    pub start_time: i64,
-    #[serde(rename = "T")]
-    pub close_time: i64,
-    #[serde(rename = "s")]
-    pub symbol: String,
-    #[serde(rename = "i")]
-    pub interval: String,
-    #[serde(rename = "o")]
-    pub open: String,
-    #[serde(rename = "c")]
-    pub close: String,
-    #[serde(rename = "h")]
-    pub high: String,
-    #[serde(rename = "l")]
-    pub low: String,
-    #[serde(rename = "v")]
-    pub volume: String,
-    #[serde(rename = "x")]
-    pub is_closed: bool,
-}
-
-impl Kline {
-    pub fn to_vp_candle(&self, source: &str) -> VpCandle {
-        VpCandle {
-            time: self.start_time,
-            open: self.open.parse().unwrap_or(0.0),
-            high: self.high.parse().unwrap_or(0.0),
-            low: self.low.parse().unwrap_or(0.0),
-            close: self.close.parse().unwrap_or(0.0),
-            volume: self.volume.parse().unwrap_or(0.0),
-            source: source.into(),
-        }
-    }
-}
-
-// =====================================================================
 // Volume profile
 // =====================================================================
 
@@ -179,6 +125,16 @@ pub struct VpLevels {
     pub end: i64,
     /// When this profile was last recomputed (ms).
     pub timestamp: i64,
+    /// `bullish` / `bearish` for swing-anchored profiles, `neutral` for the
+    /// calendar windows retained for compatibility.
+    #[serde(default)]
+    pub direction: String,
+    /// Best structural extremes used by a swing profile. These are absent on
+    /// PW/PS/CW levels and included so clients can audit the anchor selection.
+    #[serde(default)]
+    pub swing_high: Option<f64>,
+    #[serde(default)]
+    pub swing_low: Option<f64>,
 }
 
 // =====================================================================

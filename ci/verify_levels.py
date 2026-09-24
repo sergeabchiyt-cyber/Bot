@@ -22,6 +22,14 @@ assert 23 <= span_h <= 25, f"PS window is not one session ({span_h}h): {ps}"
 assert ps["val"] <= ps["poc"] <= ps["vah"], f"bad PS value area: {ps}"
 assert ps["poc"] > 0, f"PS poc not computed: {ps}"
 
+swing_names = {"SWING_BULL", "SWING_BEAR"}.intersection(windows)
+assert len(swing_names) == 1, f"expected one directional swing profile: {levels}"
+swing = windows[next(iter(swing_names))]
+assert swing["direction"] in {"bullish", "bearish"}, f"bad swing direction: {swing}"
+assert swing.get("swing_high") is not None and swing.get("swing_low") is not None
+assert swing["swing_low"] < swing["swing_high"], f"bad swing anchors: {swing}"
+assert swing["start"] < swing["end"], f"unbounded swing profile: {swing}"
+
 # The PS window must END at a 17:00 America/New_York session close.
 try:
     from zoneinfo import ZoneInfo
@@ -34,8 +42,11 @@ except ImportError:
 
 print(f"PS session window: {fmt(ps['start'])} -> {fmt(ps['end'])} ({span_h:.1f}h)")
 print(f"PS poc={ps['poc']:.3f} vah={ps['vah']:.3f} val={ps['val']:.3f}")
-for name in ("PW", "CW"):
+for name in ("PW", "CW", "SWING_BULL", "SWING_BEAR"):
     if name in windows:
         w = windows[name]
-        print(f"{name} poc={w['poc']:.3f} vah={w['vah']:.3f} val={w['val']:.3f}")
+        print(
+            f"{name} direction={w.get('direction')} poc={w['poc']:.3f} "
+            f"vah={w['vah']:.3f} val={w['val']:.3f}"
+        )
 print("LEVELS CHECK PASSED")

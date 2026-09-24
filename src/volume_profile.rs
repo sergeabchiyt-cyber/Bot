@@ -3,8 +3,10 @@ use chrono_tz::America::New_York;
 
 use crate::types::{VpCandle, VpLevels};
 
-const BIN_SIZE: f64 = 0.50;      // $0.50 bins for gold
-const VA_PCT: f64 = 0.70;        // 70% value area
+const BIN_SIZE: f64 = 0.50; // $0.50 bins for gold
+const VA_PCT: f64 = 0.70; // 70% value area
+const SWING_PIVOT_RADIUS: usize = 8;
+const FIFTEEN_MIN_MS: i64 = 15 * 60 * 1000;
 
 /// Hour (America/New_York) at which the FX trading session rolls over.
 /// 17:00 NY is the daily close/open used by every retail gold feed.
@@ -14,13 +16,61 @@ const SESSION_CLOSE_HOUR: u32 = 17;
 /// session. Covers the weekend hole (Fri 17:00 → Sun 18:00) plus holidays.
 const MAX_SESSION_LOOKBACK: i64 = 5;
 
-/// How much history we keep in memory: previous week + current week + slack.
-const RETAIN_MS: i64 = 16 * 24 * 60 * 60 * 1000;
+/// Keep the complete fixed 2,000-candle Sifting seed (about 21 days of 15m
+/// bars) plus room for live closes and session/week boundaries.
+const RETAIN_MS: i64 = 35 * 24 * 60 * 60 * 1000;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PivotKind {
+    High,
+    Low,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SwingDirection {
+    Bullish,
+    Bearish,
+}
+
+impl SwingDirection {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Bullish => "SWING_BULL",
+            Self::Bearish => "SWING_BEAR",
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Bullish => "bullish",
+            Self::Bearish => "bearish",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Pivot {
+    index: usize,
+    kind: PivotKind,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SwingLeg {
+    start_index: usize,
+    end_index: usize,
+    direction: SwingDirection,
+    high: f64,
+    low: f64,
+}
 
 pub struct VolumeProfileEngine {
     pub pw_levels: Option<VpLevels>,
     pub ps_levels: Option<VpLevels>,
     pub cw_levels: Option<VpLevels>,
+    /// The most recent completed pivot-to-pivot swing profile. Its label is
+    /// `SWING_BULL` or `SWING_BEAR`, so consumers can target the correct leg
+    /// without guessing from a time-window profile.
+    pub swing_levels: Option<VpLevels>,
     /// End timestamp (ms) of the session PS currently describes. Used to
     /// detect a session rollover so PS is recomputed on every session close
     /// instead of being frozen at whatever it was at boot.
@@ -34,21 +84,57 @@ impl VolumeProfileEngine {
             pw_levels: None,
             ps_levels: None,
             cw_levels: None,
+            swing_levels: None,
             ps_session_end: None,
             candles: Vec::new(),
         }
     }
 
-    fn compute(candles: &[VpCandle], label: &str, start: i64, end: i64) -> Option<VpLevels> {
+    /// Build a price histogram. For swing profiles `range` is the exact best
+    /// low/high of the directional leg; session/week profiles derive their
+    /// range from the candles in that window.
+    fn compute(
+        candles: &[VpCandle],
+        label: &str,
+        start: i64,
+        end: i64,
+        range: Option<(f64, f64)>,
+        direction: &str,
+        swing_high: Option<f64>,
+        swing_low: Option<f64>,
+    ) -> Option<VpLevels> {
         if candles.is_empty() {
             return None;
         }
-        let mut lo = f64::INFINITY;
-        let mut hi = f64::NEG_INFINITY;
-        for c in candles {
-            if c.low < lo { lo = c.low; }
-            if c.high > hi { hi = c.high; }
+
+        let valid: Vec<&VpCandle> = candles
+            .iter()
+            .filter(|c| {
+                c.time > 0
+                    && c.open.is_finite()
+                    && c.high.is_finite()
+                    && c.low.is_finite()
+                    && c.close.is_finite()
+                    && c.volume.is_finite()
+                    && c.volume > 0.0
+                    && c.high >= c.low
+            })
+            .collect();
+        if valid.is_empty() {
+            return None;
         }
+
+        let (lo, hi) = range.unwrap_or_else(|| {
+            let lo = valid
+                .iter()
+                .map(|c| c.low)
+                .fold(f64::INFINITY, f64::min);
+            let hi = valid
+                .iter()
+                .map(|c| c.high)
+                .fold(f64::NEG_INFINITY, f64::max);
+            (lo, hi)
+        });
         if !lo.is_finite() || !hi.is_finite() || hi <= lo {
             return None;
         }
@@ -56,40 +142,77 @@ impl VolumeProfileEngine {
         let n_bins = (((hi - lo) / BIN_SIZE).ceil() as usize).max(1);
         let mut bins = vec![0.0_f64; n_bins];
 
-        for c in candles {
-            let i_lo = (((c.low - lo) / BIN_SIZE).floor() as isize).max(0) as usize;
-            let i_hi = (((c.high - lo) / BIN_SIZE).floor() as isize)
-                .min(n_bins as isize - 1)
-                .max(0) as usize;
-            let span = (i_hi - i_lo + 1) as f64;
-            let per_bin = c.volume / span;
-            for i in i_lo..=i_hi {
-                bins[i] += per_bin;
+        for c in valid {
+            let clipped_low = c.low.max(lo);
+            let clipped_high = c.high.min(hi);
+            if clipped_high < clipped_low {
+                continue;
             }
+
+            let low_idx = Self::bin_index(clipped_low, lo, n_bins);
+            let high_idx = Self::bin_index(clipped_high, lo, n_bins);
+            let candle_range = c.high - c.low;
+
+            if candle_range <= f64::EPSILON {
+                bins[low_idx] += c.volume;
+                continue;
+            }
+
+            // Allocate volume by the actual overlap with each price row. The
+            // previous implementation split it equally among every row in a
+            // candle's range, which shifts POC/VA when ranges are uneven.
+            for i in low_idx..=high_idx {
+                let bin_low = lo + i as f64 * BIN_SIZE;
+                let bin_high = bin_low + BIN_SIZE;
+                let overlap_low = c.low.max(bin_low);
+                let overlap_high = c.high.min(bin_high);
+                let overlap = (overlap_high - overlap_low).max(0.0);
+                if overlap > 0.0 {
+                    bins[i] += c.volume * overlap / candle_range;
+                }
+            }
+        }
+
+        let total: f64 = bins.iter().sum();
+        if !total.is_finite() || total <= 0.0 {
+            return None;
         }
 
         let poc_idx = bins
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|a, b| {
+                a.1.partial_cmp(b.1)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .map(|(i, _)| i)?;
         let poc = lo + (poc_idx as f64 + 0.5) * BIN_SIZE;
 
-        let total: f64 = bins.iter().sum();
+        // Standard market-profile value area expansion: start at POC and add
+        // the larger adjacent row until 70% of total volume is included. On a
+        // tie, prefer the upper row for deterministic CME-style expansion.
         let target = total * VA_PCT;
         let mut va_sum = bins[poc_idx];
         let mut lo_idx = poc_idx;
         let mut hi_idx = poc_idx;
 
         while va_sum < target && (lo_idx > 0 || hi_idx < n_bins - 1) {
-            let lo_vol = if lo_idx > 0 { bins[lo_idx - 1] } else { f64::NEG_INFINITY };
-            let hi_vol = if hi_idx < n_bins - 1 { bins[hi_idx + 1] } else { f64::NEG_INFINITY };
-            if lo_vol >= hi_vol {
-                lo_idx -= 1;
-                va_sum += bins[lo_idx];
+            let lo_vol = if lo_idx > 0 {
+                bins[lo_idx - 1]
             } else {
+                f64::NEG_INFINITY
+            };
+            let hi_vol = if hi_idx < n_bins - 1 {
+                bins[hi_idx + 1]
+            } else {
+                f64::NEG_INFINITY
+            };
+            if hi_vol >= lo_vol {
                 hi_idx += 1;
                 va_sum += bins[hi_idx];
+            } else {
+                lo_idx -= 1;
+                va_sum += bins[lo_idx];
             }
         }
 
@@ -104,13 +227,38 @@ impl VolumeProfileEngine {
             start,
             end,
             timestamp: Utc::now().timestamp_millis(),
+            direction: direction.into(),
+            swing_high,
+            swing_low,
         })
     }
 
-    pub fn ingest_candle(&mut self, candle: VpCandle) {
-        self.candles.push(candle);
+    fn bin_index(price: f64, lo: f64, n_bins: usize) -> usize {
+        (((price - lo) / BIN_SIZE).floor() as isize)
+            .clamp(0, n_bins as isize - 1) as usize
+    }
+
+    fn upsert_candle(&mut self, candle: VpCandle) {
+        if let Some(existing) = self.candles.iter_mut().find(|c| c.time == candle.time) {
+            *existing = candle;
+        } else {
+            self.candles.push(candle);
+        }
         self.candles.sort_by_key(|c| c.time);
-        self.candles.dedup_by_key(|c| c.time);
+    }
+
+    /// Add or replace one candle and recompute all profiles.
+    pub fn ingest_candle(&mut self, candle: VpCandle) {
+        self.upsert_candle(candle);
+        self.recompute(Utc::now().timestamp_millis());
+    }
+
+    /// Seed the engine in one pass. This avoids recomputing a 2,000-candle
+    /// history 2,000 times during cold start.
+    pub fn ingest_candles(&mut self, candles: Vec<VpCandle>) {
+        for candle in candles {
+            self.upsert_candle(candle);
+        }
         self.recompute(Utc::now().timestamp_millis());
     }
 
@@ -120,11 +268,15 @@ impl VolumeProfileEngine {
     /// PS  = the last **closed** session (17:00 NY → 17:00 NY), so it rolls
     ///       forward at every session close instead of being computed once.
     /// CW  = current week so far.
+    /// SWING = the most recent completed pivot-to-pivot directional leg.
     pub fn recompute(&mut self, now_ms: i64) {
         let week_start = Self::most_recent_week_start_utc(now_ms);
         let pw_start = week_start - 7 * 24 * 60 * 60 * 1000;
 
         let retain_floor = pw_start.min(now_ms - RETAIN_MS);
+        // Keep out-of-order candles in storage; the individual windows apply
+        // their own time bounds. This also lets a historical backfill arrive
+        // before a caller advances its synthetic/test clock.
         self.candles.retain(|c| c.time >= retain_floor);
 
         let pw: Vec<_> = self
@@ -133,15 +285,208 @@ impl VolumeProfileEngine {
             .filter(|c| c.time >= pw_start && c.time < week_start)
             .cloned()
             .collect();
-        let cw: Vec<_> = self.candles.iter().filter(|c| c.time >= week_start).cloned().collect();
+        let cw: Vec<_> = self
+            .candles
+            .iter()
+            .filter(|c| c.time >= week_start && c.time <= now_ms)
+            .cloned()
+            .collect();
 
-        self.pw_levels = Self::compute(&pw, "PW", pw_start, week_start);
-        self.cw_levels = Self::compute(&cw, "CW", week_start, now_ms);
+        self.pw_levels = Self::compute(
+            &pw,
+            "PW",
+            pw_start,
+            week_start,
+            None,
+            "neutral",
+            None,
+            None,
+        );
+        self.cw_levels = Self::compute(
+            &cw,
+            "CW",
+            week_start,
+            now_ms,
+            None,
+            "neutral",
+            None,
+            None,
+        );
 
         // ---- Previous session (rolls at every session close) ----
         let (ps_start, ps_end, ps_candles) = self.previous_session_slice(now_ms);
-        self.ps_levels = Self::compute(&ps_candles, "PS", ps_start, ps_end);
+        self.ps_levels = Self::compute(
+            &ps_candles,
+            "PS",
+            ps_start,
+            ps_end,
+            None,
+            "neutral",
+            None,
+            None,
+        );
         self.ps_session_end = Some(ps_end);
+
+        self.swing_levels = self.compute_swing();
+    }
+
+    fn compute_swing(&self) -> Option<VpLevels> {
+        if self.candles.len() < 2 {
+            return None;
+        }
+        let leg = Self::latest_swing(&self.candles)?;
+        let start_index = leg.start_index.min(leg.end_index);
+        let end_index = leg.start_index.max(leg.end_index);
+        let candles = &self.candles[start_index..=end_index];
+        let start = self.candles[start_index].time;
+        let end = self.candles[end_index]
+            .time
+            .saturating_add(Self::candle_interval(candles));
+
+        Self::compute(
+            candles,
+            leg.direction.label(),
+            start,
+            end,
+            Some((leg.low, leg.high)),
+            leg.direction.as_str(),
+            Some(leg.high),
+            Some(leg.low),
+        )
+    }
+
+    fn candle_interval(candles: &[VpCandle]) -> i64 {
+        candles
+            .windows(2)
+            .map(|pair| pair[1].time.saturating_sub(pair[0].time))
+            .find(|delta| *delta > 0)
+            .unwrap_or(FIFTEEN_MIN_MS)
+    }
+
+    /// Find the latest confirmed alternating pivot pair. A high followed by a
+    /// low is a bearish leg (high → low); a low followed by a high is bullish
+    /// (low → high). The profile's price bounds are the best high and best low
+    /// inside that leg, not the arbitrary bounds of a calendar window.
+    fn latest_swing(candles: &[VpCandle]) -> Option<SwingLeg> {
+        let mut pivots = Vec::new();
+        if candles.len() >= SWING_PIVOT_RADIUS * 2 + 1 {
+            for index in SWING_PIVOT_RADIUS..candles.len() - SWING_PIVOT_RADIUS {
+                let high = candles[index].high;
+                let low = candles[index].low;
+                let is_high = high.is_finite()
+                    && (index - SWING_PIVOT_RADIUS..=index + SWING_PIVOT_RADIUS)
+                        .all(|j| j == index || high > candles[j].high);
+                let is_low = low.is_finite()
+                    && (index - SWING_PIVOT_RADIUS..=index + SWING_PIVOT_RADIUS)
+                        .all(|j| j == index || low < candles[j].low);
+
+                if is_high {
+                    Self::push_pivot(&mut pivots, PivotKind::High, index, candles);
+                } else if is_low {
+                    Self::push_pivot(&mut pivots, PivotKind::Low, index, candles);
+                }
+            }
+        }
+
+        let mut latest = None;
+        for pair in pivots.windows(2) {
+            let (first, second) = (pair[0], pair[1]);
+            let direction = match (first.kind, second.kind) {
+                (PivotKind::Low, PivotKind::High) => SwingDirection::Bullish,
+                (PivotKind::High, PivotKind::Low) => SwingDirection::Bearish,
+                _ => continue,
+            };
+            let start_index = first.index;
+            let end_index = second.index;
+            let slice = &candles[start_index..=end_index];
+            let high = slice
+                .iter()
+                .map(|c| c.high)
+                .filter(|v| v.is_finite())
+                .fold(f64::NEG_INFINITY, f64::max);
+            let low = slice
+                .iter()
+                .map(|c| c.low)
+                .filter(|v| v.is_finite())
+                .fold(f64::INFINITY, f64::min);
+            if high.is_finite() && low.is_finite() && high > low {
+                latest = Some(SwingLeg {
+                    start_index,
+                    end_index,
+                    direction,
+                    high,
+                    low,
+                });
+            }
+        }
+
+        if latest.is_some() {
+            return latest;
+        }
+
+        // A short or monotonic history may not contain a confirmed pivot on
+        // both sides. Still anchor a deterministic best-extreme leg rather
+        // than silently falling back to a mixed source/time profile.
+        let high_index = candles
+            .iter()
+            .enumerate()
+            .max_by(|a, b| {
+                a.1.high
+                    .partial_cmp(&b.1.high)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(i, _)| i)?;
+        let low_index = candles
+            .iter()
+            .enumerate()
+            .min_by(|a, b| {
+                a.1.low
+                    .partial_cmp(&b.1.low)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(i, _)| i)?;
+        if high_index == low_index {
+            return None;
+        }
+
+        let (start_index, end_index, direction) = if low_index < high_index {
+            (low_index, high_index, SwingDirection::Bullish)
+        } else {
+            (high_index, low_index, SwingDirection::Bearish)
+        };
+        let slice = &candles[start_index..=end_index];
+        let high = slice
+            .iter()
+            .map(|c| c.high)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let low = slice.iter().map(|c| c.low).fold(f64::INFINITY, f64::min);
+        if high > low {
+            Some(SwingLeg {
+                start_index,
+                end_index,
+                direction,
+                high,
+                low,
+            })
+        } else {
+            None
+        }
+    }
+
+    fn push_pivot(pivots: &mut Vec<Pivot>, kind: PivotKind, index: usize, candles: &[VpCandle]) {
+        if let Some(previous) = pivots.last_mut() {
+            if previous.kind == kind {
+                let replace = match kind {
+                    PivotKind::High => candles[index].high >= candles[previous.index].high,
+                    PivotKind::Low => candles[index].low <= candles[previous.index].low,
+                };
+                if replace {
+                    previous.index = index;
+                }
+                return;
+            }
+        }
+        pivots.push(Pivot { index, kind });
     }
 
     /// Recompute only when the session boundary has moved past the session PS
@@ -194,7 +539,10 @@ impl VolumeProfileEngine {
     /// Most recent 17:00 America/New_York boundary at or before `now_ms`.
     /// DST-safe: the wall-clock hour is re-anchored in the local zone.
     pub fn last_session_close_utc(now_ms: i64) -> i64 {
-        let now = Utc.timestamp_millis_opt(now_ms).single().unwrap_or_else(Utc::now);
+        let now = Utc
+            .timestamp_millis_opt(now_ms)
+            .single()
+            .unwrap_or_else(Utc::now);
         let local = now.with_timezone(&New_York);
         let mut close = Self::ny_close_on(local.year(), local.month(), local.day());
         if close > now_ms {
@@ -235,14 +583,26 @@ impl VolumeProfileEngine {
     /// order flow for bubble detection.
     pub fn all_levels(&self) -> Vec<VpLevels> {
         let mut out = Vec::new();
-        if let Some(pw) = &self.pw_levels { out.push(pw.clone()); }
-        if let Some(ps) = &self.ps_levels { out.push(ps.clone()); }
-        if let Some(cw) = &self.cw_levels { out.push(cw.clone()); }
+        if let Some(pw) = &self.pw_levels {
+            out.push(pw.clone());
+        }
+        if let Some(ps) = &self.ps_levels {
+            out.push(ps.clone());
+        }
+        if let Some(cw) = &self.cw_levels {
+            out.push(cw.clone());
+        }
+        if let Some(swing) = &self.swing_levels {
+            out.push(swing.clone());
+        }
         out
     }
 
     pub fn most_recent_week_start_utc(now_ms: i64) -> i64 {
-        let now = Utc.timestamp_millis_opt(now_ms).single().unwrap_or_else(Utc::now);
+        let now = Utc
+            .timestamp_millis_opt(now_ms)
+            .single()
+            .unwrap_or_else(Utc::now);
         let local = now.with_timezone(&New_York);
         let days_since_sunday = local.weekday().num_days_from_sunday() as i64;
         let mut sunday = local - Duration::days(days_since_sunday);
@@ -294,6 +654,22 @@ mod tests {
         }
         engine.candles.sort_by_key(|c| c.time);
         engine.candles.dedup_by_key(|c| c.time);
+    }
+
+    fn swing_history(prices: &[f64]) -> Vec<VpCandle> {
+        let start = Utc::now().timestamp_millis() - prices.len() as i64 * 15 * MIN;
+        prices
+            .iter()
+            .enumerate()
+            .map(|(i, price)| {
+                candle(
+                    start + i as i64 * 15 * MIN,
+                    price - 0.5,
+                    price + 0.5,
+                    100.0,
+                )
+            })
+            .collect()
     }
 
     #[test]
@@ -401,5 +777,49 @@ mod tests {
         assert_eq!(cw.start, week_start);
         assert!((3100.0..=3110.0).contains(&pw.poc));
         assert!((3200.0..=3210.0).contains(&cw.poc));
+    }
+
+    #[test]
+    fn bearish_swing_is_anchored_high_to_low() {
+        let prices = [
+            100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 104.0, 103.0, 102.0, 101.0,
+            100.0, 99.0, 98.0, 97.0, 96.0, 95.0, 96.0, 97.0, 98.0, 99.0, 100.0, 101.0,
+            102.0, 103.0, 104.0,
+        ];
+        let mut e = VolumeProfileEngine::new();
+        e.ingest_candles(swing_history(&prices));
+        let swing = e.swing_levels.expect("bearish swing");
+        assert_eq!(swing.window, "SWING_BEAR");
+        assert_eq!(swing.direction, "bearish");
+        assert_eq!(swing.swing_high, Some(105.5));
+        assert_eq!(swing.swing_low, Some(94.5));
+        assert!(swing.start < swing.end);
+    }
+
+    #[test]
+    fn bullish_swing_is_anchored_low_to_high() {
+        let prices = [
+            105.0, 104.0, 103.0, 102.0, 101.0, 100.0, 101.0, 102.0, 103.0, 104.0, 105.0,
+            106.0, 107.0, 108.0, 109.0, 110.0, 109.0, 108.0, 107.0, 106.0, 105.0, 104.0,
+            103.0, 102.0, 101.0,
+        ];
+        let mut e = VolumeProfileEngine::new();
+        e.ingest_candles(swing_history(&prices));
+        let swing = e.swing_levels.expect("bullish swing");
+        assert_eq!(swing.window, "SWING_BULL");
+        assert_eq!(swing.direction, "bullish");
+        assert_eq!(swing.swing_low, Some(99.5));
+        assert_eq!(swing.swing_high, Some(110.5));
+        assert!(swing.start < swing.end);
+    }
+
+    #[test]
+    fn duplicate_candle_timestamp_is_replaced() {
+        let mut e = VolumeProfileEngine::new();
+        let time = Utc::now().timestamp_millis() - H;
+        e.ingest_candle(candle(time, 100.0, 101.0, 10.0));
+        e.ingest_candle(candle(time, 200.0, 201.0, 10.0));
+        assert_eq!(e.candle_count(), 1);
+        assert!(e.swing_levels.is_none());
     }
 }
