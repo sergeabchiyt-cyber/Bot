@@ -1,6 +1,11 @@
 /* ============================================================
  * XAUUSD Terminal — configuration
  * All tunables and endpoint URLs live here.
+ *
+ * The browser talks to the backend API only. Candles and volume-profile
+ * levels are SiftingIO-backed and computed by the backend; Binance is used
+ * there for order flow (aggTrade) exclusively and must never be called
+ * directly from the frontend. No API keys belong in this file.
  * ============================================================ */
 (function (App) {
   "use strict";
@@ -10,14 +15,13 @@
   App.config = {
     endpoints: {
       ws: `wss://${BACKEND_HOST}/ws`,
+      candles: `https://${BACKEND_HOST}/candles`,
       levels: `https://${BACKEND_HOST}/levels`,
       calendar: `https://${BACKEND_HOST}/calendar`,
-      klines:
-        "https://fapi.binance.com/fapi/v1/klines?symbol=XAUUSDT&interval=15m&limit=500",
     },
 
     ws: {
-      topics: ["levels", "candle", "bubbles", "trades", "sentiment", "calendar"],
+      topics: ["levels", "candle", "bubbles", "trades", "calendar"],
       reconnectMinMs: 1000,
       reconnectMaxMs: 30000,
     },
@@ -53,8 +57,30 @@
         vah: { color: "#F778BA", title: "CW VaH", cls: "cw-vah", dashed: true },
         val: { color: "#22D3EE", title: "CW VaL", cls: "cw-val", dashed: true },
       },
+
+      // Only ONE swing profile is active at a time. The inactive window's
+      // price lines are dropped whenever the backend flips direction.
+      SWING_BULL: {
+        poc: { color: "#26A69A", title: "Bull Swing PoC", cls: "swing-bull-poc", dashed: false },
+        vah: { color: "#22C55E", title: "Bull Swing VaH", cls: "swing-bull-vah", dashed: true },
+        val: { color: "#86EFAC", title: "Bull Swing VaL", cls: "swing-bull-val", dashed: true },
+      },
+      SWING_BEAR: {
+        poc: { color: "#EF5350", title: "Bear Swing PoC", cls: "swing-bear-poc", dashed: false },
+        vah: { color: "#F97316", title: "Bear Swing VaH", cls: "swing-bear-vah", dashed: true },
+        val: { color: "#FDBA74", title: "Bear Swing VaL", cls: "swing-bear-val", dashed: true },
+      },
     },
-    levelWindows: ["PW", "PS", "CW"],
+    levelWindows: ["PW", "PS", "CW", "SWING_BULL", "SWING_BEAR"],
+
+    // Calendar windows plus the mutually exclusive swing profiles.
+    swingWindows: ["SWING_BULL", "SWING_BEAR"],
+
+    // Human labels for the swing anchor row (metadata only).
+    swingLabels: {
+      SWING_BULL: "Bull Swing",
+      SWING_BEAR: "Bear Swing",
+    },
     levelKinds: ["poc", "vah", "val"],
   };
 })((window.App = window.App || {}));

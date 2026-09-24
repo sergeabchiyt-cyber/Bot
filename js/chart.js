@@ -63,52 +63,101 @@
   // ---------- Top bar price ----------
   let lastClose = null;
   function updateLastPrice(close) {
+    const price = Number(close);
+    if (!Number.isFinite(price)) return;
     const priceEl = $("last-price");
     if (!priceEl) return;
-    priceEl.textContent = fmtPrice(close);
-    if (lastClose != null && close !== lastClose) {
-      priceEl.dataset.dir = close > lastClose ? "up" : "down";
+    priceEl.textContent = fmtPrice(price);
+    if (lastClose != null && price !== lastClose) {
+      priceEl.dataset.dir = price > lastClose ? "up" : "down";
     }
-    lastClose = close;
+    lastClose = price;
   }
 
   // ---------- History ----------
+  /**
+   * Backend `/candles` returns SiftingIO candle objects (ms timestamps):
+   *   { time, open, high, low, close, volume, source }
+   * Binance REST is never called from the browser.
+   */
+  function parseCandles(raw) {
+    if (!Array.isArray(raw)) return [];
+    const byTime = new Map();
+    for (const c of raw) {
+      if (!c) continue;
+      const time = toSec(c.time);
+      const candle = {
+        time,
+        open: Number(c.open),
+        high: Number(c.high),
+        low: Number(c.low),
+        close: Number(c.close),
+      };
+      if (
+        time == null ||
+        !Number.isFinite(candle.open) ||
+        !Number.isFinite(candle.high) ||
+        !Number.isFinite(candle.low) ||
+        !Number.isFinite(candle.close)
+      ) {
+        continue;
+      }
+      byTime.set(time, candle); // de-dupe: last candle for a bucket wins
+    }
+    return [...byTime.values()].sort((a, b) => a.time - b.time);
+  }
+
   async function loadHistory() {
     setStatus("loading", "busy");
     try {
-      const res = await fetch(cfg.endpoints.klines);
-      if (!res.ok) throw new Error(`Binance REST ${res.status}`);
+      const res = await fetch(cfg.endpoints.candles);
+      if (!res.ok) throw new Error(`backend candles ${res.status}`);
       const raw = await res.json();
-      const data = raw.map((k) => ({
-        time: Math.floor(k[0] / 1000),
-        open: parseFloat(k[1]),
-        high: parseFloat(k[2]),
-        low: parseFloat(k[3]),
-        close: parseFloat(k[4]),
-      }));
+      const data = parseCandles(raw);
+      if (!data.length) throw new Error("backend candles: empty payload");
       series.setData(data);
       chart.timeScale().fitContent();
-      if (data.length) updateLastPrice(data[data.length - 1].close);
+      updateLastPrice(data[data.length - 1].close);
+      setStatus("ready", "busy"); // WS flips this to "live" on open
     } catch (e) {
       console.error("History load failed:", e);
       setStatus("history error", "error");
     }
   }
 
+  /** Live candle from the backend WebSocket (same shape as `/candles`). */
   function updateCandle(c) {
-    const time = toSec(c && c.time);
+    if (!c) return;
+    const time = toSec(c.time);
     if (time == null) return;
-    series.update({ time, open: c.open, high: c.high, low: c.low, close: c.close });
-    updateLastPrice(c.close);
+    const candle = {
+      time,
+      open: Number(c.open),
+      high: Number(c.high),
+      low: Number(c.low),
+      close: Number(c.close),
+    };
+    if (
+      !Number.isFinite(candle.open) ||
+      !Number.isFinite(candle.high) ||
+      !Number.isFinite(candle.low) ||
+      !Number.isFinite(candle.close)
+    ) {
+      return;
+    }
+    series.update(candle);
+    updateLastPrice(candle.close);
   }
 
   // ---------- Price lines ----------
   const priceLines = {};
 
   function upsertPriceLine(key, price, style) {
-    if (priceLines[key]) series.removePriceLine(priceLines[key]);
+    const value = Number(price);
+    if (!Number.isFinite(value) || !style) return;
+    removePriceLine(key);
     priceLines[key] = series.createPriceLine({
-      price,
+      price: value,
       color: style.color,
       lineWidth: 1,
       lineStyle: style.dashed
@@ -117,6 +166,13 @@
       axisLabelVisible: true,
       title: isNarrow() ? "" : style.title, // axis label only on mobile
     });
+  }
+
+  /** Drop a single price line, e.g. the swing profile that just went stale. */
+  function removePriceLine(key) {
+    if (!priceLines[key]) return;
+    series.removePriceLine(priceLines[key]);
+    delete priceLines[key];
   }
 
   function clearPriceLines() {
@@ -136,6 +192,6 @@
 
   App.chart = {
     chart, series, loadHistory, updateCandle,
-    upsertPriceLine, clearPriceLines, repaint,
+    upsertPriceLine, removePriceLine, clearPriceLines, repaint,
   };
 })((window.App = window.App || {}));
