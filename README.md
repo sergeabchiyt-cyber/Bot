@@ -23,7 +23,7 @@ There is no `/` route — the engine is API-only.
 | `/health`  | `ok`                                                |
 | `/status`  | JSON snapshot of every feed's liveness              |
 | `/levels`  | Current PW/PS/CW PoC/VaH/VaL levels (+ window `start`/`end`) |
-| `/candles` | Recent 15m candles (Binance source)                 |
+| `/candles` | SiftingIO 15m candles used by the chart and VP (latest fixed seed + live closes) |
 | `/calendar`| Latest economic calendar snapshot (`source`, `count`, `events`) |
 | `/ws`      | WebSocket stream — send `{"type":"subscribe","topics":["candle","levels","bubbles","trades","calendar","status"]}` |
 
@@ -35,7 +35,7 @@ WebSocket frames are tagged with `type`: `candle`, `levels`, `bubbles`,
 
 | Feed    | What it provides | Needs |
 |---------|------------------|-------|
-| `binance` | XAUUSDT perp aggTrade (order flow) + 15m klines (chart / volume profile) | — |
+| `binance` | XAUUSDT Futures aggTrade (order flow only) | — |
 | `bybit`   | XAUUSDT linear trades (order flow) | — |
 | `okx`     | XAU-USDT-SWAP trades (order flow) | — |
 | `bitget`  | XAUTUSDT trades (order flow) | — |
@@ -43,7 +43,7 @@ WebSocket frames are tagged with `type`: `candle`, `levels`, `bubbles`,
 | `kraken`  | PF_XAUTUSD trade feed (order flow) | — |
 | `alltick` | Spot XAUUSD ticks | `ALLTICK_TOKEN` |
 | `itick`   | Spot XAUUSD ticks | `ITICK_TOKEN` |
-| `sifting` | Spot XAUUSD chart candles + 15m history (cold start) | `SIFTING_API_KEY` |
+| `sifting` | Spot XAUUSD REST history + live chart candles | `SIFTING_API_KEY` |
 
 Every feed auto-reconnects with status broadcasting; feeds without taker-side
 data count toward volume but never toward delta.
@@ -55,6 +55,7 @@ PORT=3000
 BINANCE_SYMBOL=XAUUSDT
 SIFTING_API_KEY=            SIFTING_SYMBOL=XAUUSD
 SIFTING_WS_URL=             SIFTING_HIST_URL=https://api.sifting.io
+# Sifting REST VP seed is always exactly 2,000 15m candles; no Binance REST fallback.
 FEED_BINANCE=on|off|auto    FEED_BYBIT=on|off|auto      FEED_OKX=on|off|auto
 FEED_BITGET=on|off|auto     FEED_GATE=on|off|auto       FEED_KRAKEN=on|off|auto
 FEED_ALLTICK=on|off|auto    FEED_ITICK=on|off|auto      FEED_SIFTING=on|off|auto
@@ -94,6 +95,13 @@ Tool names are discovered via `tools/list` (`browser_navigate` +
 | `PW` | Previous trading week (Sun 18:00 NY → Sun 18:00 NY) | on week rollover |
 | `PS` | **Last closed session** (17:00 NY → 17:00 NY) | **at every session close** |
 | `CW` | Current week so far | on every closed candle |
+| `SWING_BULL` / `SWING_BEAR` | Most recent confirmed directional leg | on every closed candle |
+
+The VP seed is one SiftingIO REST request for **exactly 2,000** latest 15m
+candles. A short or invalid page is rejected rather than padded or replaced
+with Binance prices. SiftingIO's live WebSocket supplies the current chart
+candle and completed candle updates; Binance remains isolated to the aggTrade
+order-flow analyzer.
 
 `PS` is not a boot-time constant. A 30-second ticker compares the current
 17:00 America/New_York session boundary against the session `PS` currently
@@ -102,8 +110,13 @@ describes; the moment the boundary moves, the profile is recomputed and fresh
 stays at 17:00 across DST changes, and the weekend hole (Fri 17:00 → Sun 18:00)
 is skipped by walking back up to five sessions for one that actually has data.
 
-Each `VpLevels` payload carries `start` / `end` (epoch ms) so clients can see
-exactly which window a profile covers — and watch `PS.end` advance.
+The swing profile detects confirmed alternating pivots. A high followed by a
+low creates a bearish profile anchored from the best high to the best low; a low
+followed by a high creates a bullish profile anchored from the best low to the
+best high. Candle volume is allocated to bins by actual high/low overlap, then
+POC and the 70% VA are expanded from the POC. Each `VpLevels` payload carries
+`start` / `end` (epoch ms), `direction`, and swing anchor prices so clients can
+audit exactly which move produced the levels.
 
 ## Economic calendar
 
