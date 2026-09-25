@@ -264,14 +264,15 @@ impl VolumeProfileEngine {
 
     /// Recompute every window against `now_ms`.
     ///
-    /// PW  = previous trading week   (Sun 18:00 NY → Sun 18:00 NY)
+    /// PW  = previous trading week   (Sun 18:00 NY open → Fri 17:00 NY close),
+    ///       drawn/served unchanged for the whole of the current week.
     /// PS  = the last **closed** session (17:00 NY → 17:00 NY), so it rolls
     ///       forward at every session close instead of being computed once.
     /// CW  = current week so far.
     /// SWING = the most recent completed pivot-to-pivot directional leg.
     pub fn recompute(&mut self, now_ms: i64) {
         let week_start = Self::most_recent_week_start_utc(now_ms);
-        let pw_start = week_start - 7 * 24 * 60 * 60 * 1000;
+        let (pw_start, pw_end) = Self::previous_week_bounds_utc(now_ms);
 
         let retain_floor = pw_start.min(now_ms - RETAIN_MS);
         // Keep out-of-order candles in storage; the individual windows apply
@@ -282,7 +283,7 @@ impl VolumeProfileEngine {
         let pw: Vec<_> = self
             .candles
             .iter()
-            .filter(|c| c.time >= pw_start && c.time < week_start)
+            .filter(|c| c.time >= pw_start && c.time < pw_end)
             .cloned()
             .collect();
         let cw: Vec<_> = self
@@ -296,7 +297,7 @@ impl VolumeProfileEngine {
             &pw,
             "PW",
             pw_start,
-            week_start,
+            pw_end,
             None,
             "neutral",
             None,
@@ -615,6 +616,33 @@ impl VolumeProfileEngine {
         }
         sunday.with_timezone(&Utc).timestamp_millis()
     }
+
+    /// Bounds of the previous trading week in UTC millis:
+    /// `(Sunday 18:00 NY open, Friday 17:00 NY close)` of the week before the
+    /// current one. Both anchors are resolved in America/New_York local time so
+    /// they stay on the FX open/close across DST changes.
+    pub fn previous_week_bounds_utc(now_ms: i64) -> (i64, i64) {
+        let week_start = Self::most_recent_week_start_utc(now_ms);
+        let this_sunday = Utc
+            .timestamp_millis_opt(week_start)
+            .single()
+            .unwrap_or_else(Utc::now)
+            .with_timezone(&New_York);
+        let prev_sunday = this_sunday - Duration::days(7);
+        let prev_friday = this_sunday - Duration::days(2);
+        let start = New_York
+            .with_ymd_and_hms(prev_sunday.year(), prev_sunday.month(), prev_sunday.day(), 18, 0, 0)
+            .single()
+            .expect("valid Sunday 18:00 local time");
+        let end = New_York
+            .with_ymd_and_hms(prev_friday.year(), prev_friday.month(), prev_friday.day(), SESSION_CLOSE_HOUR, 0, 0)
+            .single()
+            .expect("valid Friday 17:00 local time");
+        (
+            start.with_timezone(&Utc).timestamp_millis(),
+            end.with_timezone(&Utc).timestamp_millis(),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -773,10 +801,29 @@ mod tests {
         e.recompute(now);
         let pw = e.pw_levels.clone().expect("PW");
         let cw = e.cw_levels.clone().expect("CW");
-        assert_eq!(pw.end, week_start);
+        // PW ends at the previous Friday 17:00 NY close, not at the Sunday open.
+        assert_eq!(pw.start, ny(2025, 6, 1, 18, 0));
+        assert_eq!(pw.end, ny(2025, 6, 6, 17, 0));
         assert_eq!(cw.start, week_start);
         assert!((3100.0..=3110.0).contains(&pw.poc));
         assert!((3200.0..=3210.0).contains(&cw.poc));
+    }
+
+    #[test]
+    fn pw_excludes_weekend_candles_and_is_stable_all_week() {
+        let mut e = VolumeProfileEngine::new();
+        let (start, end) = VolumeProfileEngine::previous_week_bounds_utc(ny(2025, 6, 11, 12, 0));
+        assert_eq!(start, ny(2025, 6, 1, 18, 0));
+        assert_eq!(end, ny(2025, 6, 6, 17, 0));
+        fill(&mut e, start, end - H, 3100.0, 3110.0);
+        // Anything after the Friday close (weekend / Sunday pre-open) must not leak in.
+        fill(&mut e, end, end + 40 * H, 3500.0, 3510.0);
+        for day in 9..=13 {
+            e.recompute(ny(2025, 6, day, 12, 0));
+            let pw = e.pw_levels.clone().expect("PW");
+            assert_eq!((pw.start, pw.end), (start, end));
+            assert!((3100.0..=3110.0).contains(&pw.poc), "{pw:?}");
+        }
     }
 
     #[test]
