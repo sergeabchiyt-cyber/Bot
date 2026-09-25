@@ -118,7 +118,7 @@ Tool names are discovered via `tools/list` (`browser_navigate` +
 
 | Window | Period | Refresh |
 |--------|--------|---------|
-| `PW` | Previous trading week (Sun 18:00 NY → Sun 18:00 NY) | on week rollover |
+| `PW` | Previous trading week (Sun 18:00 NY open → Fri 17:00 NY close), held for the whole current week | on week rollover |
 | `PS` | **Last closed session** (17:00 NY → 17:00 NY) | **at every session close** |
 | `CW` | Current week so far | on every closed candle |
 | `SWING_BULL` / `SWING_BEAR` | Most recent confirmed directional leg | on every closed candle |
