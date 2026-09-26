@@ -18,7 +18,8 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use crate::config::Config;
 use crate::status::FeedStatus;
-use crate::types::{VpLevels, VpCandle, WsFrame};
+use crate::tick_volume::TickVolumeStore;
+use crate::types::{TickVolumeBar, VpLevels, VpCandle, WsFrame};
 use crate::volume_profile::VolumeProfileEngine;
 
 #[derive(Clone)]
@@ -28,6 +29,7 @@ pub struct AppState {
     pub cached_levels: Arc<RwLock<Vec<VpLevels>>>,
     pub cached_candles: Arc<RwLock<Vec<VpCandle>>>,
     pub cached_calendar: Arc<RwLock<serde_json::Value>>,
+    pub tick_volume: TickVolumeStore,
     pub vp: Arc<RwLock<VolumeProfileEngine>>,
     pub status: FeedStatus,
     pub config: Config,
@@ -80,6 +82,7 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/levels", get(levels_snapshot))
         .route("/candles", get(candles_snapshot))
+        .route("/tick-volume", get(tick_volume_snapshot))
         .route("/calendar", get(calendar_snapshot))
         .route("/status", get(status_snapshot))
         .route("/ws", get(ws_handler))
@@ -99,6 +102,14 @@ async fn levels_snapshot(State(state): State<AppState>) -> Json<Vec<VpLevels>> {
 async fn candles_snapshot(State(state): State<AppState>) -> Json<Vec<VpCandle>> {
     let candles = state.cached_candles.read().await;
     Json(candles.clone())
+}
+
+/// Live tick-volume bars built since boot (oldest first; the last one may be
+/// the in-progress bucket, `closed: false`). History before boot is the
+/// `volume` field of `/candles`, which uses the same tick-count unit.
+async fn tick_volume_snapshot(State(state): State<AppState>) -> Response {
+    let bars: Vec<TickVolumeBar> = state.tick_volume.snapshot();
+    ([(header::CACHE_CONTROL, "no-store")], Json(bars)).into_response()
 }
 
 async fn calendar_snapshot(State(state): State<AppState>) -> Json<serde_json::Value> {
@@ -159,7 +170,8 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                 subscribed = true;
 
                                 // Replay cached state so new clients fill
-                                // instantly (levels + recent candles + status).
+                                // instantly (levels + recent candles + tick
+                                // volume + calendar + status).
                                 if topics.iter().any(|x| x == "levels") {
                                     let cached = state.cached_levels.read().await;
                                     for lvl in cached.iter() {
@@ -174,6 +186,15 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                     let cached = state.cached_candles.read().await;
                                     for c in cached.iter() {
                                         let frame = WsFrame::Candle { data: c.clone() };
+                                        let json = serde_json::to_string(&frame).unwrap_or_default();
+                                        if sender.send(Message::Text(json.into())).await.is_err() {
+                                            return;
+                                        }
+                                    }
+                                }
+                                if topics.iter().any(|x| x == "tick_volume") {
+                                    for bar in state.tick_volume.snapshot() {
+                                        let frame = WsFrame::TickVolume { data: bar };
                                         let json = serde_json::to_string(&frame).unwrap_or_default();
                                         if sender.send(Message::Text(json.into())).await.is_err() {
                                             return;
@@ -211,6 +232,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                         let topic = match &frame {
                             WsFrame::Levels { .. } => "levels",
                             WsFrame::Candle { .. } => "candle",
+                            WsFrame::TickVolume { .. } => "tick_volume",
                             WsFrame::Bubbles { .. } => "bubbles",
                             WsFrame::Trades { .. } => "trades",
                             WsFrame::Calendar { .. } => "calendar",
@@ -260,7 +282,8 @@ mod tests {
 
     const ALLOWED: &str = "https://static-dash-frontend.onrender.com";
     const FOREIGN: &str = "https://evil.example";
-    const REST_ROUTES: [&str; 5] = ["/health", "/levels", "/candles", "/calendar", "/status"];
+    const REST_ROUTES: [&str; 6] =
+        ["/health", "/levels", "/candles", "/tick-volume", "/calendar", "/status"];
 
     /// Router with an empty-but-valid snapshot cache, configured for `allowed`.
     fn app(allowed: &str) -> Router {
@@ -284,6 +307,22 @@ mod tests {
             cached_calendar: Arc::new(RwLock::new(serde_json::json!({
                 "source": "forexfactory", "count": 0, "events": []
             }))),
+            tick_volume: {
+                let store = TickVolumeStore::new(16);
+                store.upsert(TickVolumeBar {
+                    time: 1_700_000_000_000,
+                    ticks: 412,
+                    up_ticks: 150,
+                    down_ticks: 140,
+                    flat_ticks: 122,
+                    close: 3383.75,
+                    last_tick: 1_700_000_899_000,
+                    ticks_per_sec: 0.4,
+                    closed: false,
+                    source: "sifting".into(),
+                });
+                store
+            },
             vp: Arc::new(RwLock::new(VolumeProfileEngine::new())),
             status: FeedStatus::new(tx),
             config,
@@ -454,6 +493,33 @@ mod tests {
                 "close", "high", "low", "open", "source", "time", "volume"
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn tick_volume_route_serves_the_live_bars_uncached() {
+        let res = send("GET", "/tick-volume", Some(ALLOWED)).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            res.headers().get(header::CACHE_CONTROL).unwrap().to_str().unwrap(),
+            "no-store"
+        );
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let bars = json.as_array().unwrap();
+        assert_eq!(bars.len(), 1);
+        let b = &bars[0];
+        assert_eq!(b["time"], 1_700_000_000_000i64);
+        assert_eq!(b["ticks"], 412);
+        assert_eq!(
+            b["up_ticks"].as_u64().unwrap()
+                + b["down_ticks"].as_u64().unwrap()
+                + b["flat_ticks"].as_u64().unwrap(),
+            412
+        );
+        assert_eq!(b["closed"], false);
+        assert_eq!(b["source"], "sifting");
     }
 
     #[test]

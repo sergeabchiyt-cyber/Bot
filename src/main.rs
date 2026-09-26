@@ -12,6 +12,7 @@ mod execution_deriv;
 mod execution_chelsea;
 mod mcp_client;
 mod sifting_ws;
+mod tick_volume;
 mod ws_server;
 
 use std::sync::Arc;
@@ -23,6 +24,7 @@ use config::Config;
 use execution::ExecutionManager;
 use order_flow::OrderFlowAnalyzer;
 use status::FeedStatus;
+use tick_volume::TickVolumeStore;
 use types::{OrderflowEvent, VpCandle, WsFrame};
 use volume_profile::VolumeProfileEngine;
 use ws_server::AppState;
@@ -91,6 +93,9 @@ async fn main() -> anyhow::Result<()> {
     let cached_levels = Arc::new(RwLock::new(Vec::new()));
     let cached_candles = Arc::new(RwLock::new(Vec::<VpCandle>::new()));
     let recent_bubbles: Arc<RwLock<Vec<OrderflowEvent>>> = Arc::new(RwLock::new(Vec::new()));
+    // Live tick-volume bars (closed + in-progress) for /tick-volume and WS
+    // replay. Same span as the candle cache.
+    let tick_volume = TickVolumeStore::new(sifting_rest::SIFTING_HISTORY_CANDLE_LIMIT);
     let cached_calendar = Arc::new(RwLock::new(serde_json::json!({
         "source": "pending",
         "count": 0,
@@ -168,10 +173,11 @@ async fn main() -> anyhow::Result<()> {
         let symbol = config.sifting_symbol.clone();
         let bc = bc_tx.clone();
         let candle_tx = sifting_candle_tx.clone();
+        let store = tick_volume.clone();
         let st = status.clone();
         tokio::spawn(async move {
             if let Err(e) =
-                sifting_ws::run_sifting_stream(url, key, symbol, bc, candle_tx, st).await
+                sifting_ws::run_sifting_stream(url, key, symbol, bc, candle_tx, store, st).await
             {
                 tracing::error!("Sifting stream terminated: {e}");
             }
@@ -495,6 +501,7 @@ async fn main() -> anyhow::Result<()> {
         cached_levels: cached_levels.clone(),
         cached_candles: cached_candles.clone(),
         cached_calendar: cached_calendar.clone(),
+        tick_volume: tick_volume.clone(),
         vp: vp.clone(),
         status: status.clone(),
         config: config.clone(),
@@ -502,7 +509,7 @@ async fn main() -> anyhow::Result<()> {
     let app = ws_server::router(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
     info!(
-        "Listening on 0.0.0.0:{} — /health /status /levels /candles /calendar /ws",
+        "Listening on 0.0.0.0:{} — /health /status /levels /candles /tick-volume /calendar /ws",
         config.port
     );
     axum::serve(listener, app).await?;

@@ -4,6 +4,7 @@
 #   2. /calendar is actually populated with real ForexFactory events
 #   3. CORS lets the Node2 static origin (and only that origin) read the REST API
 #   4. /ws still upgrades and replays levels + candles through the CORS layer
+#   5. /tick-volume serves well-formed live tick-volume bars
 set -uo pipefail
 
 BIN=${BIN:-./target/release/xauusd-engine}
@@ -60,6 +61,11 @@ curl -sf "$BASE/candles" -o /tmp/candles.json || fail "/candles request failed"
 python3 ci/verify_candles.py /tmp/candles.json || fail "/candles verification failed"
 
 echo
+echo "--- /tick-volume payload shape ---"
+curl -sf "$BASE/tick-volume" -o /tmp/tick_volume.json || fail "/tick-volume request failed"
+python3 ci/verify_tick_volume.py /tmp/tick_volume.json || fail "/tick-volume verification failed"
+
+echo
 echo "--- CORS: only the Node2 origin may read the REST API ---"
 CORS_ALLOWED=${CORS_ALLOWED_ORIGIN:-https://static-dash-frontend.onrender.com}
 CORS_FOREIGN=https://evil.example
@@ -75,7 +81,7 @@ cors_headers() {
 one_line() { printf '%s' "$1" | tr '\n' '|'; }
 
 echo "1) allowed origin gets access-control-allow-origin on every route"
-for r in /health /levels /candles /calendar /status; do
+for r in /health /levels /candles /tick-volume /calendar /status; do
   h=$(cors_headers GET "$r" -H "Origin: $CORS_ALLOWED")
   printf '%s\n' "$h" | head -n1 | grep -q " 200" \
     || fail "$r: expected 200, got '$(printf '%s\n' "$h" | head -n1)'"
@@ -97,7 +103,7 @@ printf '%s\n' "$h" | grep -qi "^access-control-max-age: 600\$" \
 printf '  %s\n' "$(one_line "$(printf '%s\n' "$h" | grep -Ei '^(HTTP/|access-control|vary)')")"
 
 echo "3) every other origin gets NO allow-header"
-for r in /health /levels /candles /calendar /status; do
+for r in /health /levels /candles /tick-volume /calendar /status; do
   h=$(cors_headers GET "$r" -H "Origin: $CORS_FOREIGN")
   printf '%s\n' "$h" | grep -qi "^access-control-allow-origin" \
     && fail "$r: leaked an allow-header to $CORS_FOREIGN [$(one_line "$h")]"

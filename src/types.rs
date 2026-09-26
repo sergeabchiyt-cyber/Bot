@@ -110,6 +110,43 @@ pub struct VpCandle {
     pub source: String,
 }
 
+// =====================================================================
+// Tick volume
+// =====================================================================
+
+/// Real-time tick volume for one 15m bucket of the SiftingIO spot stream.
+///
+/// "Tick volume" is the number of price updates in the bucket — the same unit
+/// SiftingIO's historical bars use for `v` — so `ticks` always equals the
+/// matching candle's `volume` and history + live plot on one scale.
+///
+/// Spot XAUUSD has no taker side, so the up/down split uses the tick rule
+/// (price above / below the previous tick) instead. It's an activity and
+/// pressure gauge, not directional order flow, and it never feeds delta.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TickVolumeBar {
+    /// Bucket open (epoch ms). Identical to the candle's `time`.
+    pub time: i64,
+    /// Price updates in the bucket (== candle `volume`).
+    pub ticks: u64,
+    /// Ticks that printed above the previous tick.
+    pub up_ticks: u64,
+    /// Ticks that printed below the previous tick.
+    pub down_ticks: u64,
+    /// Ticks at an unchanged price (`ticks - up_ticks - down_ticks`).
+    pub flat_ticks: u64,
+    /// Latest price in the bucket (== candle `close`).
+    pub close: f64,
+    /// Epoch ms of the latest tick counted in this bucket.
+    pub last_tick: i64,
+    /// Rolling tick rate over the last 10 s of stream time.
+    pub ticks_per_sec: f64,
+    /// `true` exactly once, on the frame that finalises the bucket.
+    pub closed: bool,
+    #[serde(default)]
+    pub source: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VpLevels {
     pub window: String,
@@ -181,6 +218,9 @@ pub enum WsFrame {
 
     #[serde(rename = "candle")]
     Candle { data: VpCandle },
+
+    #[serde(rename = "tick_volume")]
+    TickVolume { data: TickVolumeBar },
 
     #[serde(rename = "bubbles")]
     Bubbles { data: OrderflowEvent },
