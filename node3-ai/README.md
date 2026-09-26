@@ -196,17 +196,17 @@ sudo systemctl status xauusd-node3
 ```bash
 tail -f node3.log
 ```
-Run sentiment test:
+Verify sentiment prediction:
 ```bash
-python3 test_sentiment.py
+python3 -c "
+from finbert_service import FinBERTService
+fb = FinBERTService()
+print(fb.predict('The Federal Reserve raised rates by 75 basis points.'))
+"
 ```
-Output:
+Expected Output:
 ```
-The Federal Reserve raised rates by 75 basis points.
-  → {'hawkish': 0.72, 'dovish': 0.11, 'neutral': 0.17, 'confidence': 0.72}
-
-The Fed signaled it would slow the pace of rate hikes.
-  → {'hawkish': 0.14, 'dovish': 0.71, 'neutral': 0.15, 'confidence': 0.71}
+{'hawkish': 0.72, 'dovish': 0.11, 'neutral': 0.17, 'confidence': 0.72}
 ```
 
 ---
@@ -223,16 +223,9 @@ node3-ai/
 ├── moonshine_service.py       # Moonshine Small Streaming ONNX INT8 wrapper
 ├── requirements.txt           # Python dependencies (torch-free)
 ├── rill_learner.py            # Online logistic regression model (rill-ml fallback)
-├── test_sentiment.py          # Benchmark test script for Fed sentiment
 ├── ws_client.py               # Main daemon entry point (WebSocket client + keep-alive)
 ├── xauusd-node3.service       # Systemd service unit definition
-├── models/                    # Downloaded model weights (persistent storage)
-│   ├── finbert-int8/
-│   └── moonshine-streaming-onnx/
-└── tests/                     # Unit and integration test suite
-    ├── test_api.py
-    ├── test_finbert.py
-    ├── test_learner.py
-    ├── test_moonshine.py
-    └── test_ws_protocol.py
+└── models/                    # Downloaded model weights (persistent storage)
+    ├── finbert-int8/
+    └── moonshine-streaming-onnx/
 ```

@@ -10,6 +10,5 @@ For detailed setup, model specifications, and deployment steps, see **[`node3-ai
 cd node3-ai
 pip install --no-cache-dir -r requirements.txt
 python3 download_models.py
-python3 test_sentiment.py
 python3 -u ws_client.py
 ```
