@@ -130,7 +130,7 @@ if headers.get("access-control-allow-origin") != ORIGIN:
     fail("the 101 response lost the CORS allow-header for the site's own origin")
 
 # ---------------------------------------------------------------- subscribe
-sock.sendall(encode_frame(json.dumps({"topics": ["levels", "candle", "status"], "type": "subscribe"}).encode()))
+sock.sendall(encode_frame(json.dumps({"topics": ["levels", "candle", "tick_volume", "status"], "type": "subscribe"}).encode()))
 
 reader, seen, deadline = Reader(sock, rest), {}, time.monotonic() + 25
 while time.monotonic() < deadline and not {"levels", "candle"} <= set(seen):

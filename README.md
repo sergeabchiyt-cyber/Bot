@@ -23,13 +23,44 @@ There is no `/` route — the engine is API-only.
 | `/health`  | `ok`                                                |
 | `/status`  | JSON snapshot of every feed's liveness              |
 | `/levels`  | Current PW/PS/CW PoC/VaH/VaL levels (+ window `start`/`end`) |
-| `/candles` | SiftingIO 15m candles used by the chart and VP (latest fixed seed + live closes) |
+| `/candles` | SiftingIO 15m candles used by the chart and VP (latest fixed seed + live closes); `volume` = tick count |
+| `/tick-volume` | Live tick-volume bars built since boot (up/down/flat split, tick rate); newest may be in progress |
 | `/calendar`| Latest economic calendar snapshot (`source`, `count`, `events`) |
-| `/ws`      | WebSocket stream — send `{"type":"subscribe","topics":["candle","levels","bubbles","trades","calendar","status"]}` |
+| `/ws`      | WebSocket stream — send `{"type":"subscribe","topics":["candle","tick_volume","levels","bubbles","trades","calendar","status"]}` |
 
-WebSocket frames are tagged with `type`: `candle`, `levels`, `bubbles`,
-`trades`, `calendar`, `status`, `heartbeat`. The four order-flow colors:
+WebSocket frames are tagged with `type`: `candle`, `tick_volume`, `levels`,
+`bubbles`, `trades`, `calendar`, `status`, `heartbeat`. The four order-flow colors:
 `BUY_BUBBLE` green, `SELL_BUBBLE` red, `ABS_BUY` blue, `ABS_SELL` orange.
+
+### Tick volume
+
+Tick volume is the number of price updates in a bucket. SiftingIO's historical
+bars use that unit for `v`, so the live aggregator counts ticks too, and
+`candle.volume` means the same thing across the 2,000-bar seed and the live
+edge. Every accepted SiftingIO tick sends a `candle` frame and a `tick_volume`
+frame for the same 15m bucket:
+
+```json
+{"type":"tick_volume","data":{
+  "time":1758873600000, "ticks":412, "up_ticks":150, "down_ticks":140, "flat_ticks":122,
+  "close":3383.75, "last_tick":1758874499000, "ticks_per_sec":0.4,
+  "closed":false, "source":"sifting"}}
+```
+
+* `ticks` always equals the candle's `volume`, and `time` its `time`, so a
+  client can draw a volume histogram from `/candles` history and keep it live
+  from either frame.
+* `up_ticks` / `down_ticks` / `flat_ticks` use the tick rule (price above,
+  below, or equal to the previous tick). Spot XAUUSD has no taker side, so this
+  shows activity and pressure, not order flow, and it never feeds delta.
+* `ticks_per_sec` is a rolling 10 s rate on stream time.
+* When a bucket rolls, one final frame with `closed: true` is sent for it
+  before the next bucket's first frame.
+* The stream state survives reconnects. The cached tick Sifting replays on
+  every re-subscribe isn't counted twice, and late ticks for an already closed
+  bucket are dropped.
+* Subscribing to `tick_volume` replays the live bars built since boot, the
+  same list as `GET /tick-volume`.
 
 ### CORS (browser clients)
 
@@ -37,7 +68,7 @@ The dashboard (Node2, `https://static-dash-frontend.onrender.com`) is a static
 site on its own origin, so it reads these routes cross-origin. `CorsLayer` is
 applied to the whole router and allows **exactly one origin**, `CORS_ALLOWED_ORIGIN`:
 
-* `GET /health|/levels|/candles|/calendar|/status` from that origin get
+* `GET /health|/levels|/candles|/tick-volume|/calendar|/status` from that origin get
   `access-control-allow-origin: <origin>`, plus `vary: origin, ...` so a shared
   cache can never hand our grant to a different requester.
 * Any other `Origin` (and requests with no `Origin`, e.g. curl or another
@@ -126,7 +157,8 @@ Tool names are discovered via `tools/list` (`browser_navigate` +
 The VP seed is one SiftingIO REST request for **exactly 2,000** latest 15m
 candles. A short or invalid page is rejected rather than padded or replaced
 with Binance prices. SiftingIO's live WebSocket supplies the current chart
-candle and completed candle updates; Binance remains isolated to the aggTrade
+candle and completed candle updates (volume = tick count, the same unit as the
+REST seed's `v`); Binance remains isolated to the aggTrade
 order-flow analyzer.
 
 `PS` is not a boot-time constant. A 30-second ticker compares the current
@@ -168,7 +200,7 @@ cargo test                         # session-rollover, calendar parsing, CORS po
 cargo test -- --ignored --nocapture  # hits the live ForexFactory feed
 bash ci/smoke.sh                   # boots the binary and asserts:
                                    #   /levels window bounds, /calendar contents,
-                                   #   /candles payload shape, the CORS allow-list
+                                   #   /candles + /tick-volume payload shape, the CORS allow-list
                                    #   (allowed / preflight / foreign origin) and
                                    #   that /ws still upgrades and replays frames
 ```
