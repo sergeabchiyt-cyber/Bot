@@ -12,6 +12,8 @@
   App.socket.on("heartbeat", () => {});
   App.socket.on("levels", App.levels.apply);
   App.socket.on("candle", App.chart.updateCandle);
+  App.socket.on("tick_volume", App.chart.updateTickVolume);
+  App.socket.on("tickVolume", App.chart.updateTickVolume);
   App.socket.on("bubbles", App.orderflow.add);
   App.socket.on("sentiment", App.sentiment.update);
   App.socket.on("calendar", App.calendar.ingest);

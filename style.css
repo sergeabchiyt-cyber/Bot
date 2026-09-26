@@ -109,6 +109,30 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
 #last-price[data-dir="up"]   { color: var(--teal); }
 #last-price[data-dir="down"] { color: var(--coral); }
 
+.tps-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.tps-label {
+  color: var(--text-dim);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  font-size: 9px;
+}
+#tps-value {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+
 .sentiment-pill {
   display: inline-flex;
   align-items: center;
@@ -531,7 +555,7 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
 }
 
 @media (max-width: 380px) {
-  .sentiment-label { display: none; }
+  .sentiment-label, .tps-label { display: none; }
   #last-price { font-size: 14px; }
   .ev-values { padding-left: 0; }
 }
