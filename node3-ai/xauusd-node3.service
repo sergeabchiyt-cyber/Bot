@@ -1,0 +1,18 @@
+[Unit]
+Description=XAUUSD Node 3 AI Services
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zeus
+WorkingDirectory=/teamspace/studios/this_studio/xauusd-node3/node3-ai
+EnvironmentFile=/teamspace/studios/this_studio/xauusd-node3/node3-ai/.env
+ExecStart=/usr/bin/python3 -u ws_client.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/teamspace/studios/this_studio/xauusd-node3/node3-ai/node3.log
+StandardError=append:/teamspace/studios/this_studio/xauusd-node3/node3-ai/node3.err
+
+[Install]
+WantedBy=multi-user.target

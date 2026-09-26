@@ -1,0 +1,34 @@
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environment files
+.env
+.env.local
+
+# Logs and runtime artifacts
+*.log
+*.err
+node3.log
+node3.err
+learner_state.json
+
+# Model checkpoints and weights (downloaded on VM, persistent in /teamspace/studios/this_studio)
+models/
+node3-ai/models/
+*.onnx
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS artifacts
+.DS_Store
