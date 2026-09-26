@@ -40,7 +40,13 @@
       vertLine: { color: "rgba(255,255,255,0.15)", width: 1, style: 2 },
       horzLine: { color: "rgba(255,255,255,0.15)", width: 1, style: 2 },
     },
-    rightPriceScale: { borderColor: "rgba(255,255,255,0.06)" },
+    rightPriceScale: {
+      borderColor: "rgba(255,255,255,0.06)",
+      scaleMargins: {
+        top: 0.1,
+        bottom: 0.25,
+      },
+    },
     timeScale: {
       borderColor: "rgba(255,255,255,0.06)",
       timeVisible: true,
@@ -60,7 +66,27 @@
     wickDownColor: "#EF5350",
   });
 
-  // ---------- Top bar price ----------
+  const volumeSeries = chart.addHistogramSeries({
+    priceFormat: {
+      type: "volume",
+    },
+    priceScaleId: "", // Overlay scale: separate from candlestick price scale
+  });
+
+  volumeSeries.priceScale().applyOptions({
+    scaleMargins: {
+      top: 0.8,
+      bottom: 0,
+    },
+  });
+
+  const COLOR_UP = "#26A69A";
+  const COLOR_DOWN = "#EF5350";
+
+  // Cache candles by bucket time (sec) for color fallbacks
+  const candlesByTime = new Map();
+
+  // ---------- Top bar price & TPS ----------
   let lastClose = null;
   function updateLastPrice(close) {
     const price = Number(close);
@@ -72,6 +98,43 @@
       priceEl.dataset.dir = price > lastClose ? "up" : "down";
     }
     lastClose = price;
+  }
+
+  function updateTps(rate) {
+    const val = Number(rate);
+    if (!Number.isFinite(val)) return;
+    const text = val.toFixed(1);
+    const tpsSec = $("ticks-per-sec");
+    if (tpsSec) tpsSec.textContent = text;
+    const tpsVal = $("tps-value");
+    if (tpsVal && !tpsSec) tpsVal.textContent = text;
+    const tpsPill = $("tps");
+    if (tpsPill) tpsPill.dataset.rate = text;
+  }
+
+  /**
+   * Determine volume bar color:
+   * 1. Green or red by whether up-ticks or down-ticks win.
+   * 2. If tied (or neither up_ticks nor down_ticks are present):
+   *    fall back to the candle's colour (green if close >= open, else red).
+   */
+  function getBarColor(bar, candle) {
+    const up = bar && bar.up_ticks != null ? Number(bar.up_ticks) : null;
+    const down = bar && bar.down_ticks != null ? Number(bar.down_ticks) : null;
+
+    if (up != null && down != null && Number.isFinite(up) && Number.isFinite(down) && up !== down) {
+      return up > down ? COLOR_UP : COLOR_DOWN;
+    }
+
+    if (candle && Number.isFinite(candle.close) && Number.isFinite(candle.open)) {
+      return candle.close >= candle.open ? COLOR_UP : COLOR_DOWN;
+    }
+
+    if (bar && Number.isFinite(Number(bar.close)) && candle && Number.isFinite(candle.open)) {
+      return Number(bar.close) >= candle.open ? COLOR_UP : COLOR_DOWN;
+    }
+
+    return COLOR_UP;
   }
 
   // ---------- History ----------
@@ -92,6 +155,7 @@
         high: Number(c.high),
         low: Number(c.low),
         close: Number(c.close),
+        volume: Number(c.volume) || 0,
       };
       if (
         time == null ||
@@ -115,10 +179,39 @@
       const raw = await res.json();
       const data = parseCandles(raw);
       if (!data.length) throw new Error("backend candles: empty payload");
+
+      candlesByTime.clear();
+      const volumeData = [];
+      for (const c of data) {
+        candlesByTime.set(c.time, c);
+        volumeData.push({
+          time: c.time,
+          value: c.volume,
+          color: c.close >= c.open ? COLOR_UP : COLOR_DOWN,
+        });
+      }
+
       series.setData(data);
+      volumeSeries.setData(volumeData);
       chart.timeScale().fitContent();
       updateLastPrice(data[data.length - 1].close);
       setStatus("ready", "busy"); // WS flips this to "live" on open
+
+      if (cfg.endpoints.tickVolume) {
+        try {
+          const tvRes = await fetch(cfg.endpoints.tickVolume);
+          if (tvRes.ok) {
+            const tvBars = await tvRes.json();
+            if (Array.isArray(tvBars)) {
+              for (const bar of tvBars) {
+                updateTickVolume(bar);
+              }
+            }
+          }
+        } catch {
+          // Non-fatal: WS tick_volume replay handles live backfill
+        }
+      }
     } catch (e) {
       console.error("History load failed:", e);
       setStatus("history error", "error");
@@ -136,6 +229,7 @@
       high: Number(c.high),
       low: Number(c.low),
       close: Number(c.close),
+      volume: c.volume != null ? Number(c.volume) : 0,
     };
     if (
       !Number.isFinite(candle.open) ||
@@ -145,8 +239,50 @@
     ) {
       return;
     }
+    const prev = candlesByTime.get(time);
+    if (prev) {
+      prev.high = Math.max(prev.high, candle.high);
+      prev.low = Math.min(prev.low, candle.low);
+      prev.close = candle.close;
+      if (c.volume != null) prev.volume = candle.volume;
+    } else {
+      candlesByTime.set(time, candle);
+    }
     series.update(candle);
     updateLastPrice(candle.close);
+  }
+
+  /** Live tick volume bar from the backend WebSocket or /tick-volume. */
+  function updateTickVolume(bar) {
+    if (!bar) return;
+    const time = toSec(bar.time);
+    if (time == null) return;
+
+    const ticks = bar.ticks != null
+      ? Number(bar.ticks)
+      : (bar.volume != null ? Number(bar.volume) : 0);
+    if (!Number.isFinite(ticks)) return;
+
+    const candle = candlesByTime.get(time);
+    if (candle && bar.close != null && Number.isFinite(Number(bar.close))) {
+      candle.close = Number(bar.close);
+    }
+
+    const color = getBarColor(bar, candle);
+
+    volumeSeries.update({
+      time,
+      value: ticks,
+      color,
+    });
+
+    if (bar.ticks_per_sec != null) {
+      updateTps(bar.ticks_per_sec);
+    }
+
+    if (bar.close != null) {
+      updateLastPrice(bar.close);
+    }
   }
 
   // ---------- Price lines ----------
@@ -186,12 +322,22 @@
   function repaint() {
     chart.applyOptions({});
     series.applyOptions({});
+    volumeSeries.applyOptions({});
   }
 
   new ResizeObserver(() => chart.applyOptions(size())).observe(el);
 
   App.chart = {
-    chart, series, loadHistory, updateCandle,
-    upsertPriceLine, removePriceLine, clearPriceLines, repaint,
+    chart,
+    series,
+    volumeSeries,
+    loadHistory,
+    updateCandle,
+    updateTickVolume,
+    updateTps,
+    upsertPriceLine,
+    removePriceLine,
+    clearPriceLines,
+    repaint,
   };
 })((window.App = window.App || {}));

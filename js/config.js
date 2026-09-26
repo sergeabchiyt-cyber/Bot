@@ -16,12 +16,14 @@
     endpoints: {
       ws: `wss://${BACKEND_HOST}/ws`,
       candles: `https://${BACKEND_HOST}/candles`,
+      tickVolume: `https://${BACKEND_HOST}/tick-volume`,
+      tick_volume: `https://${BACKEND_HOST}/tick-volume`,
       levels: `https://${BACKEND_HOST}/levels`,
       calendar: `https://${BACKEND_HOST}/calendar`,
     },
 
     ws: {
-      topics: ["levels", "candle", "bubbles", "trades", "calendar"],
+      topics: ["levels", "candle", "bubbles", "trades", "calendar", "tick_volume"],
       reconnectMinMs: 1000,
       reconnectMaxMs: 30000,
     },
