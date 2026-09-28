@@ -35,6 +35,11 @@
       impactRank: { high: 3, medium: 2, low: 1, holiday: 0 },
     },
 
+    // Periodic /levels snapshot reconcile. The backend drops CW at the
+    // Sunday 18:00 NY week boundary without broadcasting a removal frame,
+    // so the UI re-reads the authoritative snapshot to clear stale levels.
+    levelsRefreshMs: 60 * 1000,
+
     bubbles: {
       maxOnChart: 60,
       maxRows: 40,
