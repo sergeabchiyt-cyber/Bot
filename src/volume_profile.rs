@@ -75,6 +75,12 @@ pub struct VolumeProfileEngine {
     /// detect a session rollover so PS is recomputed on every session close
     /// instead of being frozen at whatever it was at boot.
     ps_session_end: Option<i64>,
+    /// The last completed daily session included in CW. CW is deliberately
+    /// frozen between daily closes rather than moving on every 15m candle.
+    cw_session_end: Option<i64>,
+    /// Week anchor used by the frozen CW snapshot. This lets CW reset at the
+    /// Sunday 18:00 NY week boundary before the first new daily close.
+    cw_week_start: Option<i64>,
     candles: Vec<VpCandle>,
 }
 
@@ -86,6 +92,8 @@ impl VolumeProfileEngine {
             cw_levels: None,
             swing_levels: None,
             ps_session_end: None,
+            cw_session_end: None,
+            cw_week_start: None,
             candles: Vec::new(),
         }
     }
@@ -268,7 +276,8 @@ impl VolumeProfileEngine {
     ///       drawn/served unchanged for the whole of the current week.
     /// PS  = the last **closed** session (17:00 NY → 17:00 NY), so it rolls
     ///       forward at every session close instead of being computed once.
-    /// CW  = current week so far.
+    /// CW  = current week through the last completed 17:00 NY daily close; it
+    ///       remains frozen during the in-progress day and resets each week.
     /// SWING = the most recent completed pivot-to-pivot directional leg.
     pub fn recompute(&mut self, now_ms: i64) {
         let week_start = Self::most_recent_week_start_utc(now_ms);
@@ -286,12 +295,38 @@ impl VolumeProfileEngine {
             .filter(|c| c.time >= pw_start && c.time < pw_end)
             .cloned()
             .collect();
-        let cw: Vec<_> = self
-            .candles
-            .iter()
-            .filter(|c| c.time >= week_start && c.time <= now_ms)
-            .cloned()
-            .collect();
+        // CW is a completed-daily-session snapshot. A live/in-progress day
+        // must never move its levels. The 17:00 NY boundary is also the
+        // existing FX session close, so it is DST-safe and consistent with
+        // PS. Before the first close of a new week, explicitly clear the old
+        // week's CW profile.
+        let completed_day_end = Self::last_session_close_utc(now_ms);
+        let cw_needs_refresh = self.cw_session_end != Some(completed_day_end)
+            || self.cw_week_start != Some(week_start);
+        if cw_needs_refresh {
+            if completed_day_end > week_start {
+                let cw: Vec<_> = self
+                    .candles
+                    .iter()
+                    .filter(|c| c.time >= week_start && c.time < completed_day_end)
+                    .cloned()
+                    .collect();
+                self.cw_levels = Self::compute(
+                    &cw,
+                    "CW",
+                    week_start,
+                    completed_day_end,
+                    None,
+                    "neutral",
+                    None,
+                    None,
+                );
+            } else {
+                self.cw_levels = None;
+            }
+            self.cw_session_end = Some(completed_day_end);
+            self.cw_week_start = Some(week_start);
+        }
 
         self.pw_levels = Self::compute(
             &pw,
@@ -303,17 +338,6 @@ impl VolumeProfileEngine {
             None,
             None,
         );
-        self.cw_levels = Self::compute(
-            &cw,
-            "CW",
-            week_start,
-            now_ms,
-            None,
-            "neutral",
-            None,
-            None,
-        );
-
         // ---- Previous session (rolls at every session close) ----
         let (ps_start, ps_end, ps_candles) = self.previous_session_slice(now_ms);
         self.ps_levels = Self::compute(

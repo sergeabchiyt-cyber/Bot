@@ -147,7 +147,7 @@ pub struct TickVolumeBar {
     pub source: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VpLevels {
     pub window: String,
     pub poc: f64,

@@ -347,11 +347,18 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 let mut vp_w = vp.write().await;
+                let previous_cw = vp_w.cw_levels.clone();
                 vp_w.ingest_candle(candle.clone());
                 let levels = vp_w.all_levels();
                 drop(vp_w);
                 *cached.write().await = levels.clone();
                 for lvl in levels {
+                    // CW is a daily snapshot. Do not redraw/rebroadcast the
+                    // same CW values for every 15m candle; it is emitted when
+                    // the NY daily close creates a new snapshot.
+                    if lvl.window == "CW" && previous_cw.as_ref() == Some(&lvl) {
+                        continue;
+                    }
                     let _ = bc.send(WsFrame::Levels { data: lvl });
                 }
                 let _ = exec.send(candle).await;
