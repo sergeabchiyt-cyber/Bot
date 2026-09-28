@@ -151,7 +151,7 @@ Tool names are discovered via `tools/list` (`browser_navigate` +
 |--------|--------|---------|
 | `PW` | Previous trading week (Sun 18:00 NY open → Fri 17:00 NY close), held for the whole current week | on week rollover |
 | `PS` | **Last closed session** (17:00 NY → 17:00 NY) | **at every session close** |
-| `CW` | Current week so far | on every closed candle |
+| `CW` | Current week through the last completed 17:00 NY daily session | at each daily close; reset at the new week boundary |
 | `SWING_BULL` / `SWING_BEAR` | Most recent confirmed directional leg | on every closed candle |
 
 The VP seed is one SiftingIO REST request for **exactly 2,000** latest 15m
@@ -167,6 +167,12 @@ describes; the moment the boundary moves, the profile is recomputed and fresh
 `levels` frames are broadcast. The boundary is re-anchored in local time, so it
 stays at 17:00 across DST changes, and the weekend hole (Fri 17:00 → Sun 18:00)
 is skipped by walking back up to five sessions for one that actually has data.
+
+`CW` is a completed-day snapshot, not an intraday rolling profile. While a day
+is open, new 15m candles do not change or rebroadcast CW. At the next 17:00
+America/New_York close, the newly completed session is added and CW is emitted
+once with the new POC/VAH/VAL. At the Sunday 18:00 week boundary, the prior CW
+is cleared and the new week starts empty until its first daily close.
 
 The swing profile detects confirmed alternating pivots. A high followed by a
 low creates a bearish profile anchored from the best high to the best low; a low
