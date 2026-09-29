@@ -36,7 +36,7 @@ jobs:
           git commit -m "ci: build error log [skip ci]"
           git push origin ${{ github.ref_name }}
 
-      # Proof 1 — PS rolls at every 17:00 NY session close (deterministic tests).
+      # Proof 1 — PS rolls at every 18:00 NY session close (deterministic tests).
       # Proof 2 — calendar parsing is correct (fixture tests).
       - name: Unit tests
         run: |

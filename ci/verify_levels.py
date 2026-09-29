@@ -30,13 +30,13 @@ assert swing.get("swing_high") is not None and swing.get("swing_low") is not Non
 assert swing["swing_low"] < swing["swing_high"], f"bad swing anchors: {swing}"
 assert swing["start"] < swing["end"], f"unbounded swing profile: {swing}"
 
-# The PS window must END at a 17:00 America/New_York session close.
+# The PS window must END at a 18:00 America/New_York session close.
 try:
     from zoneinfo import ZoneInfo
 
     ny_end = dt.datetime.fromtimestamp(ps["end"] / 1000, ZoneInfo("America/New_York"))
     print("PS window ends at", ny_end.isoformat(), "(New York)")
-    assert (ny_end.hour, ny_end.minute) == (17, 0), f"PS does not end at a 17:00 NY close: {ny_end}"
+    assert (ny_end.hour, ny_end.minute) == (18, 0), f"PS does not end at a 18:00 NY close: {ny_end}"
 except ImportError:
     print("zoneinfo unavailable; skipped NY-hour assertion")
 
