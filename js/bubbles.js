@@ -23,6 +23,18 @@
     return t > 1e12 ? Math.floor(t / 1000) : t;
   }
 
+  /**
+   * Chart column for an event's real timestamp. The candle series is drawn on
+   * the compacted display timeline (App.axis), so a raw trade timestamp in the
+   * middle of a bucket has to be mapped onto its candle; otherwise the time
+   * scale has no such point and the bubble is dropped.
+   */
+  function eventDisplayTime(timeSec) {
+    const axis = window.App && window.App.chart && window.App.chart.axis;
+    const mapped = axis && axis.displayForReal ? axis.displayForReal(timeSec) : null;
+    return mapped == null ? timeSec : mapped;
+  }
+
   class BubblesRenderer {
     constructor(source) {
       this._source = source;
@@ -45,7 +57,7 @@
           const timeSec = eventTimeToSeconds(ev);
           if (timeSec === null) continue;
 
-          const x = ts.timeToCoordinate(timeSec);
+          const x = ts.timeToCoordinate(eventDisplayTime(timeSec));
           const y = series.priceToCoordinate(ev.level);
           if (x === null || y === null) continue;
 
