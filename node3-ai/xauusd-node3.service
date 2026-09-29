@@ -1,0 +1,24 @@
+[Unit]
+Description=XAUUSD Node 3 AI Services — UPGRADED 16GB / 4vCPU (FOMC-RoBERTa + Moonshine-Medium + Adam Learner)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zeus
+WorkingDirectory=/teamspace/studios/this_studio/xauusd-node3/node3-ai
+EnvironmentFile=/teamspace/studios/this_studio/xauusd-node3/node3-ai/.env
+# 16GB tuning — expose threads via env already, but ensure ORT sees 4 cores
+Environment=OMP_NUM_THREADS=4
+Environment=MOONSHINE_INTRA_THREADS=4
+Environment=FINBERT_INTRA_THREADS=4
+ExecStart=/usr/bin/python3 -u ws_client.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/teamspace/studios/this_studio/xauusd-node3/node3-ai/node3.log
+StandardError=append:/teamspace/studios/this_studio/xauusd-node3/node3-ai/node3.err
+# 16GB: allow most of RAM, limit logs on 400GB disk
+MemoryMax=14G
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,18 @@
+# Node3 16GB / 4vCPU / 400GB UPGRADED TIER
+# Core runtime — ONNX-only, torch-free at inference (fits ~1.8GB RSS for FOMC-RoBERTa-large + Moonshine-Medium-INT8)
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+websockets==13.1
+onnxruntime==1.20.0
+numpy==2.1.0
+tokenizers==0.20.0
+transformers==4.46.0
+huggingface-hub==0.26.0
+scikit-learn==1.5.2
+# Optional: Silero VAD is fetched as single ONNX (no extra pip needed). Only if you use VAD threshold tuning.
+
+# --- ONE-TIME EXPORT EXTRAS (16GB machine has headroom — install only to convert PyTorch -> ONNX INT8) ---
+# These are NOT required at runtime. Install on the 16GB box once to build FOMC-RoBERTa ONNX + Moonshine-Medium ONNX:
+# pip install torch==2.4.1 --index-url https://download.pytorch.org/whl/cpu
+# pip install optimum[onnxruntime]==1.20.0 onnx==1.18.0
+# Then run: python3 download_models.py --tier upgraded  (or --export-onnx)
