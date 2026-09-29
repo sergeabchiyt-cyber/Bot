@@ -51,5 +51,11 @@
   App.chart.loadHistory().then(() => {
     App.socket.connect();
     App.levels.fetchAll();
+    // Reconcile against the /levels snapshot periodically so a silent CW
+    // reset (week boundary) cannot leave stale levels on screen.
+    const refreshMs = App.config.levelsRefreshMs;
+    if (refreshMs > 0) {
+      setInterval(() => App.levels.fetchAll(), refreshMs);
+    }
   });
 })((window.App = window.App || {}));

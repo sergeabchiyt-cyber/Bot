@@ -227,6 +227,9 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
   gap: 4px;
   white-space: nowrap;
 }
+/* CW keys are dimmed (not removed) while CW is pending, so the legend
+   never reflows between the "no CW" and "CW live" states. */
+.legend-item.is-pending { opacity: 0.35; }
 
 /* ---------- Layout ---------- */
 .layout {
@@ -400,6 +403,14 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
 .level-meta {
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
+}
+
+/* CW placeholder row while the backend has not yet sent a CW profile
+   ("Waiting for first daily close"). Stable layout — same row shape. */
+.level-pending .level-label { color: var(--text-dim); }
+.level-pending .level-meta {
+  font-style: italic;
+  color: var(--text-dim);
 }
 
 /* ---------- Bubble rows ---------- */
