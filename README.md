@@ -149,9 +149,9 @@ Tool names are discovered via `tools/list` (`browser_navigate` +
 
 | Window | Period | Refresh |
 |--------|--------|---------|
-| `PW` | Previous trading week (Sun 18:00 NY open → Fri 17:00 NY close), held for the whole current week | on week rollover |
-| `PS` | **Last closed session** (17:00 NY → 17:00 NY) | **at every session close** |
-| `CW` | Current week through the last completed 17:00 NY daily session | at each daily close; reset at the new week boundary |
+| `PW` | Previous trading week (Sun 18:00 NY open → Fri 18:00 NY close), held for the whole current week | on week rollover |
+| `PS` | **Last closed session** (18:00 NY → 18:00 NY) | **at every session close** |
+| `CW` | Current week (from the week open after Friday's 18:00 close) through the last completed 18:00 NY daily session | at each daily close; first snapshot when Monday closes; reset at the new week boundary |
 | `SWING_BULL` / `SWING_BEAR` | Most recent confirmed directional leg | on every closed candle |
 
 The VP seed is one SiftingIO REST request for **exactly 2,000** latest 15m
@@ -162,25 +162,37 @@ REST seed's `v`); Binance remains isolated to the aggTrade
 order-flow analyzer.
 
 `PS` is not a boot-time constant. A 30-second ticker compares the current
-17:00 America/New_York session boundary against the session `PS` currently
-describes; the moment the boundary moves, the profile is recomputed and fresh
-`levels` frames are broadcast. The boundary is re-anchored in local time, so it
-stays at 17:00 across DST changes, and the weekend hole (Fri 17:00 → Sun 18:00)
+18:00 America/New_York session boundary against the last close already seen;
+the moment the boundary moves, the profile is recomputed and fresh `levels`
+frames are broadcast. The boundary is re-anchored in local time, so it
+stays at 18:00 across DST changes, and the weekend hole (Fri 18:00 → Sun 18:00)
 is skipped by walking back up to five sessions for one that actually has data.
 
-`CW` is a completed-day snapshot, not an intraday rolling profile. While a day
-is open, new 15m candles do not change or rebroadcast CW. At the next 17:00
-America/New_York close, the newly completed session is added and CW is emitted
-once with the new POC/VAH/VAL. At the Sunday 18:00 week boundary, the prior CW
-is cleared and the new week starts empty until its first daily close.
+`CW` is a completed-day snapshot, not an intraday rolling profile. It starts
+accumulating after Friday's 18:00 close and its first levels are drawn once
+Monday's session closes. While a day is open, new 15m candles do not change or
+rebroadcast CW. At the next 18:00 America/New_York close, the newly completed
+session is added and CW is emitted once with the new POC/VAH/VAL. At the
+Sunday 18:00 week boundary, the prior CW is cleared and the new week starts
+empty until its first daily close.
 
-The swing profile detects confirmed alternating pivots. A high followed by a
-low creates a bearish profile anchored from the best high to the best low; a low
+Only one swing profile exists at a time. It detects confirmed alternating
+3-bar fractal pivots: the most recent high followed by a low creates a bearish
+profile anchored from the best high to the best low; the most recent low
 followed by a high creates a bullish profile anchored from the best low to the
-best high. Candle volume is allocated to bins by actual high/low overlap, then
-POC and the 70% VA are expanded from the POC. Each `VpLevels` payload carries
-`start` / `end` (epoch ms), `direction`, and swing anchor prices so clients can
-audit exactly which move produced the levels.
+best high. Equal highs/lows still count, anchoring at their most recent touch,
+and a short or trend-straight history falls back to a leg bounded to the most
+recent session's bars rather than spanning stale history. Candle volume is
+allocated to bins by actual high/low overlap, then POC and the 70% VA are
+expanded from the POC. Each `VpLevels` payload carries `start` / `end`
+(epoch ms), `direction`, and swing anchor prices so clients can audit exactly
+which move produced the levels.
+
+The implementation is split by window for accuracy: `volume_profile/session.rs`
+(18:00 → 18:00 sessions), `volume_profile/weekly.rs` (week anchors),
+`volume_profile/swing.rs` (the directional leg), and
+`volume_profile/histogram.rs` (the shared POC/VA math), with
+`volume_profile.rs` orchestrating ingest, refresh, and fan-out.
 
 ## Economic calendar
 

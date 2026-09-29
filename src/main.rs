@@ -408,7 +408,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // ---------- Session-close level refresh ----------
-    // PS (previous session) must roll forward at every 17:00 New York close,
+    // PS (previous session) must roll forward at every 18:00 New York close,
     // not stay frozen at whatever it was when the process booted. Candles
     // alone cannot be relied on to trigger this (quiet feed, weekend gap), so
     // a timer checks the boundary every 30s and recomputes when it moves.
