@@ -23,6 +23,70 @@
 
   const isNarrow = () => window.matchMedia("(max-width: 720px)").matches;
 
+  /* ---------- Display timeline ----------
+   * /candles is a wall-clock window: it contains the weekend/daily-break
+   * closed-market filler bars SiftingIO keeps emitting, and it has real holes
+   * wherever the upstream feed dropped out. Both render as blank columns, so
+   * the series is drawn on the compacted timeline built by App.axis while the
+   * axis/crosshair labels still read the true timestamps. */
+
+  /** Identity timeline: only used when axis.js did not load (stale index.html),
+   *  so a missing module degrades to the previous behaviour, not to no chart. */
+  function passthroughAxis() {
+    console.error("axis.js missing — falling back to raw timestamps");
+    return {
+      compact: (bars) => ({ bars: bars.slice(), dropped: 0 }),
+      displayFor: (real) => real,
+      displayForReal: (real) => real,
+      bucketStart: (real) => real,
+      append: (real) => real,
+      realFor: (t) => t,
+      lastDisplay: null,
+      lastReal: null,
+      length: 0,
+      bucket: 15 * 60,
+    };
+  }
+
+  const axis = App.axis ? App.axis.create() : passthroughAxis();
+  const isClosedMarketBar = App.axis
+    ? App.axis.isClosedMarketBar
+    : (bar) => !!bar && bar.open === bar.close;
+
+  const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const pad2 = (n) => String(n).padStart(2, "0");
+  /** Date whose local fields are `sec`'s UTC fields (what the axis shows). */
+  const clock = (sec) => (App.axis ? App.axis.utcClock(sec) : new Date(sec * 1000));
+
+  /** Format `sec` the way lightweight-charts formats UTC timestamps. */
+  function fmtTick(time, tickMarkType) {
+    const sec = axis.realFor(Number(time));
+    if (!Number.isFinite(sec)) return null;
+    const d = clock(sec);
+    switch (tickMarkType) {
+      case LightweightCharts.TickMarkType.Year:
+        return String(d.getFullYear());
+      case LightweightCharts.TickMarkType.Month:
+        return `${MONTHS_SHORT[d.getMonth()]} '${pad2(d.getFullYear() % 100)}`;
+      case LightweightCharts.TickMarkType.DayOfMonth:
+        return String(d.getDate());
+      case LightweightCharts.TickMarkType.TimeWithSeconds:
+        return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+      default: // TickMarkType.Time
+        return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    }
+  }
+
+  /** Crosshair time label: real date + clock, same shape as the default. */
+  function fmtTitle(time) {
+    const sec = axis.realFor(Number(time));
+    if (!Number.isFinite(sec)) return String(time);
+    const d = clock(sec);
+    return `${pad2(d.getDate())} ${MONTHS_SHORT[d.getMonth()]} '${pad2(d.getFullYear() % 100)}, ` +
+           `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  }
+
   const chart = LightweightCharts.createChart(el, {
     ...size(),
     layout: {
@@ -40,6 +104,10 @@
       vertLine: { color: "rgba(255,255,255,0.15)", width: 1, style: 2 },
       horzLine: { color: "rgba(255,255,255,0.15)", width: 1, style: 2 },
     },
+    localization: {
+      // The series runs on the compacted timeline; labels must not lie about it.
+      timeFormatter: fmtTitle,
+    },
     rightPriceScale: {
       borderColor: "rgba(255,255,255,0.06)",
       scaleMargins: {
@@ -52,6 +120,10 @@
       timeVisible: true,
       secondsVisible: false,
       rightOffset: 4,
+      // fitContent() must be able to frame the whole 2,000-bar payload on a
+      // phone too, so the floor is well below one pixel per bar.
+      minBarSpacing: 0.1,
+      tickMarkFormatter: fmtTick,
     },
     handleScale: { axisPressedMouseMove: true, pinch: true },
     handleScroll: { horzTouchDrag: true, vertTouchDrag: false },
@@ -171,6 +243,25 @@
     return [...byTime.values()].sort((a, b) => a.time - b.time);
   }
 
+  /**
+   * Display slot for a real bucket: the known mapping, a fresh contiguous slot
+   * for a live bar, or null when the bar must not be drawn at all — the venue's
+   * closed-market placeholder (a bodyless bar, i.e. the dead flat slab while
+   * the market is shut) or a bucket older than the loaded window (which the
+   * chart cannot place without a full reload).
+   *
+   * `bar` is the bar being drawn, not the cached one: when the market reopens,
+   * the first real bar replaces the placeholder of the *same* bucket and must
+   * be drawn.
+   */
+  function displaySlotFor(realSec, bar) {
+    const known = axis.displayFor(realSec);
+    if (known != null) return known;
+    if (isClosedMarketBar(bar)) return null;
+    if (axis.lastReal != null && realSec < axis.lastReal) return null;
+    return axis.append(realSec);
+  }
+
   async function loadHistory() {
     setStatus("loading", "busy");
     try {
@@ -180,22 +271,31 @@
       const data = parseCandles(raw);
       if (!data.length) throw new Error("backend candles: empty payload");
 
+      // Keep the raw payload keyed by real time: live frames arrive on
+      // wall-clock buckets and are matched against it.
       candlesByTime.clear();
-      const volumeData = [];
-      for (const c of data) {
-        candlesByTime.set(c.time, c);
-        volumeData.push({
-          time: c.time,
-          value: c.volume,
-          color: c.close >= c.open ? COLOR_UP : COLOR_DOWN,
-        });
-      }
+      for (const c of data) candlesByTime.set(c.time, c);
 
-      series.setData(data);
+      // Draw the compacted view: weekend/daily-break filler runs dropped,
+      // every remaining bar exactly one 15m bucket after the previous one.
+      const view = axis.compact(data);
+      const volumeData = view.bars.map((c) => ({
+        time: c.time,
+        value: c.volume,
+        color: c.close >= c.open ? COLOR_UP : COLOR_DOWN,
+      }));
+
+      series.setData(view.bars);
       volumeSeries.setData(volumeData);
       chart.timeScale().fitContent();
-      updateLastPrice(data[data.length - 1].close);
+      // Show the last *traded* price, not the filler the venue repeats while shut.
+      const newest = view.bars.length ? view.bars[view.bars.length - 1] : data[data.length - 1];
+      updateLastPrice(newest.close);
       setStatus("ready", "busy"); // WS flips this to "live" on open
+
+      if (view.dropped) {
+        console.info(`chart: dropped ${view.dropped} closed-market filler bars`);
+      }
 
       if (cfg.endpoints.tickVolume) {
         try {
@@ -240,7 +340,11 @@
       return;
     }
     const prev = candlesByTime.get(time);
-    if (prev) {
+    if (prev && isClosedMarketBar(prev) && !isClosedMarketBar(candle)) {
+      // The market just reopened inside this bucket: its placeholder must not
+      // leak its synthetic high/low into the first real candle.
+      candlesByTime.set(time, candle);
+    } else if (prev) {
       prev.high = Math.max(prev.high, candle.high);
       prev.low = Math.min(prev.low, candle.low);
       prev.close = candle.close;
@@ -248,7 +352,11 @@
     } else {
       candlesByTime.set(time, candle);
     }
-    series.update(candle);
+
+    const displaySec = displaySlotFor(time, candle);
+    if (displaySec == null) return; // closed-market placeholder: nothing to draw
+
+    series.update({ ...candle, time: displaySec });
     updateLastPrice(candle.close);
   }
 
@@ -268,10 +376,21 @@
       candle.close = Number(bar.close);
     }
 
+    // Volume follows its candle onto the display timeline. A bucket that is
+    // not on the chart yet may only extend it when its candle is drawable
+    // (the backend sends "candle" before "tick_volume"), so a stranded bar
+    // can never stretch the timeline past the live edge.
+    let displaySec = axis.displayFor(time);
+    if (displaySec == null) {
+      if (!candle) return;
+      displaySec = displaySlotFor(time, candle);
+      if (displaySec == null) return; // closed-market filler or stale bucket
+    }
+
     const color = getBarColor(bar, candle);
 
     volumeSeries.update({
-      time,
+      time: displaySec,
       value: ticks,
       color,
     });
@@ -331,6 +450,7 @@
     chart,
     series,
     volumeSeries,
+    axis,
     loadHistory,
     updateCandle,
     updateTickVolume,

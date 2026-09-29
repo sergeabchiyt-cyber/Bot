@@ -17,6 +17,12 @@
  * Default scenario is the captured "Monday morning" state from the bug
  * report: PW/PS/swing levels present, CW ABSENT (before the first 17:00
  * America/New_York daily close of the week).
+ *
+ * The candle payload mirrors the real feed's shape: a wall-clock 15m window
+ * (weekends + the 21:00-22:00 UTC daily break) where closed buckets are
+ * bodyless filler bars, plus one simulated upstream outage with buckets
+ * missing entirely — the two things that used to leave blank columns in the
+ * chart.
  * ============================================================ */
 "use strict";
 
@@ -52,12 +58,47 @@ function levelSnapshot() {
 
 /* ---------- synthetic 15m candles around the fixture prices ---------- */
 
+const BUCKET_MS = 900000;
+
+/**
+ * Gold trades Sunday 22:00 to Friday 21:00 UTC with a 21:00-22:00 UTC daily
+ * break — the same calendar the real feed follows.
+ */
+function isMarketClosed(ms) {
+  const d = new Date(ms);
+  const day = d.getUTCDay(); // 0 = Sunday
+  const mins = d.getUTCHours() * 60 + d.getUTCMinutes();
+  if (day === 6) return true;                                 // Saturday
+  if (day === 5 && mins >= 21 * 60) return true;              // Friday close
+  if (day === 0 && mins < 22 * 60) return true;               // Sunday pre-open
+  return day >= 1 && day <= 4 && mins >= 21 * 60 && mins < 22 * 60; // daily break
+}
+
+/**
+ * A wall-clock window of 15m buckets, exactly like the backend's /candles:
+ * closed-market buckets are bodyless filler bars (open === close, the last
+ * traded price repeated) and an upstream outage leaves 16 buckets missing.
+ * Both used to punch blank columns into the chart.
+ */
 function candles() {
   const bars = [];
-  const nowMin = Math.floor(Date.now() / 900000) * 900000;
+  const nowMin = Math.floor(Date.now() / BUCKET_MS) * BUCKET_MS;
+  const outageStart = nowMin - 62 * BUCKET_MS;   // ~15h ago, 4h of missing data
+  const outageEnd = outageStart + 16 * BUCKET_MS;
   let price = 4285.0;
-  for (let i = 199; i >= 0; i--) {
-    const t = nowMin - i * 900000;
+
+  for (let i = 319; i >= 0; i--) {               // ~200 drawn bars once closed-market filler is out
+    const t = nowMin - i * BUCKET_MS;
+    if (t >= outageStart && t < outageEnd) continue; // upstream outage: no bar at all
+
+    if (isMarketClosed(t)) {
+      bars.push({
+        time: t, open: price, high: price + 0.65, low: price, close: price,
+        volume: 4600 + Math.floor(Math.random() * 400), source: "mock",
+      });
+      continue;
+    }
+
     const drift = Math.sin(i / 7) * 1.2 + (Math.random() - 0.5) * 0.6;
     const open = price;
     const close = price + drift;
