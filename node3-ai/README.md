@@ -20,7 +20,7 @@ Node 3 is the Python AI sidecar next to Node 1 (Rust engine) + Node 2 (dashboard
 | `requirements.txt` | 8 | ONNX-only, torch-free | Perfect for inference. For 16GB we keep torch-free at runtime and add one-time `optimum+torch` for ONNX export |
 | `xauusd-node3.service` | 18 | systemd Always-On, `Restart=always` | Needs `MemoryMax=14G` and env thread hints for 4 vCPU |
 
-**End-to-end flow today:**
+**End-to-end flow (implemented engine-side — the Rust engine now serves this):**
 
 ```
 Node1 (Rust WS) --audio_chunk base64 float32 16kHz--> Node3 ws_client
@@ -29,6 +29,14 @@ Node1 (Rust WS) --audio_chunk base64 float32 16kHz--> Node3 ws_client
            -> ws_client sends  {type:"sentiment", data:{...ts}} + {type:"transcript"}
 Node1 --learn {features:[...], target:0/1}--> Node3 rill_learner.update() -> persists learner_state.json
 ```
+
+The engine's **econ news monitor** produces the `audio_chunk` stream: it watches
+the economic calendar for event windows (NFP / CPI / FOMC / Powell), discovers
+live coverage via the MCP browser + `ECON_STREAM_SOURCES`, and streams decoded
+16 kHz mono f32le PCM on the `audio_chunk` topic. `transcript`/`sentiment`
+frames sent back by this client are cached and served at `GET /ai` ("what did
+the econ news deliver today"). Contract details: `README.md` → "Econ news
+audio → Node3".
 
 **Footprint today:** ~341 MB (Moonshine small INT8) + ~110 MB (FinBERT INT8) + ~30 MB Python → **~460 MB RSS, ~1.73GB peak** per your `node3.log`. Leaves ~14GB headroom you correctly flagged.
 

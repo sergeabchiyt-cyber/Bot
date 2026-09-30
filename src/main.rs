@@ -1,3 +1,4 @@
+mod ai_cache;
 mod calendar;
 mod config;
 mod status;
@@ -10,6 +11,7 @@ mod order_flow;
 mod execution;
 mod execution_deriv;
 mod execution_chelsea;
+mod econ_monitor;
 mod mcp_client;
 mod sifting_ws;
 mod tick_volume;
@@ -20,6 +22,7 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
+use ai_cache::AiCache;
 use config::Config;
 use execution::ExecutionManager;
 use order_flow::OrderFlowAnalyzer;
@@ -407,6 +410,22 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // ---------- Econ news audio monitor ----------
+    // Watches the calendar for event windows (NFP / CPI / FOMC / ...), finds
+    // live coverage (MCP browser + ECON_STREAM_SOURCES watchlist), captures
+    // the audio (yt-dlp + ffmpeg) and streams it to Node3 as `audio_chunk`
+    // frames on /ws. Node3 transcribes/scores and reports back `transcript` /
+    // `sentiment`, served to the desk at GET /ai.
+    {
+        let cfg = config.clone();
+        let bc = bc_tx.clone();
+        let cal = cached_calendar.clone();
+        let st = status.clone();
+        tokio::spawn(async move {
+            econ_monitor::run_econ_monitor(cfg, bc, cal, st).await;
+        });
+    }
+
     // ---------- Session-close level refresh ----------
     // PS (previous session) must roll forward at every 18:00 New York close,
     // not stay frozen at whatever it was when the process booted. Candles
@@ -512,11 +531,12 @@ async fn main() -> anyhow::Result<()> {
         vp: vp.clone(),
         status: status.clone(),
         config: config.clone(),
+        ai: Arc::new(AiCache::new()),
     };
     let app = ws_server::router(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
     info!(
-        "Listening on 0.0.0.0:{} — /health /status /levels /candles /tick-volume /calendar /ws",
+        "Listening on 0.0.0.0:{} — /health /status /levels /candles /tick-volume /calendar /ai /ws",
         config.port
     );
     axum::serve(listener, app).await?;

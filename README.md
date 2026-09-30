@@ -26,10 +26,13 @@ There is no `/` route — the engine is API-only.
 | `/candles` | SiftingIO 15m candles used by the chart and VP (latest fixed seed + live closes); `volume` = tick count |
 | `/tick-volume` | Live tick-volume bars built since boot (up/down/flat split, tick rate); newest may be in progress |
 | `/calendar`| Latest economic calendar snapshot (`source`, `count`, `events`) |
-| `/ws`      | WebSocket stream — send `{"type":"subscribe","topics":["candle","tick_volume","levels","bubbles","trades","calendar","status"]}` |
+| `/ai`      | What the econ news delivered today: Node3's `transcript`/`sentiment` frames (+ last health), filtered to the current UTC day |
+| `/ws`      | WebSocket stream — send `{"type":"subscribe","topics":["candle","tick_volume","levels","bubbles","trades","calendar","status","audio_chunk","learn","transcript","sentiment","health","prediction"]}` |
 
 WebSocket frames are tagged with `type`: `candle`, `tick_volume`, `levels`,
-`bubbles`, `trades`, `calendar`, `status`, `heartbeat`. The four order-flow colors:
+`bubbles`, `trades`, `calendar`, `status`, `heartbeat`, plus the Node3 AI
+contract frames `audio_chunk`, `learn`, `transcript`, `sentiment`, `health`,
+`prediction` (see "Econ news audio → Node3" below). The four order-flow colors:
 `BUY_BUBBLE` green, `SELL_BUBBLE` red, `ABS_BUY` blue, `ABS_SELL` orange.
 
 ### Tick volume
@@ -121,6 +124,14 @@ ITICK_TOKEN=                ITICK_WS_URL=               ITICK_SYMBOL=XAUUSD
 MCP_BROWSER_URL=http://localhost:3001     MCP_BROWSER_TOKEN=
 MCP_BROWSER_TOOL_NAVIGATE=  MCP_BROWSER_TOOL_READ=      MCP_SCRAPE_SECS=900
 CALENDAR_URL=               CALENDAR_USE_MCP=true
+# Econ-news audio monitor: streams live event coverage to Node3 as audio_chunk frames
+ECON_MONITOR=true           ECON_SCAN_SECS=60
+ECON_WINDOW_BEFORE_SECS=900 ECON_WINDOW_AFTER_SECS=3600
+ECON_MIN_IMPACT=High        ECON_CURRENCIES=USD
+ECON_STREAM_SOURCES=        # comma list of live pages/media (e.g. https://www.youtube.com/@federalreserve/live)
+ECON_CHUNK_MS=1000          ECON_USE_MCP=true
+ECON_MAX_STREAM_SECS=7200   ECON_YTDLP=yt-dlp   ECON_FFMPEG=ffmpeg
+ECON_TEST_TONE=1            # CI/offline plumbing test: synthetic 16kHz tone instead of live audio
 LEVEL_PROXIMITY_PIPS=5      SL_MIN_PIPS=10  SL_MAX_PIPS=50  TP_MIN_PIPS=15  TP_MAX_PIPS=100
 CORS_ALLOWED_ORIGIN=https://static-dash-frontend.onrender.com   # only origin allowed to call the REST API from a browser
 RR_MIN=1 RR_MAX=3           DERIV_DEMO_API=  DERIV_APP_ID=  DERIV_API_URL=
@@ -211,14 +222,60 @@ and it retries on the `MCP_SCRAPE_SECS` interval. The latest snapshot is cached,
 served at `/calendar`, and replayed to WebSocket clients that subscribe to the
 `calendar` topic.
 
+## Econ news audio → Node3 (AI pipeline)
+
+The engine closes the loop with Node3 (`node3-ai/ws_client.py`): it turns
+economic events into live audio, streams it to Node3 over the `/ws`
+connection Node3 already holds, and reports what the news delivered.
+
+```
+calendar event window opens (NFP, CPI, FOMC, Powell, ...)
+   │
+   ├─ ECON_STREAM_SOURCES watchlist (channel /live pages, direct media URLs)
+   ├─ MCP browser (the ~31-tool server) browses the event's live coverage
+   │
+   ▼
+yt-dlp resolves the stream ──► ffmpeg decodes ──► 16kHz mono f32le PCM
+   │
+   ▼
+/ws topic `audio_chunk`  ──►  Node3 ws_client.py  (subscribes audio_chunk+learn)
+                                 ├─ Moonshine → transcript
+                                 └─ FinBERT / FOMC-RoBERTa → sentiment
+   ▼                                        │
+GET /ai  ◄── engine caches those frames ────┘   (today's UTC day)
+```
+
+**Wire contract** (exactly what `node3-ai/ws_client.py` consumes):
+
+- `{"type":"audio_chunk","data":{"data":"<b64 f32le 16kHz mono>","ts":…,"source":…,"event":…,"sample_rate":16000,"format":"f32le","duration_ms":1000}}`
+  — one PCM chunk per `ECON_CHUNK_MS` of captured audio
+- `{"type":"learn","data":{"features":[…],"target":0|1}}` — forwarded to Node3's
+  online learner; any WS client or script may publish `learn`/`audio_chunk`
+  frames to `/ws` and the engine rebroadcasts them on the bus
+- Node3's replies (`transcript`, `sentiment`, `health`, `prediction`) are
+  fanned out on their topics and cached for `GET /ai`
+- `sentiment_req` / `predict_req` requests are forwarded to Node3 regardless
+  of topic subscription (Node3 only subscribes to `audio_chunk` + `learn`)
+
+The monitor arms on calendar events matching `ECON_MIN_IMPACT` (default
+`High`) and `ECON_CURRENCIES` (default `USD`) inside the window
+`[time − ECON_WINDOW_BEFORE_SECS, time + ECON_WINDOW_AFTER_SECS]` (default
+15 min before → 1 h after). Fed-type events (FOMC, Powell, press conferences)
+automatically add the official Federal Reserve live channel as a candidate
+source. Missing yt-dlp/ffmpeg degrade gracefully (direct media URLs in
+`ECON_STREAM_SOURCES` need neither extractor), and `ECON_TEST_TONE=1` streams
+a synthetic 16kHz tone instead — CI uses that (`ci/verify_econ_audio.py`) to
+prove the whole pipeline offline.
+
 ## Verifying
 
 ```bash
-cargo test                         # session-rollover, calendar parsing, CORS policy
+cargo test                         # session-rollover, calendar parsing, CORS policy, AI cache
 cargo test -- --ignored --nocapture  # hits the live ForexFactory feed
 bash ci/smoke.sh                   # boots the binary and asserts:
                                    #   /levels window bounds, /calendar contents,
-                                   #   /candles + /tick-volume payload shape, the CORS allow-list
+                                   #   /candles + /tick-volume payload shape, the CORS allow-list,
+                                   #   the econ audio pipeline (audio_chunk/learn on /ws, /ai digest)
                                    #   (allowed / preflight / foreign origin) and
                                    #   that /ws still upgrades and replays frames
 ```

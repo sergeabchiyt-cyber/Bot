@@ -32,7 +32,7 @@ jobs:
           git fetch origin ${{ github.ref_name }}
           git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
           tail -c 60000 /tmp/check.log > build-errors.log
-          git add build-errors.log
+          git add -f build-errors.log
           git commit -m "ci: build error log [skip ci]"
           git push origin ${{ github.ref_name }}
 

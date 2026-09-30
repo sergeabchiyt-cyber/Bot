@@ -241,7 +241,7 @@ impl McpClient {
     /// the page content back through the MCP browser server.
     pub async fn scrape_calendar(&self, status: &FeedStatus) -> Result<String> {
         status.set("mcp_browser", "connecting");
-        match self.scrape_calendar_inner().await {
+        match self.browse_page("https://www.forexfactory.com/calendar").await {
             Ok(text) => {
                 status.set("mcp_browser", "connected");
                 Ok(text)
@@ -253,7 +253,11 @@ impl McpClient {
         }
     }
 
-    async fn scrape_calendar_inner(&self) -> Result<String> {
+    /// Generic page browse through the MCP browser server: initialize the
+    /// session, discover the navigate/read tools from `tools/list` (a
+    /// Playwright-style server exposes ~30 tools; any compatible server
+    /// works), open `url`, and return the page text.
+    pub async fn browse_page(&self, url: &str) -> Result<String> {
         self.initialize().await.context("MCP initialize")?;
 
         let nav = self
@@ -264,14 +268,21 @@ impl McpClient {
             .find_tool(READ_CANDIDATES, "MCP_BROWSER_TOOL_READ")
             .await
             .ok_or_else(|| anyhow!("no page-content tool on browser MCP server"))?;
-        info!("MCP calendar scrape using tools: {nav} + {read}");
+        info!("MCP browse using tools: {nav} + {read} -> {url}");
 
-        self.call_tool(&nav, json!({"url": "https://www.forexfactory.com/calendar"}))
+        self.call_tool(&nav, json!({ "url": url }))
             .await
             .context("browser_navigate")?;
-        // Give the SPA a moment to render the table.
+        // Give the SPA a moment to render.
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         self.call_tool(&read, json!({})).await.context("page read")
+    }
+
+    /// How many tools the connected MCP server exposes (logged for proof
+    /// that the configured server — e.g. the 31-tool browser — is in use).
+    pub async fn tool_count(&self) -> Option<usize> {
+        self.initialize().await.ok()?;
+        self.list_tools().await.ok().map(|t| t.len())
     }
 }
 

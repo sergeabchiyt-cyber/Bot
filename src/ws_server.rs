@@ -16,6 +16,7 @@ use tokio::sync::{broadcast, RwLock};
 use tracing::info;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
+use crate::ai_cache::AiCache;
 use crate::config::Config;
 use crate::status::FeedStatus;
 use crate::tick_volume::TickVolumeStore;
@@ -33,6 +34,8 @@ pub struct AppState {
     pub vp: Arc<RwLock<VolumeProfileEngine>>,
     pub status: FeedStatus,
     pub config: Config,
+    /// Everything Node3 reports back (transcripts, sentiment, health).
+    pub ai: Arc<AiCache>,
 }
 
 /// Browser-facing CORS policy.
@@ -84,6 +87,7 @@ pub fn router(state: AppState) -> Router {
         .route("/candles", get(candles_snapshot))
         .route("/tick-volume", get(tick_volume_snapshot))
         .route("/calendar", get(calendar_snapshot))
+        .route("/ai", get(ai_snapshot))
         .route("/status", get(status_snapshot))
         .route("/ws", get(ws_handler))
         .with_state(state)
@@ -114,6 +118,57 @@ async fn tick_volume_snapshot(State(state): State<AppState>) -> Response {
 
 async fn calendar_snapshot(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(state.cached_calendar.read().await.clone())
+}
+
+/// What the econ news delivered today: Node3's transcripts + sentiment
+/// (plus last health), filtered to the current UTC day.
+async fn ai_snapshot(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(state.ai.snapshot_today())
+}
+
+/// Fill in the `data` envelope at the edge for loose producer payloads:
+/// `{"type":"learn","features":[..],"target":1}` and
+/// `{"type":"audio_chunk","audio":"<b64>"}` are accepted alongside the
+/// canonical `{"type":"...","data":{...}}` shape Node3 uses, and normalized
+/// before rebroadcast so subscribers always see one wire format.
+fn normalize_envelope(raw: &str, frame: WsFrame) -> WsFrame {
+    let needs_payload = match &frame {
+        WsFrame::AudioChunk { data } | WsFrame::Learn { data } => data.is_null(),
+        _ => return frame,
+    };
+    if !needs_payload {
+        return frame;
+    }
+    let Ok(obj) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return frame;
+    };
+    let Some(map) = obj.as_object() else {
+        return frame;
+    };
+    match frame {
+        WsFrame::AudioChunk { .. } => {
+            let payload = if let Some(a) = map.get("audio") {
+                serde_json::json!({ "data": a.clone() })
+            } else if let Some(a) = map.get("payload") {
+                serde_json::json!({ "data": a.clone() })
+            } else {
+                serde_json::Value::Null
+            };
+            WsFrame::AudioChunk { data: payload }
+        }
+        WsFrame::Learn { .. } => {
+            let mut m = serde_json::Map::new();
+            for k in ["features", "target"] {
+                if let Some(v) = map.get(k) {
+                    m.insert(k.to_string(), v.clone());
+                }
+            }
+            WsFrame::Learn {
+                data: serde_json::Value::Object(m),
+            }
+        }
+        other => other,
+    }
 }
 
 async fn status_snapshot(State(state): State<AppState>) -> Response {
@@ -164,7 +219,8 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(frame) = serde_json::from_str::<WsFrame>(&text) {
-                            if let WsFrame::Subscribe { topics: t } = frame {
+                          match frame {
+                            WsFrame::Subscribe { topics: t } => {
                                 info!("WS session {} subscribed to {:?}", session_id, t);
                                 topics = t;
                                 subscribed = true;
@@ -215,6 +271,36 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                     return;
                                 }
                             }
+
+                            // AI ingest: external producers (the econ monitor,
+                            // scripts) may publish audio chunks / learner
+                            // samples through the WS itself. The frame is
+                            // rebroadcast on the bus so Node3 — subscribed to
+                            // `audio_chunk` + `learn` — receives it.
+                            WsFrame::AudioChunk { .. } | WsFrame::Learn { .. } => {
+                                let frame = normalize_envelope(&text, frame);
+                                let _ = state.tx.send(frame);
+                            }
+
+                            // Node3 answers: cache for GET /ai and fan out to
+                            // subscribers of the matching topic.
+                            WsFrame::Transcript { .. }
+                            | WsFrame::Sentiment { .. }
+                            | WsFrame::Health { .. }
+                            | WsFrame::Prediction { .. } => {
+                                state.ai.record(&frame);
+                                let _ = state.tx.send(frame);
+                            }
+
+                            // Requests aimed at the AI node — rebroadcast so
+                            // the fan-out forwards them past the topic filter
+                            // (Node3 subscribes only to audio_chunk + learn).
+                            WsFrame::SentimentReq { .. } | WsFrame::PredictReq { .. } => {
+                                let _ = state.tx.send(frame);
+                            }
+
+                            _ => {}
+                          }
                         }
                     }
                     Some(Ok(_)) => {}
@@ -237,8 +323,18 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             WsFrame::Trades { .. } => "trades",
                             WsFrame::Calendar { .. } => "calendar",
                             WsFrame::Status { .. } => "status",
-                            WsFrame::Heartbeat => {
-                                // keepalive for proxies — always forwarded
+                            WsFrame::AudioChunk { .. } => "audio_chunk",
+                            WsFrame::Learn { .. } => "learn",
+                            WsFrame::Transcript { .. } => "transcript",
+                            WsFrame::Sentiment { .. } => "sentiment",
+                            WsFrame::Health { .. } => "health",
+                            WsFrame::Prediction { .. } => "prediction",
+                            WsFrame::Heartbeat
+                            | WsFrame::SentimentReq { .. }
+                            | WsFrame::PredictReq { .. } => {
+                                // keepalive for proxies and requests aimed at
+                                // the AI node — always forwarded, regardless
+                                // of topic subscription
                                 let json = serde_json::to_string(&frame).unwrap_or_default();
                                 if sender.send(Message::Text(json.into())).await.is_err() {
                                     info!("WS session {} send failed", session_id);
@@ -282,8 +378,15 @@ mod tests {
 
     const ALLOWED: &str = "https://static-dash-frontend.onrender.com";
     const FOREIGN: &str = "https://evil.example";
-    const REST_ROUTES: [&str; 6] =
-        ["/health", "/levels", "/candles", "/tick-volume", "/calendar", "/status"];
+    const REST_ROUTES: [&str; 7] = [
+        "/health",
+        "/levels",
+        "/candles",
+        "/tick-volume",
+        "/calendar",
+        "/ai",
+        "/status",
+    ];
 
     /// Router with an empty-but-valid snapshot cache, configured for `allowed`.
     fn app(allowed: &str) -> Router {
@@ -326,6 +429,7 @@ mod tests {
             vp: Arc::new(RwLock::new(VolumeProfileEngine::new())),
             status: FeedStatus::new(tx),
             config,
+            ai: Arc::new(AiCache::new()),
         };
         router(state)
     }
@@ -534,5 +638,70 @@ mod tests {
 
         assert!(good.is_ok());
         assert!(bad.is_err());
+    }
+
+    #[tokio::test]
+    async fn ai_route_reports_todays_digest() {
+        let res = send("GET", "/ai", Some(ALLOWED)).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        for key in [
+            "day_start",
+            "generated",
+            "transcripts",
+            "sentiments",
+            "predictions",
+            "health",
+            "counts",
+        ] {
+            assert!(json.get(key).is_some(), "/ai missing {key}");
+        }
+        assert!(json["transcripts"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn envelope_normalization_wraps_loose_producer_payloads() {
+        // Learn with top-level features/target (the shape Node3's handler
+        // documents) is wrapped into the canonical data envelope.
+        let f = normalize_envelope(
+            r#"{"type":"learn","features":[1.5,-0.4,0.8,0.68],"target":1}"#,
+            WsFrame::Learn {
+                data: serde_json::Value::Null,
+            },
+        );
+        match f {
+            WsFrame::Learn { data } => {
+                assert_eq!(data["features"][0], 1.5);
+                assert_eq!(data["target"], 1);
+            }
+            other => panic!("wrong variant: {other:?}"),
+        }
+
+        // Audio carried under an `audio` key becomes data.data.
+        let f = normalize_envelope(
+            r#"{"type":"audio_chunk","audio":"AAAA"}"#,
+            WsFrame::AudioChunk {
+                data: serde_json::Value::Null,
+            },
+        );
+        match f {
+            WsFrame::AudioChunk { data } => assert_eq!(data["data"], "AAAA"),
+            other => panic!("wrong variant: {other:?}"),
+        }
+
+        // Canonical payloads pass through untouched.
+        let f = normalize_envelope(
+            r#"{"type":"learn","data":{"features":[1.0],"target":0.0}}"#,
+            WsFrame::Learn {
+                data: serde_json::json!({"features": [1.0], "target": 0.0}),
+            },
+        );
+        match f {
+            WsFrame::Learn { data } => assert_eq!(data["target"], 0.0),
+            other => panic!("wrong variant: {other:?}"),
+        }
     }
 }
