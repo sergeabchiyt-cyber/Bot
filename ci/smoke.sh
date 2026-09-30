@@ -5,6 +5,8 @@
 #   3. CORS lets the Node2 static origin (and only that origin) read the REST API
 #   4. /ws still upgrades and replays levels + candles through the CORS layer
 #   5. /tick-volume serves well-formed live tick-volume bars
+#   6. the econ-news audio pipeline serves `audio_chunk`/`learn` on /ws and
+#      caches Node3 transcripts for GET /ai (test-tone mode, no ffmpeg needed)
 set -uo pipefail
 
 BIN=${BIN:-./target/release/xauusd-engine}
@@ -14,7 +16,10 @@ ENGINE_LOG=${ENGINE_LOG:-/tmp/engine.log}
 SEED_SYNTHETIC_CANDLES=${SEED_SYNTHETIC_CANDLES:-1} \
 RUST_LOG=${RUST_LOG:-info} "$BIN" >"$ENGINE_LOG" 2>&1 &
 PID=$!
-cleanup() { kill "$PID" 2>/dev/null || true; }
+cleanup() {
+  kill "$PID" 2>/dev/null || true
+  [ -n "${PID2:-}" ] && kill "$PID2" 2>/dev/null || true
+}
 trap cleanup EXIT
 
 fail() {
@@ -81,7 +86,7 @@ cors_headers() {
 one_line() { printf '%s' "$1" | tr '\n' '|'; }
 
 echo "1) allowed origin gets access-control-allow-origin on every route"
-for r in /health /levels /candles /tick-volume /calendar /status; do
+for r in /health /levels /candles /tick-volume /calendar /ai /status; do
   h=$(cors_headers GET "$r" -H "Origin: $CORS_ALLOWED")
   printf '%s\n' "$h" | head -n1 | grep -q " 200" \
     || fail "$r: expected 200, got '$(printf '%s\n' "$h" | head -n1)'"
@@ -103,7 +108,7 @@ printf '%s\n' "$h" | grep -qi "^access-control-max-age: 600\$" \
 printf '  %s\n' "$(one_line "$(printf '%s\n' "$h" | grep -Ei '^(HTTP/|access-control|vary)')")"
 
 echo "3) every other origin gets NO allow-header"
-for r in /health /levels /candles /tick-volume /calendar /status; do
+for r in /health /levels /candles /tick-volume /calendar /ai /status; do
   h=$(cors_headers GET "$r" -H "Origin: $CORS_FOREIGN")
   printf '%s\n' "$h" | grep -qi "^access-control-allow-origin" \
     && fail "$r: leaked an allow-header to $CORS_FOREIGN [$(one_line "$h")]"
@@ -125,6 +130,29 @@ echo "  headers are CORS-only"
 
 echo "5) /ws still upgrades and replays frames through the layer"
 python3 ci/verify_ws.py "${BASE#*://}" "$CORS_ALLOWED" || fail "/ws no longer streams through the CORS layer"
+
+echo
+echo "6) econ-news audio pipeline serves audio_chunk/learn and caches /ai digests"
+ECON_LOG=/tmp/engine-econ.log
+PORT=3100 SEED_SYNTHETIC_CANDLES=1 ECON_TEST_TONE=1 \
+FEED_BINANCE=0 FEED_BYBIT=0 FEED_OKX=0 FEED_BITGET=0 FEED_GATE=0 FEED_KRAKEN=0 \
+FEED_ALLTICK=0 FEED_ITICK=0 FEED_SIFTING=0 ECON_USE_MCP=0 \
+RUST_LOG=${RUST_LOG:-info} "$BIN" >"$ECON_LOG" 2>&1 &
+PID2=$!
+for _ in $(seq 1 30); do
+  if curl -sf http://127.0.0.1:3100/health >/dev/null; then break; fi
+  sleep 1
+done
+curl -sf http://127.0.0.1:3100/health >/dev/null || {
+  tail -60 "$ECON_LOG" || true
+  fail "econ-audio engine never became healthy"
+}
+python3 ci/verify_econ_audio.py 127.0.0.1:3100 || {
+  tail -60 "$ECON_LOG" || true
+  fail "econ audio pipeline verification failed"
+}
+kill "$PID2" 2>/dev/null || true
+PID2=""
 
 echo
 echo "--- engine log: session/level/calendar/CORS lines ---"

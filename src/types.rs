@@ -239,4 +239,64 @@ pub enum WsFrame {
 
     #[serde(rename = "heartbeat")]
     Heartbeat,
+
+    // ---- Node3 AI wire contract (ws_client.py) ----
+    // Engine -> Node3: base64 PCM audio of live econ-news coverage.
+    // `data` is `{"data": "<b64 f32le 16kHz mono>", "ts", "source", "event", ...}`
+    // or a bare base64 string — Node3 accepts both shapes.
+    #[serde(rename = "audio_chunk")]
+    AudioChunk {
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+
+    // Engine -> Node3: one online-learner sample `{"features": [..], "target": 0|1}`.
+    #[serde(rename = "learn")]
+    Learn {
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+
+    // Node3 -> engine: Moonshine transcript `{"text", "ts", "tier"}`.
+    #[serde(rename = "transcript")]
+    Transcript {
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+
+    // Node3 -> engine: FinBERT/FOMC sentiment `{"hawkish","dovish","neutral",...}`.
+    #[serde(rename = "sentiment")]
+    Sentiment {
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+
+    // Node3 -> engine: periodic health report (RSS, model tiers, learner stats).
+    #[serde(rename = "health")]
+    Health {
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+
+    // Node3 -> engine: learner prediction `{"proba", "threshold"}`.
+    #[serde(rename = "prediction")]
+    Prediction {
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+
+    // Engine -> Node3 request frames. Node3 only subscribes to
+    // `audio_chunk` + `learn`, so these bypass the topic filter like
+    // heartbeat does — they are rare, targeted requests for the AI node.
+    #[serde(rename = "sentiment_req")]
+    SentimentReq {
+        #[serde(default)]
+        data: serde_json::Value,
+    },
+
+    #[serde(rename = "predict_req")]
+    PredictReq {
+        #[serde(default)]
+        data: serde_json::Value,
+    },
 }

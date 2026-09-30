@@ -72,6 +72,40 @@ pub struct Config {
     /// Use the browser MCP server as a fallback when the direct feed fails.
     pub calendar_use_mcp: bool,
 
+    // ---- Econ news audio monitor (engine -> Node3 as `audio_chunk`) ----
+    /// Master switch for the automated econ-news audio monitor. When an
+    /// upcoming/active calendar event window opens, the monitor discovers
+    /// live coverage (MCP browser + configured watchlist), captures the
+    /// audio and streams it to Node3 over `/ws` topic `audio_chunk`.
+    pub econ_monitor: bool,
+    /// How often (seconds) the calendar is scanned for event windows.
+    pub econ_scan_secs: u64,
+    /// Start capturing this many seconds BEFORE an event's scheduled time.
+    pub econ_before_secs: i64,
+    /// Keep capturing this many seconds AFTER an event's scheduled time.
+    pub econ_after_secs: i64,
+    /// Minimum impact to arm on: "High" | "Medium" | "Low".
+    pub econ_min_impact: String,
+    /// Currencies to arm on (comma list, e.g. "USD,ALL").
+    pub econ_currencies: Vec<String>,
+    /// Always-on stream watchlist (comma list of page or direct media URLs,
+    /// e.g. `https://www.youtube.com/@federalreserve/live`).
+    pub econ_stream_sources: Vec<String>,
+    /// PCM chunk duration streamed per `audio_chunk` frame (ms).
+    pub econ_chunk_ms: u64,
+    /// Use the browser MCP server to browse active events and discover live
+    /// coverage links (the same 31-tool browser server as the calendar).
+    pub econ_use_mcp: bool,
+    /// CI/offline plumbing test: stream a synthetic 16kHz tone as
+    /// `audio_chunk` frames without any event, stream, ffmpeg or yt-dlp.
+    pub econ_test_tone: bool,
+    /// Safety cap per captured stream (seconds).
+    pub econ_max_stream_secs: u64,
+    /// Binary used to resolve live stream URLs (yt-dlp).
+    pub econ_ytdlp: String,
+    /// Binary used to decode streams to 16kHz mono f32le PCM (ffmpeg).
+    pub econ_ffmpeg: String,
+
     /// CI/offline only: if no historical candles could be fetched from any
     /// upstream, seed a deterministic synthetic series so the volume-profile
     /// endpoints are exercisable. Never enabled by default.
@@ -117,6 +151,20 @@ fn env_bool(key: &str, default: bool) -> bool {
 
 fn env_u64(key: &str, default: u64) -> u64 {
     env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
+fn env_i64(key: &str, default: i64) -> i64 {
+    env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
+/// Comma-separated list env, trimmed and stripped of empties.
+fn env_list(key: &str, default: &str) -> Vec<String> {
+    env::var(key)
+        .unwrap_or_else(|_| default.to_string())
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 /// tri-state feed switch: FEED_X=on|off|auto (auto = on only when its
@@ -180,6 +228,21 @@ impl Config {
 
             calendar_url: env_opt("CALENDAR_URL"),
             calendar_use_mcp: env_bool("CALENDAR_USE_MCP", true),
+
+            econ_monitor: env_bool("ECON_MONITOR", true),
+            econ_scan_secs: env_u64("ECON_SCAN_SECS", 60),
+            econ_before_secs: env_i64("ECON_WINDOW_BEFORE_SECS", 900),
+            econ_after_secs: env_i64("ECON_WINDOW_AFTER_SECS", 3600),
+            econ_min_impact: env_str("ECON_MIN_IMPACT", "High"),
+            econ_currencies: env_list("ECON_CURRENCIES", "USD"),
+            econ_stream_sources: env_list("ECON_STREAM_SOURCES", ""),
+            econ_chunk_ms: env_u64("ECON_CHUNK_MS", 1000).clamp(100, 10_000),
+            econ_use_mcp: env_bool("ECON_USE_MCP", true),
+            econ_test_tone: env_bool("ECON_TEST_TONE", false),
+            econ_max_stream_secs: env_u64("ECON_MAX_STREAM_SECS", 7200),
+            econ_ytdlp: env_str("ECON_YTDLP", "yt-dlp"),
+            econ_ffmpeg: env_str("ECON_FFMPEG", "ffmpeg"),
+
             seed_synthetic_candles: env_bool("SEED_SYNTHETIC_CANDLES", false),
 
             mcp_chelsea_url: env_opt("MCP_CHELSEA_URL"),
@@ -202,6 +265,15 @@ impl Config {
             ExecutionVenue::DerivDemo
         } else {
             ExecutionVenue::None
+        }
+    }
+
+    /// Numeric impact rank for the econ monitor: High=2, Medium=1, Low/other=0.
+    pub fn econ_min_impact_rank(&self) -> u8 {
+        match self.econ_min_impact.trim().to_ascii_lowercase().as_str() {
+            "high" | "red" => 2,
+            "medium" | "orange" => 1,
+            _ => 0,
         }
     }
 }
