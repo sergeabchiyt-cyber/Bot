@@ -360,7 +360,7 @@ async fn capture_media(
         }
         let mut buf = vec![0u8; want];
         match stdout.read_exact(&mut buf).await {
-            Ok(()) => {
+            Ok(_) => {
                 let _ = bc.send(audio_frame(&buf, chunk_ms, media_url, label, seq));
                 st.mark_msg("econ_monitor");
                 seq += 1;
