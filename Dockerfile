@@ -4,7 +4,7 @@ COPY Cargo.toml ./
 COPY src ./src
 RUN cargo build --release
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 # ffmpeg decodes live econ-news streams to 16kHz mono PCM for Node3;
 # yt-dlp resolves YouTube/other live stream pages to direct media URLs.
 RUN apt-get update \
