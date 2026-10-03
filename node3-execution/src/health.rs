@@ -13,7 +13,7 @@
 //! - `GET /account`          -> `200 OK` JSON `DerivAccountSnapshot`.
 
 use std::time::Duration;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{Sink, SinkExt, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{interval, timeout};
@@ -121,7 +121,7 @@ async fn send_initial_snapshots<S>(
     topics: &[String],
 ) -> Result<(), tokio_tungstenite::tungstenite::Error>
 where
-    S: SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
+    S: Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
 {
     let diag = WsFrame::Diagnostics {
         data: hub.snapshot().await,
