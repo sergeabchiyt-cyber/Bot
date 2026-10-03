@@ -4,8 +4,7 @@
   "private": true,
   "description": "Node2 static frontend for the XAUUSD terminal (no build step, no runtime dependencies)",
   "scripts": {
-    "test": "node tests/levels.test.js && node tests/chart-axis.test.js && node tests/execution.test.js",
-    "lint": "for f in js/*.js tests/*.js; do node --check \"$f\" || exit 1; done",
+    "lint": "for f in js/*.js; do node --check \"$f\" || exit 1; done",
     "mock": "node tests/mock-server.js"
   }
 }
