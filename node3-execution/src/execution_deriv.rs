@@ -4,7 +4,7 @@ use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use tokio::time::{interval, sleep, timeout};
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 use tracing::{debug, info, warn};
 
 use crate::config::Config;
@@ -438,15 +438,39 @@ impl DerivExecution {
         out
     }
 
-    /// WebSocket handshake with browser-like headers so Cloudflare in front of
+    /// Build the RFC 6455 client upgrade request for a Deriv WebSocket URL
+    /// (OTP or legacy v3), with browser-like headers so Cloudflare in front of
     /// Deriv treats the client as a regular browser session.
+    ///
+    /// The request **must** be derived from the URL through
+    /// [`IntoClientRequest`]: that is the only conversion in tungstenite that
+    /// writes `Host`, `Connection: Upgrade`, `Upgrade: websocket`,
+    /// `Sec-WebSocket-Version: 13` and the random `Sec-WebSocket-Key`. A
+    /// hand-built `http::Request` is forwarded verbatim (the trait impl for
+    /// `http::Request<()>` is trivial) and tungstenite's `generate_request`
+    /// then rejects it before a single byte leaves the process with
+    /// `WebSocket protocol error: Missing, duplicated or incorrect header
+    /// sec-websocket-key` — which is exactly what used to break both the OTP
+    /// and the legacy sockets.
+    fn handshake_request(url: &str) -> Result<http::Request<()>> {
+        let mut request = url
+            .into_client_request()
+            .map_err(|e| anyhow::anyhow!("invalid Deriv WS URL {}: {e}", redact_ws_url(url)))?;
+        request.headers_mut().insert(
+            http::header::ORIGIN,
+            http::HeaderValue::from_static(DERIV_ORIGIN),
+        );
+        request.headers_mut().insert(
+            http::header::USER_AGENT,
+            http::HeaderValue::from_static(DERIV_USER_AGENT),
+        );
+        Ok(request)
+    }
+
+    /// WebSocket handshake (OTP or legacy v3) over the request built by
+    /// [`Self::handshake_request`].
     async fn connect_ws(url: &str) -> Result<DerivWsStream> {
-        let request = http::Request::builder()
-            .uri(url)
-            .header("Origin", DERIV_ORIGIN)
-            .header("User-Agent", DERIV_USER_AGENT)
-            .body(())
-            .map_err(|e| anyhow::anyhow!("invalid Deriv WS URL {url}: {e}"))?;
+        let request = Self::handshake_request(url)?;
         let (ws, _) = timeout(
             Duration::from_secs(20),
             tokio_tungstenite::connect_async(request),
@@ -1475,6 +1499,42 @@ mod tests {
             Some("wss://h.test/v3?other=2".to_string())
         );
         assert_eq!(strip_app_id_param("wss://h.test/v3"), None);
+    }
+
+    #[test]
+    fn handshake_request_carries_the_required_upgrade_headers() {
+        // Regression: a hand-built `http::Request` carrying only `Origin` and
+        // `User-Agent` reached tungstenite without `Sec-WebSocket-Key`, so the
+        // OTP socket died before the upgrade ever left the process with
+        // "Missing, duplicated or incorrect header sec-websocket-key".
+        let url = "wss://api.derivws.com/trading/v1/options/ws/demo?otp=abc123xyz";
+        let request = DerivExecution::handshake_request(url).expect("handshake request");
+
+        // tungstenite's own generator is what rejected the old request: it must
+        // accept this one and emit every RFC 6455 handshake header.
+        let (bytes, key) =
+            tokio_tungstenite::tungstenite::handshake::client::generate_request(request)
+                .expect("tungstenite accepts the Deriv handshake request");
+        let text = String::from_utf8(bytes).expect("handshake request is ASCII");
+        let lowercase = text.to_lowercase();
+
+        assert!(
+            text.starts_with("GET /trading/v1/options/ws/demo?otp=abc123xyz HTTP/1.1\r\n"),
+            "unexpected request line:\n{text}"
+        );
+        assert!(!key.is_empty(), "missing Sec-WebSocket-Key");
+        let key_header = format!("sec-websocket-key: {}", key.to_lowercase());
+        for header in [
+            "host: api.derivws.com",
+            "connection: upgrade",
+            "upgrade: websocket",
+            "sec-websocket-version: 13",
+            key_header.as_str(),
+            "origin: https://app.deriv.com",
+            "user-agent: mozilla/5.0",
+        ] {
+            assert!(lowercase.contains(header), "missing `{header}` in:\n{text}");
+        }
     }
 
     #[test]
