@@ -11,7 +11,7 @@ Node 3 is the Python AI sidecar next to Node 1 (Rust engine) + Node 2 (dashboard
 
 | File | LOC | What it does | Bottleneck for accuracy |
 |---|---|---|---|
-| `ws_client.py` | 344 | Persistent WS to Node1, subscribes `audio_chunk` + `learn`, calls Moonshine → FinBERT → back to Node1, plus `keep_alive()` tick & health reporter | OK, but `audio_chunk` handling assumed float32 only, no VAD gating, no tier reporting |
+| `ws_client.py` | 427 | Persistent WS to Node1; subscribes to market (`candle`/`levels`/`trades`) and AI (`audio_chunk`/`learn`) topics, seeds ATR(14), plus `keep_alive()` and health reporting | Current market cache initializes levels/ATR; audio flow calls Moonshine → FinBERT |
 | `moonshine_service.py` | 203 | Loads `Mer0vin8ian/moonshine-streaming-small-onnx` INT8 (use `onnxruntime` + `tokenizers`), does encode → autoreg decode | **Small 123M** is best small-tier but **medium 245M exists** (Streaming WER 6.65 vs 7.84 avg → ~15% error cut). No VAD → silent chunks waste CPU & hallucinate |
 | `finbert_service.py` | 246 | Loads `sekarkrishna/finbert-int8` (ProsusAI/finbert quantized) + heuristic fallback | **Generic financial news BERT**: maps `negative → hawkish`, `positive → dovish`. FOMC has its own distribution. SOTA is **`gtfintechlab/FOMC-RoBERTa` (RoBERTa-large 355M, ACL'23 "Trillion Dollar Words") — 93.3% FOMC hawkish/dovish accuracy** vs ~72% via generic mapping |
 | `rill_learner.py` | 212 | Online logistic regression via SGD `eta=0.05/√(1+0.01t)`, L2=0.001, EMA loss | **No Adam, no feature scaling** → orderflow delta (units 10's) dominates sentiment (0-1). Slow convergence on regime shifts. No L1 sparsity |
@@ -80,7 +80,7 @@ All code was already **graceful-fallback safe** — missing ONNX → heuristic /
        |  Rust WebSocket Server (onrender.com / 0.0.0.0)    |
        +-------------------------+--------------------------+
                                  |
-              WebSocket (audio_chunk, learn, sentiment)
+              WebSocket (candle, levels, trades, audio_chunk, learn, sentiment)
                                  |
        +-------------------------v--------------------------+
        |               Node 3 — UPGRADED 16GB               |
@@ -150,9 +150,12 @@ All code was already **graceful-fallback safe** — missing ONNX → heuristic /
 
 ---
 
-## WebSocket Contract (unchanged wire, added tier fields)
+## WebSocket Contract (market state + AI pipeline)
 
-- **Subscribe** `{"type":"subscribe","topics":["audio_chunk","learn"]}`
+- **Subscribe** `{"type":"subscribe","topics":["audio_chunk","learn","candle","levels","trades"]}`. Reconnecting clients get cached levels and the latest 15 candles for immediate market-state initialization.
+- **Levels** frames are `{"type":"levels","data":{"window":"PW","poc":2340.0,"vah":2350.0,"val":2330.0,...}}`; `window` is one of `PW`, `PS`, or `CW`. Node3 caches those windows and ignores additional swing-profile windows. `PW.sunday_open`, when present, is the Sunday 18:00 New York start-candle open.
+- **Candles** are 15-minute OHLC bars. Fifteen bars seed Wilder ATR(14); same-time updates replace the current bar.
+- **Trade event** Node3 can publish via `Node3Client.send_trade_event(event)` as `{"type":"trades","data":{"trade_id":"n3-1","symbol":"XAUUSD","side":"buy","size":0.01,"entry":2340.0,"sl":2335.0,"tp":2350.0,"status":"signal","timestamp":1700000000000}}`. Node1 rebroadcasts it to dashboard clients subscribed to `trades`; the helper is a notification, not a broker order call.
 - **Sentiment** now includes model tag:
   ```json
   {"type":"sentiment","data":{"hawkish":0.81,"dovish":0.07,"neutral":0.12,"confidence":0.81,"ts":1700000000000,"model":"fomc:roberta_model_quantized.onnx","latency_ms":18.3}}

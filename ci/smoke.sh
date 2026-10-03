@@ -3,7 +3,7 @@
 #   1. /levels exposes a bounded PS window ending on a 18:00 NY session close
 #   2. /calendar is actually populated with real ForexFactory events
 #   3. CORS lets the Node2 static origin (and only that origin) read the REST API
-#   4. /ws still upgrades and replays levels + candles through the CORS layer
+#   4. /ws upgrades, replays levels + 15 candles, and fans Node3 trades to dashboards
 #   5. /tick-volume serves well-formed live tick-volume bars
 #   6. the econ-news audio pipeline serves `audio_chunk`/`learn` on /ws and
 #      caches Node3 transcripts for GET /ai (test-tone mode, no ffmpeg needed)

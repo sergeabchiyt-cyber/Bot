@@ -167,6 +167,15 @@ impl VolumeProfileEngine {
             None,
             None,
         );
+        if let Some(levels) = self.pw_levels.as_mut() {
+            // Preserve the Sunday 18:00 NY start timestamp in `start`, and
+            // expose the boundary candle's open separately as a price level.
+            levels.sunday_open = self
+                .candles
+                .iter()
+                .find(|c| c.time == pw_start && c.open.is_finite())
+                .map(|c| c.open);
+        }
         // ---- Previous session (rolls at every session close) ----
         let (ps_start, ps_end, ps_candles) =
             session::previous_session_slice(&self.candles, now_ms);
@@ -439,6 +448,29 @@ mod tests {
             assert_eq!((pw.start, pw.end), (start, end));
             assert!((3100.0..=3110.0).contains(&pw.poc), "{pw:?}");
         }
+    }
+
+    #[test]
+    fn pw_marks_the_sunday_start_candle_open_price() {
+        let mut e = VolumeProfileEngine::new();
+        let now = ny(2025, 6, 11, 12, 0);
+        let (start, end) = VolumeProfileEngine::previous_week_bounds_utc(now);
+        fill(&mut e, start, end, 3100.0, 3110.0);
+        let sunday_open = 3107.25;
+        e.candles
+            .iter_mut()
+            .find(|c| c.time == start)
+            .expect("exact Sunday 18:00 candle")
+            .open = sunday_open;
+
+        e.recompute(now);
+        let pw = e.pw_levels.as_ref().expect("PW profile");
+        assert_eq!(pw.start, start, "start remains the Sunday-open timestamp");
+        assert_eq!(pw.sunday_open, Some(sunday_open));
+
+        let wire = serde_json::to_value(pw).expect("serialize PW levels");
+        assert_eq!(wire["window"], "PW");
+        assert_eq!(wire["sunday_open"], sunday_open);
     }
 
     #[test]

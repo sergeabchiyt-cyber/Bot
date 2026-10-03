@@ -38,6 +38,7 @@ if curr_dir not in sys.path:
     sys.path.insert(0, curr_dir)
 
 from finbert_service import FinBERTService
+from market_state import MarketState
 from moonshine_service import MoonshineService
 from rill_learner import OnlineLearner
 
@@ -65,6 +66,8 @@ def load_env(env_path: Optional[str] = None):
 
 load_env()
 
+# Prefer Node1's direct same-region WSS endpoint (or private service DNS when
+# supported); the public Singapore hostname is the fallback.
 NODE1_WS_URL = os.getenv(
     "NODE1_WS_URL", "wss://engine-southeastasia-sng-main.onrender.com/ws"
 )
@@ -100,6 +103,10 @@ class Node3Client:
         self.url = NODE1_WS_URL
         self.session_id = SESSION_ID
         self.cached_sentiment: Optional[Dict[str, Any]] = None
+        # Populated by the immediate levels + 15-candle replay on every
+        # subscription/reconnect; execution components can read `levels` and
+        # the ready 14-period ATR directly from this cache.
+        self.market_state = MarketState()
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
         self.running = True
 
@@ -181,6 +188,17 @@ class Node3Client:
             return
         msg = json.dumps({"type": frame_type, "data": data})
         await self.ws.send(msg)
+
+    async def send_trade_event(self, trade_event: Dict[str, Any]):
+        """Publish a Node3 execution result/signal for Node1 dashboard fan-out."""
+        required = {
+            "trade_id", "symbol", "side", "size", "entry", "sl", "tp",
+            "status", "timestamp",
+        }
+        if not isinstance(trade_event, dict) or not required.issubset(trade_event):
+            missing = sorted(required - set(trade_event)) if isinstance(trade_event, dict) else sorted(required)
+            raise ValueError(f"TradeEvent is missing required fields: {missing}")
+        await self.send_frame("trades", trade_event)
 
     async def handle_audio_chunk(self, raw_data: Any):
         try:
@@ -264,6 +282,26 @@ class Node3Client:
                 await self.handle_audio_chunk(data or frame)
             elif f_type == "learn":
                 await self.handle_learn(frame)
+            elif f_type == "levels":
+                if self.market_state.update_levels(data):
+                    logger.debug(
+                        "Cached %s levels: POC %.3f VAH %.3f VAL %.3f",
+                        data["window"], data["poc"], data["vah"], data["val"],
+                    )
+            elif f_type == "candle":
+                was_ready = self.market_state.atr_14 is not None
+                if self.market_state.update_candle(data):
+                    if not was_ready and self.market_state.atr_14 is not None:
+                        logger.info(
+                            "Market state initialized from replay: levels=%s ATR14=%.5f",
+                            sorted(self.market_state.levels),
+                            self.market_state.atr_14,
+                        )
+            elif f_type == "trades":
+                # Node1 rebroadcasts a Node3 trade to all `trades` subscribers,
+                # including this socket. Treat it as an acknowledgement only;
+                # never feed the echo back into execution.
+                logger.debug("Trade frame received from Node1: %s", data)
             elif f_type == "heartbeat":
                 logger.debug("Received heartbeat from Node 1")
             elif f_type == "sentiment_req":
@@ -299,14 +337,19 @@ class Node3Client:
                 ) as ws:
                     self.ws = ws
                     delay = RECONNECT_MIN
+                    # Start clean so a missing frame cannot leave stale
+                    # levels/ATR from the previous connection in execution state.
+                    self.market_state = MarketState()
                     logger.info("WS connected (RSS %.1f MB)", get_rss_mb())
 
                     subscribe_frame = {
                         "type": "subscribe",
-                        "topics": ["audio_chunk", "learn"],
+                        "topics": ["audio_chunk", "learn", "candle", "levels", "trades"],
                     }
                     await ws.send(json.dumps(subscribe_frame))
-                    logger.info('Sent subscribe frame: ["audio_chunk", "learn"]')
+                    logger.info(
+                        'Sent subscribe frame: ["audio_chunk", "learn", "candle", "levels", "trades"]'
+                    )
 
                     if self.cached_sentiment:
                         await self.send_frame("sentiment", self.cached_sentiment)

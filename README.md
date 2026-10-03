@@ -32,8 +32,15 @@ There is no `/` route — the engine is API-only.
 WebSocket frames are tagged with `type`: `candle`, `tick_volume`, `levels`,
 `bubbles`, `trades`, `calendar`, `status`, `heartbeat`, plus the Node3 AI
 contract frames `audio_chunk`, `learn`, `transcript`, `sentiment`, `health`,
-`prediction` (see "Econ news audio → Node3" below). The four order-flow colors:
+`prediction` (see "Node 1 ↔ Node 3" below). The four order-flow colors:
 `BUY_BUBBLE` green, `SELL_BUBBLE` red, `ABS_BUY` blue, `ABS_SELL` orange.
+
+Subscribing to `levels` replays the cached profiles. Subscribing to `candle`
+replays the latest 15 cached 15-minute OHLC bars (enough for Node3 to seed
+ATR(14)); `/candles` remains the full chart-history endpoint. Subscriptions to
+`candle`, `levels`, and `trades` are supported together. The `trades` topic is
+bidirectional: a valid Node3 `TradeEvent` published to `/ws` is fanned out
+unchanged to every connected client subscribed to `trades`.
 
 ### Tick volume
 
@@ -222,11 +229,43 @@ and it retries on the `MCP_SCRAPE_SECS` interval. The latest snapshot is cached,
 served at `/calendar`, and replayed to WebSocket clients that subscribe to the
 `calendar` topic.
 
-## Econ news audio → Node3 (AI pipeline)
+## Node 1 ↔ Node 3
 
-The engine closes the loop with Node3 (`node3-ai/ws_client.py`): it turns
-economic events into live audio, streams it to Node3 over the `/ws`
-connection Node3 already holds, and reports what the news delivered.
+### Market state and trade fan-out
+
+Node3 (`node3-ai/ws_client.py`) subscribes to `candle`, `levels`, and
+`trades` in addition to the audio/learner topics. On each subscribe (including
+reconnect), Node1 first replays its cached level frames and last 15 candles.
+Node3 stores `PW` / `PS` / `CW` levels and seeds Wilder ATR(14) from those 15
+bars; duplicate updates for the current 15-minute candle replace that bar.
+`PW.sunday_open` carries the open price of the exact Sunday 18:00 New York
+start candle when that candle exists in the history (`PW.start` remains the
+boundary timestamp).
+
+When Node3 emits an execution or trade signal, publish the standard event on
+the same connection:
+
+```json
+{"type":"trades","data":{"trade_id":"n3-1","symbol":"XAUUSD","side":"buy","size":0.01,"entry":2340.0,"sl":2335.0,"tp":2350.0,"status":"signal","timestamp":1700000000000}}
+```
+
+Node1 rebroadcasts this unchanged to every `/ws` client subscribed to
+`trades`, including Node2 dashboards. Node3's helper is
+`Node3Client.send_trade_event(...)`; this only broadcasts the event and does
+not itself place an order.
+
+For lowest latency in a Singapore deployment, set Node3's `NODE1_WS_URL` to
+Node1's direct secure WebSocket endpoint (`wss://<node1-sg-host>/ws`), using
+provider-private networking/internal DNS when available. The existing
+`engine-southeastasia-sng-main.onrender.com` WSS address is the public fallback;
+keep Node3 and Node1 in the same region and avoid routing execution traffic via
+Node2 or another proxy. Network RTT depends on the hosting provider, so the
+sub-millisecond target must be verified from the deployed services.
+
+### Econ news audio
+
+The engine also turns economic events into live audio, streams it to Node3 over
+the same `/ws` connection Node3 already holds, and reports what the news delivered.
 
 ```
 calendar event window opens (NFP, CPI, FOMC, Powell, ...)
@@ -238,7 +277,7 @@ calendar event window opens (NFP, CPI, FOMC, Powell, ...)
 yt-dlp resolves the stream ──► ffmpeg decodes ──► 16kHz mono f32le PCM
    │
    ▼
-/ws topic `audio_chunk`  ──►  Node3 ws_client.py  (subscribes audio_chunk+learn)
+/ws topic `audio_chunk`  ──►  Node3 ws_client.py  (also candle/levels/trades)
                                  ├─ Moonshine → transcript
                                  └─ FinBERT / FOMC-RoBERTa → sentiment
    ▼                                        │
@@ -255,7 +294,8 @@ GET /ai  ◄── engine caches those frames ────┘   (today's UTC day
 - Node3's replies (`transcript`, `sentiment`, `health`, `prediction`) are
   fanned out on their topics and cached for `GET /ai`
 - `sentiment_req` / `predict_req` requests are forwarded to Node3 regardless
-  of topic subscription (Node3 only subscribes to `audio_chunk` + `learn`)
+  of topic subscription; Node3 subscribes to `audio_chunk`, `learn`, `candle`,
+  `levels`, and `trades`
 
 The monitor arms on calendar events matching `ECON_MIN_IMPACT` (default
 `High`) and `ECON_CURRENCIES` (default `USD`) inside the window
@@ -277,7 +317,7 @@ bash ci/smoke.sh                   # boots the binary and asserts:
                                    #   /candles + /tick-volume payload shape, the CORS allow-list,
                                    #   the econ audio pipeline (audio_chunk/learn on /ws, /ai digest)
                                    #   (allowed / preflight / foreign origin) and
-                                   #   that /ws still upgrades and replays frames
+                                   #   that /ws replays levels/15 candles and fans out Node3 trades
 ```
 
 CI runs all three on every push. The CORS probes in `ci/smoke.sh` are the
