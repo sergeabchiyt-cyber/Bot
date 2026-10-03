@@ -117,6 +117,15 @@ docker build -t node3-execution . && docker run --env-file .env -p 10000:10000 n
   networks. Legacy connections therefore use browser-like handshake headers
   (`Origin`, `User-Agent`) and fail over across `ws.derivws.com`,
   `ws.binaryws.com`, and `wss.derivws.com`, with and without `app_id`.
+- **RFC 6455 upgrade headers.** Every Deriv socket (OTP and legacy) is dialed
+  through a request built from the URL via `IntoClientRequest`, which is the
+  only conversion that writes `Host`, `Connection: Upgrade`,
+  `Upgrade: websocket`, `Sec-WebSocket-Version: 13` and the random
+  `Sec-WebSocket-Key`; the browser-like `Origin` / `User-Agent` are added on
+  top. Hand-building the `http::Request` (as an earlier revision did) makes
+  tungstenite abort the handshake locally with
+  `WebSocket protocol error: Missing, duplicated or incorrect header
+  sec-websocket-key` — the connection never reaches Deriv.
 - **Demo only.** The Deriv venue refuses to trade on anything that is not a
   demo/virtual (`VRTC...`) account, on both the OTP and legacy flows.
 - **PAT + `DERIV_APP_ID`.** PAT REST calls are rejected by Deriv without a
