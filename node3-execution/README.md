@@ -71,10 +71,13 @@ NODE1_WS_URL=wss://engine-southeastasia-sng-main.onrender.com/ws
 PORT=10000
 
 # Execution Venues (Only 1 minimum required)
+# PAT (pat_...) tokens REQUIRE DERIV_APP_ID; legacy a1-... tokens do not.
 DERIV_DEMO_API=your_deriv_token
-# Required ONLY for PAT (pat_...) tokens — register a free app at
-# https://developers.deriv.com (API dashboard) and paste its App ID here.
-# Legacy a1-... tokens do not need it.
+# Required whenever DERIV_DEMO_API is a PAT (pat_...) token — register a free
+# app at https://developers.deriv.com (API dashboard) and paste its App ID here.
+# Set it in the running service's environment (Render → Environment), not only in
+# a local .env, otherwise Deriv answers HTTP 401:
+#   "Deriv-App-ID header is required for PAT tokens".
 DERIV_APP_ID=
 # Optional override. Default: https://api.derivws.com (current REST + OTP API).
 # Set to wss://ws.derivws.com/websockets/v3 to force the legacy flow.
@@ -120,3 +123,27 @@ docker build -t node3-execution . && docker run --env-file .env -p 10000:10000 n
   `Deriv-App-ID` header, so PAT users must register a (free) app and set
   `DERIV_APP_ID`. The `/deriv` endpoint and logs spell this out if it is
   missing.
+
+### PAT credentials checklist
+
+A `pat_...` token needs **two** variables in the service environment:
+
+| Variable           | Value                                                                        |
+| ------------------ | ---------------------------------------------------------------------------- |
+| `DERIV_DEMO_API`   | the PAT itself (`pat_...`)                                                   |
+| `DERIV_APP_ID`     | App ID of a free app registered at <https://developers.deriv.com> (API dashboard) |
+
+Set them where Node 3 actually runs (e.g. Render → **Environment**) and restart
+the service — editing a local `.env` alone does not change the deployed bot.
+
+Verify without reading logs:
+
+```bash
+curl -s http://localhost:10000/deriv | jq '{token_kind, app_id_configured, connected, authorized, error, setup_hint}'
+```
+
+- `token_kind: "pat"` with `app_id_configured: false` → `DERIV_APP_ID` is missing;
+  the response's `setup_hint` names the exact variable to set.
+- `app_id_configured: true` and still unauthorized → the App ID value is wrong,
+  or `DERIV_API_URL` was pointed at a legacy `wss://` endpoint (PATs only work on
+  the default `https://api.derivws.com` REST + OTP API).

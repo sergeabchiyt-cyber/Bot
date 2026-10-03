@@ -48,3 +48,24 @@ curl http://localhost:10000/scanning      # -> Current scanned VP levels & armed
 curl http://localhost:10000/open-trades   # -> Node 3 open trades + Deriv open contracts
 curl http://localhost:10000/deriv         # -> Deriv Demo balance & open contracts
 ```
+
+### 5. Deriv credentials
+
+Node 3 auto-detects the token shape from `DERIV_DEMO_API`:
+
+- **Legacy `a1-...` token** — only `DERIV_DEMO_API` is needed.
+- **Personal Access Token `pat_...`** — Deriv needs your App ID on every REST call,
+  so `DERIV_APP_ID` must be set as well. Without it the account monitor answers
+  `HTTP 401: Deriv-App-ID header is required for PAT tokens`.
+
+Register a free app at <https://developers.deriv.com> (API dashboard) and set both
+variables **in the environment of the deployed service** (e.g. Render → Environment),
+not just in a local `.env`:
+
+```env
+DERIV_DEMO_API=pat_...
+DERIV_APP_ID=12345
+```
+
+`GET /deriv` reports `token_kind`, `app_id_configured` and a `setup_hint` naming the
+missing variable, so a misconfiguration is visible without reading the service logs.

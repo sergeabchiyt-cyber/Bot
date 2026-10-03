@@ -55,6 +55,56 @@ pub fn token_kind(token: &str) -> TokenKind {
     }
 }
 
+/// Env var holding the API token (demo / virtual account).
+pub const DERIV_TOKEN_ENV_VAR: &str = "DERIV_DEMO_API";
+
+/// Env var holding the App ID. PAT (`pat_...`) REST calls are rejected by
+/// Deriv with `HTTP 401: Deriv-App-ID header is required for PAT tokens`
+/// unless this is set to the App ID of a registered (free) Deriv app.
+pub const DERIV_APP_ID_ENV_VAR: &str = "DERIV_APP_ID";
+
+/// Human-readable token shape, reported on `/deriv` and `/diagnostics`.
+pub fn token_kind_label(token: Option<&str>) -> &'static str {
+    match token {
+        Some(t) if token_kind(t) == TokenKind::Pat => "pat",
+        Some(t) if !t.trim().is_empty() => "legacy",
+        _ => "none",
+    }
+}
+
+fn is_blank(value: Option<&str>) -> bool {
+    value.map(|v| v.trim().is_empty()).unwrap_or(true)
+}
+
+/// Setup instructions for the "PAT without `DERIV_APP_ID`" misconfiguration —
+/// the exact case Deriv answers with
+/// `HTTP 401: Deriv-App-ID header is required for PAT tokens`.
+pub fn pat_app_id_setup_hint() -> String {
+    format!(
+        "{DERIV_TOKEN_ENV_VAR} looks like a Personal Access Token (pat_...) but {DERIV_APP_ID_ENV_VAR} is not set, \
+         so Deriv rejects every REST call with `HTTP 401: Deriv-App-ID header is required for PAT tokens`. \
+         Register a free app at https://developers.deriv.com (API dashboard) and set {DERIV_APP_ID_ENV_VAR} to its \
+         App ID in this service's environment (e.g. Render -> Environment, not only in a local .env), then restart Node 3."
+    )
+}
+
+/// Actionable configuration hint, or `None` when the Deriv venue looks
+/// correctly configured. Used at startup, in the logs and on the `/deriv` and
+/// `/diagnostics` endpoints so a misconfiguration is visible without reading
+/// the service logs.
+pub fn deriv_setup_hint(token: Option<&str>, app_id: Option<&str>) -> Option<String> {
+    match token {
+        None => Some(format!(
+            "{DERIV_TOKEN_ENV_VAR} is not configured — Deriv execution and the live account monitor stay disabled \
+             (set {DERIV_TOKEN_ENV_VAR} and, for PAT tokens, {DERIV_APP_ID_ENV_VAR})."
+        )),
+        Some(_) if token_kind_label(token) == "pat" && is_blank(app_id) => {
+            Some(pat_app_id_setup_hint())
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone)]
 struct DemoAccount {
     id: String,
@@ -212,21 +262,50 @@ fn should_fallback_to_legacy(token: &str, err: &anyhow::Error) -> bool {
     !is_no_demo_error(err)
 }
 
-fn pat_guidance(err: &anyhow::Error) -> String {
-    format!(
-        "Deriv auth failed: {err:#}. This looks like a PAT (pat_...) token, which only works with Deriv's current API and requires DERIV_APP_ID — register a free app at https://developers.deriv.com (API dashboard) and set DERIV_APP_ID to its App ID."
-    )
+/// Remedy text for a PAT failure: either "set `DERIV_APP_ID`" when it is
+/// missing, or "check its value" when it is already configured.
+fn pat_remedy(app_id_configured: bool) -> String {
+    if app_id_configured {
+        format!(
+            "{DERIV_APP_ID_ENV_VAR} is set, so the App ID or the API URL is the problem: it must be the App ID of a \
+             registered app from https://developers.deriv.com (API dashboard), and DERIV_API_URL must keep pointing \
+             at Deriv's current API (https://api.derivws.com) rather than a legacy wss:// endpoint."
+        )
+    } else {
+        pat_app_id_setup_hint()
+    }
+}
+
+/// Guidance text for a PAT that failed against Deriv's current API.
+fn pat_guidance(err: &anyhow::Error, app_id_configured: bool) -> String {
+    let remedy = pat_remedy(app_id_configured);
+    format!("Deriv auth failed: {err:#}. {remedy}")
 }
 
 impl DerivExecution {
     pub fn new(config: &Config) -> Self {
+        // Blank / whitespace-only values must behave exactly like "not set",
+        // otherwise the `Deriv-App-ID` header would be sent empty and Deriv
+        // rejects the request with a confusing 401.
+        let app_id = config
+            .deriv_app_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(String::from);
         Self {
             api_token: config.deriv_demo_api.clone().unwrap_or_default(),
-            app_id: config.deriv_app_id.clone(),
+            app_id,
             api_url: config.deriv_api_url.clone(),
             ws_url: config.deriv_ws_url(),
             http: reqwest::Client::new(),
         }
+    }
+
+    /// True when a usable App ID is configured (PAT tokens need the
+    /// `Deriv-App-ID` header on every REST call).
+    pub fn app_id_configured(&self) -> bool {
+        self.app_id.is_some()
     }
 
     fn uses_http_otp(&self) -> bool {
@@ -459,6 +538,10 @@ impl DerivExecution {
                     .unwrap_or("authorize failed");
                 if is_invalid_token_error(code, message) {
                     let _ = ws.close(None).await;
+                    if token_kind(&self.api_token) == TokenKind::Pat {
+                        let remedy = pat_remedy(self.app_id_configured());
+                        anyhow::bail!("Deriv rejected the PAT ({code}: {message}). {remedy}");
+                    }
                     anyhow::bail!("Deriv rejected the API token ({code}: {message}). Check DERIV_DEMO_API — legacy a1-... tokens are authorized here, while PAT (pat_...) tokens need the default REST API plus DERIV_APP_ID.");
                 }
                 last_err = format!("{url}: authorize error {code}: {message}");
@@ -620,7 +703,7 @@ impl DerivExecution {
                     if should_fallback_to_legacy(&self.api_token, &e) {
                         warn!("Deriv OTP order flow failed ({e:#}); falling back to legacy WS flow");
                     } else if token_kind(&self.api_token) == TokenKind::Pat {
-                        return Err(anyhow::anyhow!("{}", pat_guidance(&e)));
+                        return Err(anyhow::anyhow!("{}", pat_guidance(&e, self.app_id_configured())));
                     } else {
                         return Err(e);
                     }
@@ -1065,6 +1148,22 @@ pub async fn spawn_deriv_monitor(config: Config, hub: DiagnosticsHub) {
         return;
     };
 
+    // Surface a missing App ID (PAT tokens) before the first API call, so the
+    // fix is visible in the logs instead of only as an HTTP 401 in the loop.
+    if let Some(hint) = deriv_setup_hint(Some(&token), config.deriv_app_id.as_deref()) {
+        warn!("{hint}");
+    }
+    info!(
+        "Deriv auth config: token kind = {}, {} = {}",
+        token_kind_label(Some(&token)),
+        DERIV_APP_ID_ENV_VAR,
+        if config.deriv_app_id_configured() {
+            "set"
+        } else {
+            "not set"
+        }
+    );
+
     let executor = DerivExecution::new(&config);
 
     loop {
@@ -1086,7 +1185,7 @@ pub async fn spawn_deriv_monitor(config: Config, hub: DiagnosticsHub) {
                 }
                 Err(e) => {
                     if token_kind(&token) == TokenKind::Pat {
-                        let msg = pat_guidance(&e);
+                        let msg = pat_guidance(&e, executor.app_id_configured());
                         warn!("{msg}");
                         hub.update_deriv_status(false, false, None, None, None, Some(msg))
                             .await;
@@ -1198,6 +1297,91 @@ mod tests {
         assert_eq!(token_kind("  PAT_xyz "), TokenKind::Pat);
         assert_eq!(token_kind("a1-AbC123xYz"), TokenKind::Other);
         assert_eq!(token_kind("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig"), TokenKind::Other);
+    }
+
+    fn test_config_with_token(token: &str, app_id: Option<&str>) -> Config {
+        Config {
+            node1_ws_url: "wss://example.invalid/ws".into(),
+            port: 10_000,
+            mcp_chelsea_url: None,
+            deriv_demo_api: Some(token.into()),
+            deriv_app_id: app_id.map(String::from),
+            deriv_api_url: "https://api.derivws.com".into(),
+            volume_threshold: 10_500.0,
+            sl_min_pips: 200.0,
+            sl_max_pips: 300.0,
+            tp_min_pips: 600.0,
+            tp_max_pips: 800.0,
+            rr_min: 2.0,
+            rr_max: 3.0,
+            order_size: 0.01,
+        }
+    }
+
+    #[test]
+    fn labels_token_kinds() {
+        assert_eq!(token_kind_label(Some("pat_abc")), "pat");
+        assert_eq!(token_kind_label(Some("  PAT_abc ")), "pat");
+        assert_eq!(token_kind_label(Some("a1-legacy")), "legacy");
+        assert_eq!(token_kind_label(Some("   ")), "none");
+        assert_eq!(token_kind_label(None), "none");
+    }
+
+    #[test]
+    fn flags_pat_without_app_id() {
+        let hint = deriv_setup_hint(Some("pat_abc123"), None).expect("PAT needs an app id");
+        assert!(hint.contains("DERIV_APP_ID"));
+        assert!(hint.contains("pat_"));
+        assert!(hint.contains("developers.deriv.com"));
+
+        // A configured app id (even padded with spaces) is enough.
+        assert!(deriv_setup_hint(Some("pat_abc123"), Some("1089")).is_none());
+        assert!(deriv_setup_hint(Some("pat_abc123"), Some("  ")).is_some());
+
+        // Legacy tokens never need an app id.
+        assert!(deriv_setup_hint(Some("a1-legacy"), None).is_none());
+
+        // No token at all is reported too.
+        let missing = deriv_setup_hint(None, None).expect("missing token hint");
+        assert!(missing.contains("DERIV_DEMO_API"));
+    }
+
+    #[test]
+    fn pat_remedy_distinguishes_missing_from_wrong_app_id() {
+        let missing = pat_remedy(false);
+        assert!(missing.contains("DERIV_APP_ID"));
+        assert!(missing.contains("developers.deriv.com"));
+
+        let set = pat_remedy(true);
+        assert!(set.contains("DERIV_APP_ID"));
+        assert!(set.contains("DERIV_API_URL"));
+    }
+
+    #[test]
+    fn pat_guidance_includes_the_underlying_error_and_remedy() {
+        let err = anyhow::anyhow!(
+            "Deriv accounts failed: HTTP 401: Deriv-App-ID header is required for PAT tokens"
+        );
+        let guidance = pat_guidance(&err, false);
+        assert!(guidance.contains("HTTP 401"));
+        assert!(guidance.contains("DERIV_APP_ID"));
+        assert!(guidance.contains("DERIV_DEMO_API"));
+    }
+
+    #[test]
+    fn blank_app_id_is_treated_as_unset() {
+        // Whitespace-only DERIV_APP_ID must behave like "not set" so an empty
+        // `Deriv-App-ID` header is never sent.
+        let blank = DerivExecution::new(&test_config_with_token("pat_abc", Some("   ")));
+        assert!(!blank.app_id_configured());
+        assert!(blank.app_id.is_none());
+
+        let padded = DerivExecution::new(&test_config_with_token("pat_abc", Some(" 1089 ")));
+        assert!(padded.app_id_configured());
+        assert_eq!(padded.app_id.as_deref(), Some("1089"));
+
+        let absent = DerivExecution::new(&test_config_with_token("pat_abc", None));
+        assert!(!absent.app_id_configured());
     }
 
     #[test]

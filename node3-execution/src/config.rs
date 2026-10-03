@@ -88,6 +88,18 @@ impl Config {
         }
     }
 
+    /// True when `DERIV_APP_ID` is set to a non-empty value.
+    ///
+    /// Required for PAT (`pat_...`) tokens: Deriv rejects REST calls from a PAT
+    /// without a `Deriv-App-ID` header (`HTTP 401: Deriv-App-ID header is
+    /// required for PAT tokens`). Legacy `a1-...` tokens do not need it.
+    pub fn deriv_app_id_configured(&self) -> bool {
+        self.deriv_app_id
+            .as_deref()
+            .map(|id| !id.trim().is_empty())
+            .unwrap_or(false)
+    }
+
     /// Build the Deriv WebSocket endpoint URL.
     ///
     /// An `app_id` query parameter is appended only when `DERIV_APP_ID` is
@@ -173,5 +185,20 @@ mod tests {
             embedded.deriv_ws_url(),
             "wss://ws.derivws.com/websockets/v3?app_id=999"
         );
+    }
+
+    #[test]
+    fn detects_whether_deriv_app_id_is_configured() {
+        let mut config = test_config();
+        assert!(!config.deriv_app_id_configured());
+
+        config.deriv_app_id = Some("1089".into());
+        assert!(config.deriv_app_id_configured());
+
+        // Blank / whitespace-only values count as "not set".
+        config.deriv_app_id = Some("   ".into());
+        assert!(!config.deriv_app_id_configured());
+        config.deriv_app_id = Some(String::new());
+        assert!(!config.deriv_app_id_configured());
     }
 }
