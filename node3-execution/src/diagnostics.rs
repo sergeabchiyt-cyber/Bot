@@ -54,6 +54,12 @@ impl DiagnosticsHub {
             timestamp: started_at,
         };
 
+        // Actionable hint (which env var to set) for /deriv and /diagnostics.
+        let deriv_hint = crate::execution_deriv::deriv_setup_hint(
+            config.deriv_demo_api.as_deref(),
+            config.deriv_app_id.as_deref(),
+        );
+
         let deriv_account = DerivAccountSnapshot {
             configured: deriv_configured,
             connected: false,
@@ -76,6 +82,10 @@ impl DiagnosticsHub {
             } else {
                 Some("DERIV_DEMO_API not configured".into())
             },
+            app_id_configured: config.deriv_app_id_configured(),
+            token_kind: crate::execution_deriv::token_kind_label(config.deriv_demo_api.as_deref())
+                .to_string(),
+            setup_hint: deriv_hint,
         };
 
         let work = EngineWorkDiagnostics {

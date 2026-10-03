@@ -152,6 +152,18 @@ pub struct DerivAccountSnapshot {
     pub open_trades: Vec<DerivOpenContract>,
     pub last_updated: Option<i64>,
     pub error: Option<String>,
+    /// True when `DERIV_APP_ID` is set — required for PAT (`pat_...`) tokens,
+    /// which Deriv rejects on REST without a `Deriv-App-ID` header.
+    #[serde(default)]
+    pub app_id_configured: bool,
+    /// Detected token shape: `"pat"`, `"legacy"` or `"none"`.
+    #[serde(default)]
+    pub token_kind: String,
+    /// Actionable configuration hint naming the env var to fix, e.g.
+    /// "DERIV_DEMO_API looks like a PAT (pat_...) but DERIV_APP_ID is not set".
+    /// `None` when the Deriv venue looks correctly configured.
+    #[serde(default)]
+    pub setup_hint: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

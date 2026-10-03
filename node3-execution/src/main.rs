@@ -34,6 +34,26 @@ async fn main() -> anyhow::Result<()> {
 
     let hub = DiagnosticsHub::new(&config);
 
+    // Make the Deriv credential shape explicit at startup: PAT (pat_...) tokens
+    // are rejected by Deriv unless DERIV_APP_ID is set (Deriv-App-ID header).
+    info!(
+        "Deriv venue: {:?} | token kind: {} | {}: {}",
+        config.execution_venue(),
+        execution_deriv::token_kind_label(config.deriv_demo_api.as_deref()),
+        execution_deriv::DERIV_APP_ID_ENV_VAR,
+        if config.deriv_app_id_configured() {
+            "set"
+        } else {
+            "not set"
+        }
+    );
+    if let Some(hint) = execution_deriv::deriv_setup_hint(
+        config.deriv_demo_api.as_deref(),
+        config.deriv_app_id.as_deref(),
+    ) {
+        warn!("{hint}");
+    }
+
     // Serve HTTP (/health, /diagnostics, /scanning, /open-trades, /deriv) and WebSocket (/ws) on 0.0.0.0:$PORT
     tokio::spawn(health::serve(config.port, hub.clone()));
 
