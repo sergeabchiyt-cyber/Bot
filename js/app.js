@@ -48,6 +48,9 @@
   // ---------- Boot ----------
   setStatus("init", "busy");
   App.calendar.start();
+  if (App.execution) {
+    App.execution.start();
+  }
   App.chart.loadHistory().then(() => {
     App.socket.connect();
     App.levels.fetchAll();

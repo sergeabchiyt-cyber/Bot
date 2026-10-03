@@ -27,6 +27,10 @@
         <span class="sentiment-label">FED</span>
         <span id="sentiment-value">—</span>
       </span>
+      <span id="deriv-pill" class="sentiment-pill deriv-pill" title="Deriv Demo Balance &amp; Node 3 Status" aria-live="polite">
+        <span class="sentiment-label">DERIV</span>
+        <span id="deriv-balance-value" class="tnum">—</span>
+      </span>
     </div>
   </header>
 
@@ -62,13 +66,16 @@
       <!-- Panel tabs: one panel visible at a time -->
       <div class="panel-tabs" role="tablist">
         <button class="panel-tab" data-panel="panel-calendar" role="tab">
-          USD Calendar <span id="calendar-count" class="panel-count">0</span>
+          Calendar <span id="calendar-count" class="panel-count">0</span>
         </button>
         <button class="panel-tab" data-panel="panel-levels" role="tab">
           Levels <span id="levels-count" class="panel-count">0</span>
         </button>
         <button class="panel-tab" data-panel="panel-bubbles" role="tab">
           Flow <span id="bubbles-count" class="panel-count">0</span>
+        </button>
+        <button class="panel-tab" data-panel="panel-execution" role="tab">
+          Exec <span id="execution-count" class="panel-count">0</span>
         </button>
       </div>
 
@@ -97,6 +104,12 @@
           <div class="empty">No bubbles detected</div>
         </div>
       </section>
+
+      <section id="panel-execution" class="panel panel-execution">
+        <div id="execution-body" class="panel-body">
+          <div class="empty">Connecting to Node 3…</div>
+        </div>
+      </section>
     </aside>
   </main>
 
@@ -111,6 +124,7 @@
   <script src="js/calendar.js"></script>
   <script src="js/sentiment.js"></script>
   <script src="js/socket.js"></script>
+  <script src="js/execution.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

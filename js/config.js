@@ -11,6 +11,7 @@
   "use strict";
 
   const BACKEND_HOST = "engine-southeastasia-sng-main.onrender.com";
+  const EXECUTION_HOST = "execution-southeastasia-sng-main.onrender.com";
 
   App.config = {
     endpoints: {
@@ -20,6 +21,13 @@
       tick_volume: `https://${BACKEND_HOST}/tick-volume`,
       levels: `https://${BACKEND_HOST}/levels`,
       calendar: `https://${BACKEND_HOST}/calendar`,
+
+      // Node 3 execution stream and REST snapshots.
+      executionWs: `wss://${EXECUTION_HOST}/ws`,
+      executionDiagnostics: `https://${EXECUTION_HOST}/diagnostics`,
+      executionScanning: `https://${EXECUTION_HOST}/scanning`,
+      executionOpenTrades: `https://${EXECUTION_HOST}/open-trades`,
+      executionDeriv: `https://${EXECUTION_HOST}/deriv`,
     },
 
     ws: {
