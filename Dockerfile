@@ -1,7 +1,7 @@
 FROM rust:1.94-slim AS builder
 WORKDIR /app
-COPY Cargo.toml ./
-COPY src ./src
+COPY node3-execution/Cargo.toml ./
+COPY node3-execution/src ./src
 RUN cargo build --release
 
 FROM debian:bookworm-slim
