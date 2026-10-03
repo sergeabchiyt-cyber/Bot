@@ -2,6 +2,7 @@ mod config;
 mod execution;
 mod execution_chelsea;
 mod execution_deriv;
+mod health;
 mod strategy;
 mod types;
 
@@ -27,6 +28,10 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::from_env();
     info!("Starting Node 3 (Rust Automated Execution Service)");
     info!("Node 1 WS URL: {}", config.node1_ws_url);
+    info!("Health endpoint port: {}", config.port);
+
+    // Platform health checks (Render, Docker, k8s) probe this port.
+    tokio::spawn(health::serve(config.port));
     info!(
         "Strategy Settings: Vol Threshold > {:.0}, SL: {:.0}-{:.0} pips, TP: {:.0}-{:.0} pips, Target RR: {:.1}-{:.1}",
         config.volume_threshold, config.sl_min_pips, config.sl_max_pips, config.tp_min_pips, config.tp_max_pips, config.rr_min, config.rr_max

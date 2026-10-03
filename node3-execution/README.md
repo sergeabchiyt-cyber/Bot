@@ -43,6 +43,9 @@ High-performance, low-latency execution service built entirely in **Rust** to re
 # Node 1 Connection
 NODE1_WS_URL=wss://engine-southeastasia-sng-main.onrender.com/ws
 
+# Local HTTP health endpoint (GET /health) — hosting platforms inject PORT
+PORT=10000
+
 # Execution Venues (Only 1 minimum required)
 DERIV_DEMO_API=your_deriv_token
 DERIV_APP_ID=1089
