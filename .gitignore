@@ -1,0 +1,5 @@
+target/
+node3-execution/target/
+.env
+node3-execution/.env
+build-errors.log
