@@ -60,6 +60,12 @@ impl ChelseaExecution {
             tp,
             status: "open".into(),
             timestamp: chrono::Utc::now().timestamp_millis(),
+            level_name: None,
+            venue: Some("ChelseaLive".into()),
+            rr: None,
+            current_price: None,
+            unrealized_pnl: None,
+            closed_at: None,
         })
     }
 }

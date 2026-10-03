@@ -10,7 +10,7 @@ pub enum ExecutionVenue {
 #[derive(Clone, Debug)]
 pub struct Config {
     pub node1_ws_url: String,
-    /// Port for the local HTTP health endpoint (`GET /health`). 10000 by default.
+    /// Port for the local HTTP + WebSocket server (`GET /health`, `GET /diagnostics`, `WS /ws`). 10000 by default.
     pub port: u16,
     pub mcp_chelsea_url: Option<String>,
     pub deriv_demo_api: Option<String>,
@@ -55,7 +55,7 @@ impl Config {
         Self {
             node1_ws_url: env_str("NODE1_WS_URL", "wss://engine-southeastasia-sng-main.onrender.com/ws"),
             // Hosting platforms inject PORT; we default to 10000 so the
-            // health endpoint is reachable out of the box.
+            // health and WebSocket endpoints are reachable out of the box.
             port: env_u16("PORT", 10_000),
             mcp_chelsea_url: env_opt("MCP_CHELSEA_URL"),
             deriv_demo_api: env_opt("DERIV_DEMO_API"),
@@ -80,6 +80,24 @@ impl Config {
             ExecutionVenue::DerivDemo
         } else {
             ExecutionVenue::None
+        }
+    }
+
+    /// Build the Deriv v3 WebSocket endpoint URL including `app_id` query parameter.
+    pub fn deriv_ws_url(&self) -> String {
+        let base = self.deriv_api_url.trim();
+        if base.contains("app_id=") {
+            return base.to_string();
+        }
+        let app_id = self
+            .deriv_app_id
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("1089");
+        if base.contains('?') {
+            format!("{base}&app_id={app_id}")
+        } else {
+            format!("{base}?app_id={app_id}")
         }
     }
 }
