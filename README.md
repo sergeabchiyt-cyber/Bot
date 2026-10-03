@@ -11,6 +11,7 @@ For detailed architecture, configuration parameters, and strategy details, see *
 - **Break & Retest Engine**: Automated state machine with volume threshold confirmation (> 10,500 on XAUUSD).
 - **Risk Management**: Dynamic ATR-based Stop Loss (200–300 pips) and Take Profit (600–800 pips) targeting a 2:1 to 3:1 Risk-to-Reward ratio.
 - **Multi-Venue Execution**: Supports Deriv Demo API, Chelsea Live MCP, or Node 1 Signal Mode.
+- **Health Endpoint**: Dependency-free `GET /health` on port `10000` for platform health checks.
 
 ## Quick Start
 
@@ -33,5 +34,13 @@ cargo run --release
 
 ```bash
 docker build -t node3-execution .
-docker run --env-file .env node3-execution
+docker run --env-file .env -p 10000:10000 node3-execution
+```
+
+### 4. Health Check
+
+The service exposes `GET /health` on port `10000` (override with `PORT`):
+
+```bash
+curl http://localhost:10000/health   # -> ok
 ```

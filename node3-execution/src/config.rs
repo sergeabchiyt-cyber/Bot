@@ -10,6 +10,8 @@ pub enum ExecutionVenue {
 #[derive(Clone, Debug)]
 pub struct Config {
     pub node1_ws_url: String,
+    /// Port for the local HTTP health endpoint (`GET /health`). 10000 by default.
+    pub port: u16,
     pub mcp_chelsea_url: Option<String>,
     pub deriv_demo_api: Option<String>,
     pub deriv_app_id: Option<String>,
@@ -41,10 +43,20 @@ fn env_f64(key: &str, default: f64) -> f64 {
     env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
+fn env_u16(key: &str, default: u16) -> u16 {
+    env::var(key)
+        .ok()
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(default)
+}
+
 impl Config {
     pub fn from_env() -> Self {
         Self {
             node1_ws_url: env_str("NODE1_WS_URL", "wss://engine-southeastasia-sng-main.onrender.com/ws"),
+            // Hosting platforms inject PORT; we default to 10000 so the
+            // health endpoint is reachable out of the box.
+            port: env_u16("PORT", 10_000),
             mcp_chelsea_url: env_opt("MCP_CHELSEA_URL"),
             deriv_demo_api: env_opt("DERIV_DEMO_API"),
             deriv_app_id: env_opt("DERIV_APP_ID"),

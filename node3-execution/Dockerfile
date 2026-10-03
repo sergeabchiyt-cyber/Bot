@@ -7,4 +7,6 @@ RUN cargo build --release
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/xauusd-node3-execution /usr/local/bin/node3-execution
+EXPOSE 10000
+ENV PORT=10000
 CMD ["node3-execution"]
