@@ -3,7 +3,7 @@ use tracing::{info, warn};
 use crate::config::{Config, ExecutionVenue};
 use crate::execution_chelsea::ChelseaExecution;
 use crate::execution_deriv::DerivExecution;
-use crate::types::TradeEvent;
+use crate::types::{ProjectedOrder, TradeEvent};
 
 pub struct ExecutionManager {
     pub config: Config,
@@ -40,8 +40,14 @@ impl ExecutionManager {
         }
     }
 
-    pub fn compute_sl_tp(&self, entry: f64, side: &str) -> (f64, f64) {
-        let atr_pct = (self.atr / entry).clamp(0.001, 0.05);
+    /// Compute `(sl, tp, sl_pips, tp_pips, rr)` for a given entry price and side.
+    pub fn compute_sl_tp_details(&self, entry: f64, side: &str) -> (f64, f64, f64, f64, f64) {
+        let safe_entry = if entry.is_finite() && entry > 0.0 {
+            entry
+        } else {
+            2650.0
+        };
+        let atr_pct = (self.atr / safe_entry).clamp(0.001, 0.05);
         let sl_pips = self.config.sl_min_pips
             + (self.config.sl_max_pips - self.config.sl_min_pips) * (atr_pct * 20.0).min(1.0);
         let tp_pips = self.config.tp_min_pips
@@ -49,18 +55,42 @@ impl ExecutionManager {
 
         let sl_dist = sl_pips * 0.01;
         let mut tp_dist = tp_pips * 0.01;
-        let rr = tp_dist / sl_dist;
+        let raw_rr = tp_dist / sl_dist.max(0.0001);
 
-        if rr < self.config.rr_min {
+        if raw_rr < self.config.rr_min {
             tp_dist = sl_dist * self.config.rr_min;
-        } else if rr > self.config.rr_max {
+        } else if raw_rr > self.config.rr_max {
             tp_dist = sl_dist * self.config.rr_max;
         }
 
-        match side {
-            "buy" => (entry - sl_dist, entry + tp_dist),
-            "sell" => (entry + sl_dist, entry - tp_dist),
-            _ => (entry - sl_dist, entry + tp_dist),
+        let effective_tp_pips = tp_dist * 100.0;
+        let effective_rr = tp_dist / sl_dist.max(0.0001);
+
+        let (sl, tp) = match side {
+            "buy" => (safe_entry - sl_dist, safe_entry + tp_dist),
+            "sell" => (safe_entry + sl_dist, safe_entry - tp_dist),
+            _ => (safe_entry - sl_dist, safe_entry + tp_dist),
+        };
+
+        (sl, tp, sl_pips, effective_tp_pips, effective_rr)
+    }
+
+    pub fn compute_sl_tp(&self, entry: f64, side: &str) -> (f64, f64) {
+        let (sl, tp, _, _, _) = self.compute_sl_tp_details(entry, side);
+        (sl, tp)
+    }
+
+    pub fn projected_order(&self, entry: f64, side: &str) -> ProjectedOrder {
+        let (sl, tp, sl_pips, tp_pips, rr) = self.compute_sl_tp_details(entry, side);
+        ProjectedOrder {
+            side: side.to_string(),
+            entry,
+            sl,
+            tp,
+            sl_pips,
+            tp_pips,
+            rr,
+            size: self.config.order_size,
         }
     }
 
@@ -71,26 +101,34 @@ impl ExecutionManager {
         entry: f64,
         level_name: &str,
     ) -> Result<TradeEvent> {
-        let (sl, tp) = self.compute_sl_tp(entry, side);
+        let (sl, tp, _, _, rr) = self.compute_sl_tp_details(entry, side);
         let venue = self.config.execution_venue();
 
         info!(
-            "Executing {} trade on level '{}' @ {:.3} (SL: {:.3}, TP: {:.3}, Venue: {:?})",
-            side, level_name, entry, sl, tp, venue
+            "Executing {} trade on level '{}' @ {:.3} (SL: {:.3}, TP: {:.3}, RR: {:.2}, Venue: {:?})",
+            side, level_name, entry, sl, tp, rr, venue
         );
 
-        match venue {
+        let mut trade = match venue {
             ExecutionVenue::DerivDemo => {
                 let deriv = self.deriv.as_ref().expect("Deriv demo executor missing");
-                deriv.place_order(side, size, sl, tp).await
+                let mut t = deriv.place_order(side, size, sl, tp).await?;
+                if t.entry <= 0.0 {
+                    t.entry = entry;
+                }
+                t
             }
             ExecutionVenue::ChelseaLive => {
                 let chelsea = self.chelsea.as_ref().expect("Chelsea live executor missing");
-                chelsea.place_order(side, size, sl, tp).await
+                let mut t = chelsea.place_order(side, size, sl, tp).await?;
+                if t.entry <= 0.0 {
+                    t.entry = entry;
+                }
+                t
             }
             ExecutionVenue::None => {
                 warn!("No execution venue credentials provided — simulated signal only");
-                Ok(TradeEvent {
+                TradeEvent {
                     trade_id: format!("sim-{}", chrono::Utc::now().timestamp_millis()),
                     symbol: "XAUUSD".into(),
                     side: side.into(),
@@ -100,8 +138,22 @@ impl ExecutionManager {
                     tp,
                     status: "signal_only".into(),
                     timestamp: chrono::Utc::now().timestamp_millis(),
-                })
+                    level_name: None,
+                    venue: None,
+                    rr: None,
+                    current_price: None,
+                    unrealized_pnl: None,
+                    closed_at: None,
+                }
             }
-        }
+        };
+
+        trade.level_name = Some(level_name.to_string());
+        trade.venue = Some(format!("{:?}", venue));
+        trade.rr = Some(rr);
+        trade.current_price = Some(entry);
+        trade.unrealized_pnl = Some(0.0);
+
+        Ok(trade)
     }
 }

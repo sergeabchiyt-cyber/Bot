@@ -14,6 +14,12 @@ pub struct VpLevels {
     pub timestamp: i64,
     #[serde(default)]
     pub direction: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swing_high: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swing_low: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sunday_open: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +45,187 @@ pub struct TradeEvent {
     pub tp: f64,
     pub status: String,
     pub timestamp: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub venue: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rr: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_price: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unrealized_pnl: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectedOrder {
+    pub side: String,
+    pub entry: f64,
+    pub sl: f64,
+    pub tp: f64,
+    pub sl_pips: f64,
+    pub tp_pips: f64,
+    pub rr: f64,
+    pub size: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScannedLevelSetup {
+    pub id: String,
+    pub name: String,
+    pub window: String,
+    pub level_price: f64,
+    /// `"scanning_break"` | `"broken_above"` | `"broken_below"`
+    pub state: String,
+    pub state_label: String,
+    /// `Some("buy")` when `broken_above`, `Some("sell")` when `broken_below`, `None` while waiting for break.
+    pub pending_side: Option<String>,
+    pub current_price: Option<f64>,
+    pub distance_dollars: Option<f64>,
+    pub distance_pips: Option<f64>,
+    pub retest_zone_low: f64,
+    pub retest_zone_high: f64,
+    pub invalidation_price: Option<f64>,
+    pub volume_required: f64,
+    pub current_volume: Option<f64>,
+    pub volume_confirmed: bool,
+    pub projected_buy: ProjectedOrder,
+    pub projected_sell: ProjectedOrder,
+    pub active_order: Option<ProjectedOrder>,
+    pub broken_at: Option<i64>,
+    pub broken_price: Option<f64>,
+    pub last_note: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanningSnapshot {
+    pub active_setups_count: usize,
+    pub total_levels_tracked: usize,
+    pub proximity_dollars: f64,
+    pub invalidation_dollars: f64,
+    pub volume_threshold: f64,
+    pub current_volume: Option<f64>,
+    pub volume_confirmed: bool,
+    pub last_price: Option<f64>,
+    pub atr: f64,
+    pub atr_pips: f64,
+    pub setups: Vec<ScannedLevelSetup>,
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DerivOpenContract {
+    pub contract_id: String,
+    pub symbol: String,
+    pub display_symbol: String,
+    pub contract_type: String,
+    pub side: String,
+    pub buy_price: f64,
+    pub bid_price: f64,
+    pub payout: f64,
+    pub entry_spot: Option<f64>,
+    pub current_spot: Option<f64>,
+    pub barrier: Option<String>,
+    pub profit: f64,
+    pub profit_pct: f64,
+    pub currency: String,
+    pub date_start: i64,
+    pub date_expiry: Option<i64>,
+    pub status: String,
+    pub longcode: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DerivAccountSnapshot {
+    pub configured: bool,
+    pub connected: bool,
+    pub authorized: bool,
+    pub account_id: Option<String>,
+    pub account_type: String,
+    pub balance: Option<f64>,
+    pub currency: String,
+    pub open_trades_count: usize,
+    pub total_open_stake: f64,
+    pub total_unrealized_pnl: f64,
+    pub open_trades: Vec<DerivOpenContract>,
+    pub last_updated: Option<i64>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenTradesSnapshot {
+    pub node3_open_trades: Vec<TradeEvent>,
+    pub deriv_open_trades: Vec<DerivOpenContract>,
+    pub recent_trades: Vec<TradeEvent>,
+    pub total_open_count: usize,
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivityLogEntry {
+    pub timestamp: i64,
+    pub level: String,
+    pub category: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EngineWorkDiagnostics {
+    pub service: String,
+    pub version: String,
+    pub venue: String,
+    pub started_at: i64,
+    pub uptime_secs: u64,
+    pub node1_ws_url: String,
+    pub node1_connected: bool,
+    pub node1_state: String,
+    pub node1_reconnect_count: u64,
+    pub last_node1_msg_ts: Option<i64>,
+    pub last_candle_ts: Option<i64>,
+    pub last_levels_ts: Option<i64>,
+    pub candles_received: u64,
+    pub levels_received: u64,
+    pub ws_messages_received: u64,
+    pub candle_buffer_len: usize,
+    pub candle_buffer_capacity: usize,
+    pub last_price: Option<f64>,
+    pub last_candle: Option<VpCandle>,
+    pub atr: f64,
+    pub atr_pips: f64,
+    pub current_sl_pips: f64,
+    pub current_tp_pips: f64,
+    pub current_rr: f64,
+    pub volume_threshold: f64,
+    pub last_candle_volume: Option<f64>,
+    pub volume_ratio: Option<f64>,
+    pub sl_min_pips: f64,
+    pub sl_max_pips: f64,
+    pub tp_min_pips: f64,
+    pub tp_max_pips: f64,
+    pub rr_min: f64,
+    pub rr_max: f64,
+    pub order_size: f64,
+    pub breaks_detected: u64,
+    pub breaks_invalidated: u64,
+    pub retests_rejected_low_volume: u64,
+    pub signals_confirmed: u64,
+    pub trades_executed: u64,
+    pub trades_failed: u64,
+    pub last_signal_ts: Option<i64>,
+    pub last_error: Option<String>,
+    pub ws_clients_connected: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiagnosticsSnapshot {
+    pub timestamp: i64,
+    pub scanning: ScanningSnapshot,
+    pub open_trades: OpenTradesSnapshot,
+    pub deriv_account: DerivAccountSnapshot,
+    pub work: EngineWorkDiagnostics,
+    pub recent_events: Vec<ActivityLogEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,12 +240,65 @@ pub enum WsFrame {
     #[serde(rename = "trades")]
     Trades { data: TradeEvent },
 
+    #[serde(rename = "diagnostics")]
+    Diagnostics { data: DiagnosticsSnapshot },
+
+    #[serde(rename = "scanning")]
+    Scanning { data: ScanningSnapshot },
+
+    #[serde(rename = "open_trades")]
+    OpenTrades { data: OpenTradesSnapshot },
+
+    #[serde(rename = "deriv_account")]
+    DerivAccount { data: DerivAccountSnapshot },
+
+    #[serde(rename = "diagnostic_event")]
+    DiagnosticEvent { data: ActivityLogEntry },
+
     #[serde(rename = "subscribe")]
-    Subscribe { topics: Vec<String> },
+    Subscribe {
+        #[serde(default)]
+        topics: Vec<String>,
+    },
+
+    #[serde(rename = "snapshot")]
+    Snapshot,
 
     #[serde(rename = "heartbeat")]
     Heartbeat,
 
     #[serde(other)]
     Unknown,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trade_event_backwards_compatible_serialization() {
+        let trade = TradeEvent {
+            trade_id: "t-1".into(),
+            symbol: "XAUUSD".into(),
+            side: "buy".into(),
+            size: 0.01,
+            entry: 2650.0,
+            sl: 2647.5,
+            tp: 2656.0,
+            status: "open".into(),
+            timestamp: 1_700_000_000_000,
+            level_name: Some("PW PoC".into()),
+            venue: Some("DerivDemo".into()),
+            rr: Some(2.4),
+            current_price: Some(2651.0),
+            unrealized_pnl: Some(1.0),
+            closed_at: None,
+        };
+        let frame = WsFrame::Trades { data: trade };
+        let val = serde_json::to_value(&frame).unwrap();
+        assert_eq!(val["type"], "trades");
+        assert_eq!(val["data"]["trade_id"], "t-1");
+        assert_eq!(val["data"]["level_name"], "PW PoC");
+        assert!(val["data"].get("closed_at").is_none());
+    }
 }

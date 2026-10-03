@@ -1,0 +1,51 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: node3-execution
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "node3-execution -> target"
+
+      - name: Check
+        id: check
+        run: |
+          set -o pipefail
+          cargo check --all-targets 2>&1 | tee /tmp/check.log
+
+      - name: Save error log to branch
+        if: failure() && steps.check.outcome == 'failure'
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          tail -c 60000 /tmp/check.log > build-errors.log
+          git add -f build-errors.log
+          git commit -m "ci: build error log [skip ci]"
+          git push origin ${{ github.ref_name }}
+
+      - name: Unit tests
+        run: |
+          set -o pipefail
+          cargo test --all-targets -- --nocapture 2>&1 | tee /tmp/unit.log
+
+      - name: Build release
+        run: cargo build --release
