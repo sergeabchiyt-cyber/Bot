@@ -1538,6 +1538,27 @@ mod tests {
     }
 
     #[test]
+    fn hand_built_upgrade_request_is_rejected_without_a_socket_key() {
+        // The pre-fix `connect_ws` hand-built its request; tungstenite forwards
+        // such a request untouched and refuses it before the upgrade can leave
+        // the process. Pinned here so the request is never hand-built again.
+        let request = http::Request::builder()
+            .uri("wss://api.derivws.com/trading/v1/options/ws/demo?otp=abc123xyz")
+            .header("Origin", DERIV_ORIGIN)
+            .header("User-Agent", DERIV_USER_AGENT)
+            .body(())
+            .expect("build degenerate request");
+        let err = tokio_tungstenite::tungstenite::handshake::client::generate_request(request)
+            .expect_err("a request without upgrade headers must be rejected");
+        assert!(
+            err.to_string()
+                .to_ascii_lowercase()
+                .contains("missing, duplicated or incorrect header sec-websocket-key"),
+            "unexpected tungstenite error: {err}"
+        );
+    }
+
+    #[test]
     fn legacy_fallback_rules() {
         let auth_err = anyhow::anyhow!("Deriv accounts failed: HTTP 401 Unauthorized: nope");
         assert!(should_fallback_to_legacy("a1-legacy", &auth_err));
