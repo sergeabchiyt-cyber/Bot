@@ -1,8 +1,9 @@
 use std::time::Duration;
+
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
-use tokio::time::{interval, sleep};
+use tokio::time::{interval, sleep, timeout};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info, warn};
 
@@ -10,12 +11,211 @@ use crate::config::Config;
 use crate::diagnostics::DiagnosticsHub;
 use crate::types::{DerivOpenContract, TradeEvent};
 
+/// Concrete WebSocket stream type returned by `tokio_tungstenite::connect_async`.
+type DerivWsStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+/// Hosts serving the legacy Deriv v3 WebSocket API (`/websockets/v3`).
+///
+/// `ws.derivws.com` frequently answers HTTP 520 (Cloudflare origin error) from
+/// cloud/VPS networks, while the alternate hosts may still accept the same
+/// handshake — so legacy connections fail over across all of them.
+const LEGACY_WS_HOSTS: &[&str] = &["ws.derivws.com", "ws.binaryws.com", "wss.derivws.com"];
+/// Official Deriv test `app_id` for the legacy v3 API (see deriv-com/deriv-api).
+const LEGACY_TEST_APP_ID: &str = "1089";
+/// Browser-like handshake headers. A bare WebSocket client (no `Origin` /
+/// `User-Agent`) is far more likely to be rejected by Cloudflare in front of
+/// Deriv's legacy endpoints, surfacing as `HTTP 520`.
+const DERIV_ORIGIN: &str = "https://app.deriv.com";
+const DERIV_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 node3-execution/1.0";
+
 pub struct DerivExecution {
     pub api_token: String,
     pub app_id: Option<String>,
     pub api_url: String,
     pub ws_url: String,
     pub http: reqwest::Client,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenKind {
+    /// `pat_...` Personal Access Token. PATs only work with Deriv's current
+    /// API (REST + OTP-authenticated WebSocket) and never with the legacy
+    /// `authorize` flow — sending one to the legacy endpoint fails.
+    Pat,
+    /// Anything else (legacy `a1-...` API tokens, OAuth JWTs, ...).
+    Other,
+}
+
+pub fn token_kind(token: &str) -> TokenKind {
+    if token.trim().to_ascii_lowercase().starts_with("pat_") {
+        TokenKind::Pat
+    } else {
+        TokenKind::Other
+    }
+}
+
+#[derive(Debug, Clone)]
+struct DemoAccount {
+    id: String,
+    balance: Option<f64>,
+    currency: Option<String>,
+}
+
+struct OtpTarget {
+    url: String,
+    account: DemoAccount,
+}
+
+struct LegacySession {
+    ws: DerivWsStream,
+    loginid: Option<String>,
+    balance: Option<f64>,
+    currency: Option<String>,
+}
+
+fn parse_f64(v: &serde_json::Value) -> Option<f64> {
+    if let Some(n) = v.as_f64() {
+        return Some(n);
+    }
+    if let Some(s) = v.as_str() {
+        return s.trim().parse::<f64>().ok();
+    }
+    None
+}
+
+fn account_id_of(item: &serde_json::Value) -> Option<String> {
+    for key in ["account_id", "loginid", "login_id", "id"] {
+        if let Some(s) = item[key].as_str() {
+            if !s.trim().is_empty() {
+                return Some(s.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+fn is_demo_account(item: &serde_json::Value) -> bool {
+    let ty = item["account_type"].as_str().unwrap_or("").to_ascii_lowercase();
+    let group = item["group"].as_str().unwrap_or("").to_ascii_lowercase();
+    if ty == "demo" || group == "demo" {
+        return true;
+    }
+    // Deriv demo/virtual login ids start with VRT (e.g. VRTC1234567).
+    if let Some(id) = account_id_of(item) {
+        return id.to_ascii_uppercase().starts_with("VRT");
+    }
+    false
+}
+
+fn collect_items(data: &serde_json::Value) -> Vec<&serde_json::Value> {
+    if let Some(arr) = data.as_array() {
+        arr.iter().collect()
+    } else if data.is_object() {
+        vec![data]
+    } else {
+        Vec::new()
+    }
+}
+
+/// Pick the demo account out of a `GET .../options/accounts` `data` payload,
+/// which is normally an array but is a single object in some responses.
+fn select_demo_account(data: &serde_json::Value) -> Option<DemoAccount> {
+    for item in collect_items(data) {
+        if is_demo_account(item) {
+            if let Some(id) = account_id_of(item) {
+                return Some(DemoAccount {
+                    id,
+                    balance: parse_f64(&item["balance"]),
+                    currency: item["currency"].as_str().map(String::from),
+                });
+            }
+        }
+    }
+    None
+}
+
+fn found_account_ids(data: &serde_json::Value) -> Vec<String> {
+    collect_items(data).into_iter().filter_map(account_id_of).collect()
+}
+
+/// Render Deriv's REST error shape (`{"errors": [{code, message}]}`) as text.
+fn rest_api_error(status: u16, body: &serde_json::Value) -> String {
+    if let Some(first) = body
+        .get("errors")
+        .and_then(|e| e.as_array())
+        .and_then(|a| a.first())
+    {
+        let code = first
+            .get("code")
+            .and_then(|c| c.as_str())
+            .unwrap_or("Error");
+        let msg = first
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("request failed");
+        return format!("HTTP {status} {code}: {msg}");
+    }
+    if let Some(msg) = body.get("message").and_then(|m| m.as_str()) {
+        return format!("HTTP {status}: {msg}");
+    }
+    format!("HTTP {status}: {body}")
+}
+
+/// Strip the single-use `otp` secret from a WebSocket URL before logging.
+pub fn redact_ws_url(url: &str) -> String {
+    let mut out = url.to_string();
+    if let Some(pos) = out.find("otp=") {
+        let end = out[pos..].find('&').map(|i| pos + i).unwrap_or(out.len());
+        out.replace_range(pos + 4..end, "***");
+    }
+    out
+}
+
+fn strip_app_id_param(url: &str) -> Option<String> {
+    let (head, query) = url.split_once('?')?;
+    let parts: Vec<&str> = query.split('&').collect();
+    let kept: Vec<&str> = parts
+        .iter()
+        .copied()
+        .filter(|p| !p.starts_with("app_id="))
+        .collect();
+    if kept.len() == parts.len() {
+        return None;
+    }
+    if kept.is_empty() {
+        Some(head.to_string())
+    } else {
+        Some(format!("{head}?{}", kept.join("&")))
+    }
+}
+
+fn is_invalid_token_error(code: &str, message: &str) -> bool {
+    code.eq_ignore_ascii_case("invalidtoken")
+        || message.to_ascii_lowercase().contains("invalid token")
+        || message.to_ascii_lowercase().contains("invalidtoken")
+}
+
+/// Error text for "the token was rejected by REST but might be a legacy token".
+fn is_no_demo_error(err: &anyhow::Error) -> bool {
+    err.to_string().contains("No demo account")
+}
+
+/// Legacy `a1-...` tokens are rejected (401) by the current REST API, so a
+/// REST failure with a non-PAT token is worth retrying on the legacy WS flow.
+/// PATs never work on legacy, and "no demo account" must never fall through
+/// to a flow that could touch a real-money account.
+fn should_fallback_to_legacy(token: &str, err: &anyhow::Error) -> bool {
+    if token_kind(token) == TokenKind::Pat {
+        return false;
+    }
+    !is_no_demo_error(err)
+}
+
+fn pat_guidance(err: &anyhow::Error) -> String {
+    format!(
+        "Deriv auth failed: {err:#}. This looks like a PAT (pat_...) token, which only works with Deriv's current API and requires DERIV_APP_ID — register a free app at https://developers.deriv.com (API dashboard) and set DERIV_APP_ID to its App ID."
+    )
 }
 
 impl DerivExecution {
@@ -34,123 +234,307 @@ impl DerivExecution {
         u.starts_with("http://") || u.starts_with("https://")
     }
 
-    async fn get_demo_account_id(&self) -> Result<String> {
-        let url = format!("{}/trading/v1/options/accounts", self.api_url);
-        let mut req = self
-            .http
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.api_token));
-        if let Some(app_id) = &self.app_id {
-            req = req.header("Deriv-App-ID", app_id);
+    fn rest_base(&self) -> String {
+        self.api_url.trim().trim_end_matches('/').to_string()
+    }
+
+    fn rest(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        let req = req.header("Authorization", format!("Bearer {}", self.api_token));
+        match &self.app_id {
+            Some(id) => req.header("Deriv-App-ID", id),
+            None => req,
         }
-        let body: serde_json::Value = req.send().await?.json().await?;
+    }
 
-        let accounts = body["data"]
-            .as_array()
-            .ok_or_else(|| anyhow::anyhow!("No accounts in response: {}", body))?;
-        let demo = accounts
-            .iter()
-            .find(|a| {
-                a["account_type"].as_str() == Some("demo")
-                    || a["account_id"]
-                        .as_str()
-                        .map(|s| s.starts_with("VRTC"))
-                        .unwrap_or(false)
-            })
-            .ok_or_else(|| anyhow::anyhow!("No demo account found for this token"))?;
+    /// Read a Deriv REST response, surfacing API / Cloudflare errors as text.
+    async fn into_rest_json(resp: reqwest::Response, what: &str) -> Result<serde_json::Value> {
+        let status = resp.status().as_u16();
+        let text = resp.text().await.unwrap_or_default();
+        let body: serde_json::Value =
+            serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
+        if (200..300).contains(&status) {
+            return Ok(body);
+        }
+        if body.is_null() {
+            let snippet: String = text.chars().take(300).collect();
+            anyhow::bail!("Deriv {what} failed: HTTP {status}: {snippet}");
+        }
+        anyhow::bail!("Deriv {what} failed: {}", rest_api_error(status, &body));
+    }
 
-        demo["account_id"]
-            .as_str()
-            .map(String::from)
-            .ok_or_else(|| anyhow::anyhow!("account_id missing"))
+    async fn get_demo_account(&self) -> Result<DemoAccount> {
+        let url = format!("{}/trading/v1/options/accounts", self.rest_base());
+        let resp = self.rest(self.http.get(&url)).send().await?;
+        let body = Self::into_rest_json(resp, "accounts").await?;
+
+        let data = &body["data"];
+        if let Some(account) = select_demo_account(data) {
+            return Ok(account);
+        }
+        let found = found_account_ids(data);
+        if found.is_empty() {
+            anyhow::bail!(
+                "No demo account found for this token (the Deriv API returned no accounts). Make sure the token belongs to a profile with a demo/virtual account."
+            );
+        }
+        anyhow::bail!(
+            "No demo account found for this token (found account(s): {}). Node 3 only trades demo accounts and will not touch real-money accounts.",
+            found.join(", ")
+        );
     }
 
     async fn get_otp_url(&self, account_id: &str) -> Result<String> {
         let url = format!(
             "{}/trading/v1/options/accounts/{}/otp",
-            self.api_url, account_id
+            self.rest_base(),
+            account_id
         );
-        let mut req = self
-            .http
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_token));
-        if let Some(app_id) = &self.app_id {
-            req = req.header("Deriv-App-ID", app_id);
+        let resp = self.rest(self.http.post(&url)).send().await?;
+        let body = Self::into_rest_json(resp, "OTP").await?;
+        let ws_url = body["data"]["url"].as_str().ok_or_else(|| {
+            anyhow::anyhow!("Deriv OTP response missing data.url: {body}")
+        })?;
+        if !(ws_url.starts_with("wss://") || ws_url.starts_with("ws://")) {
+            anyhow::bail!("Deriv OTP response returned a non-WebSocket URL: {ws_url}");
         }
-        let body: serde_json::Value = req.send().await?.json().await?;
-        body["data"]["url"]
-            .as_str()
-            .map(String::from)
-            .ok_or_else(|| anyhow::anyhow!("No OTP URL: {}", body))
+        Ok(ws_url.to_string())
     }
 
-    pub async fn place_order(
-        &self,
-        side: &str,
-        stake: f64,
-        sl: f64,
-        tp: f64,
-    ) -> Result<TradeEvent> {
-        let target_ws_url = if self.uses_http_otp() {
-            let account_id = self.get_demo_account_id().await?;
-            self.get_otp_url(&account_id).await?
-        } else {
-            self.ws_url.clone()
+    /// REST accounts lookup + single-use OTP WebSocket URL for the demo account.
+    async fn fetch_otp_ws(&self) -> Result<OtpTarget> {
+        let account = self.get_demo_account().await?;
+        let url = self.get_otp_url(&account.id).await?;
+        Ok(OtpTarget { url, account })
+    }
+
+    /// Ordered legacy `/websockets/v3` candidates: the explicitly configured
+    /// URL first, then host failover (Cloudflare 520s are often host-specific),
+    /// then `app_id`-less variants for tokens that need none.
+    fn legacy_candidates(&self) -> Vec<String> {
+        fn with_app_id(base: &str, app_id: &str) -> String {
+            if base.contains("app_id=") {
+                return base.to_string();
+            }
+            if base.contains('?') {
+                format!("{base}&app_id={app_id}")
+            } else {
+                format!("{base}?app_id={app_id}")
+            }
+        }
+
+        let mut out: Vec<String> = Vec::new();
+        let mut push = |u: String| {
+            if !out.contains(&u) {
+                out.push(u);
+            }
         };
 
-        let (mut ws, _) = tokio_tungstenite::connect_async(&target_ws_url).await?;
+        let app_id = self.app_id.clone().filter(|s| !s.trim().is_empty());
+        let configured_is_ws =
+            self.ws_url.starts_with("wss://") || self.ws_url.starts_with("ws://");
 
-        // Direct Deriv WS v3 connections require an explicit `authorize` call first.
-        if !self.uses_http_otp() {
+        if configured_is_ws {
+            push(self.ws_url.clone());
+            if app_id.is_none() && !self.ws_url.contains("app_id=") {
+                push(with_app_id(&self.ws_url, LEGACY_TEST_APP_ID));
+            }
+        }
+        for host in LEGACY_WS_HOSTS {
+            let base = format!("wss://{host}/websockets/v3");
+            match &app_id {
+                Some(id) => push(with_app_id(&base, id)),
+                None => push(with_app_id(&base, LEGACY_TEST_APP_ID)),
+            }
+        }
+        if configured_is_ws {
+            if let Some(bare) = strip_app_id_param(&self.ws_url) {
+                push(bare);
+            }
+        }
+        if app_id.is_none() {
+            for host in LEGACY_WS_HOSTS {
+                push(format!("wss://{host}/websockets/v3"));
+            }
+        }
+        out
+    }
+
+    /// WebSocket handshake with browser-like headers so Cloudflare in front of
+    /// Deriv treats the client as a regular browser session.
+    async fn connect_ws(url: &str) -> Result<DerivWsStream> {
+        let request = http::Request::builder()
+            .uri(url)
+            .header("Origin", DERIV_ORIGIN)
+            .header("User-Agent", DERIV_USER_AGENT)
+            .body(())
+            .map_err(|e| anyhow::anyhow!("invalid Deriv WS URL {url}: {e}"))?;
+        let (ws, _) = timeout(
+            Duration::from_secs(20),
+            tokio_tungstenite::connect_async(request),
+        )
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!("timed out connecting to {}", redact_ws_url(url))
+        })?
+        .map_err(|e| {
+            anyhow::anyhow!("handshake failed for {}: {e}", redact_ws_url(url))
+        })?;
+        Ok(ws)
+    }
+
+    /// Read the next JSON text message, answering pings and timing out instead
+    /// of hanging forever when Deriv stays silent.
+    async fn next_json(ws: &mut DerivWsStream, what: &str, secs: u64) -> Result<serde_json::Value> {
+        timeout(Duration::from_secs(secs), async {
+            loop {
+                match ws.next().await {
+                    Some(Ok(Message::Text(text))) => {
+                        return serde_json::from_str::<serde_json::Value>(&text).map_err(|e| {
+                            anyhow::anyhow!("invalid JSON in Deriv {what} response: {e}")
+                        });
+                    }
+                    Some(Ok(Message::Ping(payload))) => {
+                        let _ = ws.send(Message::Pong(payload)).await;
+                    }
+                    Some(Ok(Message::Close(_))) => {
+                        return Err(anyhow::anyhow!("Deriv WS closed while waiting for {what}"));
+                    }
+                    Some(Ok(_)) => {}
+                    Some(Err(e)) => {
+                        return Err(anyhow::anyhow!(
+                            "Deriv WS error while waiting for {what}: {e}"
+                        ));
+                    }
+                    None => {
+                        return Err(anyhow::anyhow!(
+                            "Deriv WS stream ended while waiting for {what}"
+                        ));
+                    }
+                }
+            }
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("timed out waiting for Deriv {what}"))?
+    }
+
+    /// Handshake + `authorize` against the legacy v3 API, failing over across
+    /// hosts / `app_id` variants. Refuses non-demo accounts outright.
+    async fn open_legacy_session(&self) -> Result<LegacySession> {
+        let candidates = self.legacy_candidates();
+        let mut last_err = String::from("no legacy WebSocket candidates configured");
+        for url in &candidates {
+            debug!("Trying Deriv legacy endpoint {url}");
+            let mut ws = match Self::connect_ws(url).await {
+                Ok(ws) => ws,
+                Err(e) => {
+                    last_err = e.to_string();
+                    warn!("Deriv legacy endpoint failed: {last_err}");
+                    continue;
+                }
+            };
             let auth = json!({
                 "authorize": self.api_token,
                 "req_id": 100
             });
-            ws.send(Message::Text(serde_json::to_string(&auth)?.into()))
-                .await?;
-            let msg = ws
-                .next()
-                .await
-                .ok_or_else(|| anyhow::anyhow!("no authorize response from Deriv"))??;
-            let auth_resp: serde_json::Value = serde_json::from_str(msg.to_text().unwrap_or(""))?;
-            if let Some(err) = auth_resp.get("error") {
-                anyhow::bail!("Deriv authorize error: {}", err);
+            if let Err(e) = ws.send(Message::Text(auth.to_string().into())).await {
+                last_err = format!("{url}: failed to send authorize: {e}");
+                continue;
             }
-        }
+            let resp = match Self::next_json(&mut ws, "authorize", 15).await {
+                Ok(v) => v,
+                Err(e) => {
+                    last_err = format!("{url}: {e}");
+                    let _ = ws.close(None).await;
+                    continue;
+                }
+            };
+            if let Some(err) = resp.get("error") {
+                let code = err
+                    .get("code")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("");
+                let message = err
+                    .get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("authorize failed");
+                if is_invalid_token_error(code, message) {
+                    let _ = ws.close(None).await;
+                    anyhow::bail!("Deriv rejected the API token ({code}: {message}). Check DERIV_DEMO_API — legacy a1-... tokens are authorized here, while PAT (pat_...) tokens need the default REST API plus DERIV_APP_ID.");
+                }
+                last_err = format!("{url}: authorize error {code}: {message}");
+                warn!("Deriv legacy authorize failed: {last_err}");
+                let _ = ws.close(None).await;
+                continue;
+            }
 
+            let authz = &resp["authorize"];
+            let loginid = authz
+                .get("loginid")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            if let Some(ref id) = loginid {
+                if !id.to_ascii_uppercase().starts_with("VRT") {
+                    let _ = ws.close(None).await;
+                    anyhow::bail!("Deriv account {id} is not a demo (VRTC...) account — refusing to use a real-money account. Create a Deriv demo token and set it as DERIV_DEMO_API.");
+                }
+            }
+            info!("Deriv legacy session authorized via {url}");
+            return Ok(LegacySession {
+                ws,
+                loginid,
+                balance: authz.get("balance").and_then(|b| b.as_f64()),
+                currency: authz.get("currency").and_then(|c| c.as_str()).map(String::from),
+            });
+        }
+        anyhow::bail!(
+            "All Deriv legacy endpoints failed (tried {}). Last error: {last_err}. HTTP 520s here are Cloudflare origin errors on Deriv's side that usually clear on retry — the monitor keeps retrying automatically.",
+            candidates.len()
+        );
+    }
+
+    /// Shared `proposal` -> `buy` flow used on both OTP and legacy sockets.
+    /// OTP sockets speak the current API (no `symbol` field); legacy sockets
+    /// keep the historical payload untouched.
+    async fn proposal_buy_flow(
+        ws: &mut DerivWsStream,
+        side: &str,
+        stake: f64,
+        sl: f64,
+        tp: f64,
+        otp_socket: bool,
+    ) -> Result<(String, f64)> {
         let contract_type = if side == "buy" { "CALL" } else { "PUT" };
         let barrier = match side {
             "buy" => format!("+{:.3}", (tp - sl).abs() / 2.0),
             _ => format!("-{:.3}", (tp - sl).abs() / 2.0),
         };
 
-        let proposal = json!({
+        let mut proposal = json!({
             "proposal": 1,
             "amount": stake,
             "basis": "stake",
             "contract_type": contract_type,
             "currency": "USD",
             "underlying_symbol": "frxXAUUSD",
-            "symbol": "frxXAUUSD",
             "duration": 5,
             "duration_unit": "m",
             "barrier": barrier,
             "req_id": 1
         });
-        ws.send(Message::Text(serde_json::to_string(&proposal)?.into()))
-            .await?;
-
-        let msg = ws
-            .next()
+        if !otp_socket {
+            proposal["symbol"] = json!("frxXAUUSD");
+        }
+        ws.send(Message::Text(proposal.to_string().into()))
             .await
-            .ok_or_else(|| anyhow::anyhow!("no proposal response"))??;
-        let prop: serde_json::Value = serde_json::from_str(msg.to_text().unwrap_or(""))?;
+            .map_err(|e| anyhow::anyhow!("failed to send Deriv proposal: {e}"))?;
+
+        let prop = Self::next_json(ws, "proposal", 20).await?;
         if let Some(err) = prop.get("error") {
-            anyhow::bail!("Deriv proposal error: {}", err);
+            anyhow::bail!("Deriv proposal error: {err}");
         }
         let proposal_id = prop["proposal"]["id"]
             .as_str()
-            .ok_or_else(|| anyhow::anyhow!("no proposal id"))?;
+            .ok_or_else(|| anyhow::anyhow!("no proposal id in Deriv response: {prop}"))?;
         let ask_price = prop["proposal"]["ask_price"].as_f64().unwrap_or(stake);
 
         let buy = json!({
@@ -158,25 +542,30 @@ impl DerivExecution {
             "price": ask_price,
             "req_id": 2
         });
-        ws.send(Message::Text(serde_json::to_string(&buy)?.into()))
-            .await?;
-
-        let msg = ws
-            .next()
+        ws.send(Message::Text(buy.to_string().into()))
             .await
-            .ok_or_else(|| anyhow::anyhow!("no buy response"))??;
-        let buy_resp: serde_json::Value = serde_json::from_str(msg.to_text().unwrap_or(""))?;
+            .map_err(|e| anyhow::anyhow!("failed to send Deriv buy: {e}"))?;
+
+        let buy_resp = Self::next_json(ws, "buy", 20).await?;
         if let Some(err) = buy_resp.get("error") {
-            anyhow::bail!("Deriv buy error: {}", err);
+            anyhow::bail!("Deriv buy error: {err}");
         }
 
         let contract_id = json_id_to_string(&buy_resp["buy"]["contract_id"])
             .unwrap_or_else(|| "0".to_string());
         let buy_price = buy_resp["buy"]["buy_price"].as_f64().unwrap_or(0.0);
+        Ok((contract_id, buy_price))
+    }
 
-        let _ = ws.close(None).await;
-
-        Ok(TradeEvent {
+    fn trade_event(
+        contract_id: String,
+        buy_price: f64,
+        side: &str,
+        stake: f64,
+        sl: f64,
+        tp: f64,
+    ) -> TradeEvent {
+        TradeEvent {
             trade_id: contract_id,
             symbol: "XAUUSD".into(),
             side: side.into(),
@@ -192,7 +581,65 @@ impl DerivExecution {
             current_price: None,
             unrealized_pnl: Some(0.0),
             closed_at: None,
-        })
+        }
+    }
+
+    async fn place_order_otp(
+        &self,
+        otp_url: &str,
+        side: &str,
+        stake: f64,
+        sl: f64,
+        tp: f64,
+    ) -> Result<TradeEvent> {
+        // OTP URLs are pre-authenticated: no `authorize` call is sent.
+        let mut ws = Self::connect_ws(otp_url).await.map_err(|e| {
+            anyhow::anyhow!("Deriv OTP WebSocket ({}) failed: {e}", redact_ws_url(otp_url))
+        })?;
+        let (contract_id, buy_price) =
+            Self::proposal_buy_flow(&mut ws, side, stake, sl, tp, true).await?;
+        let _ = ws.close(None).await;
+        Ok(Self::trade_event(contract_id, buy_price, side, stake, sl, tp))
+    }
+
+    pub async fn place_order(
+        &self,
+        side: &str,
+        stake: f64,
+        sl: f64,
+        tp: f64,
+    ) -> Result<TradeEvent> {
+        if self.uses_http_otp() {
+            match self.fetch_otp_ws().await {
+                Ok(target) => {
+                    return self
+                        .place_order_otp(&target.url, side, stake, sl, tp)
+                        .await;
+                }
+                Err(e) => {
+                    if should_fallback_to_legacy(&self.api_token, &e) {
+                        warn!("Deriv OTP order flow failed ({e:#}); falling back to legacy WS flow");
+                    } else if token_kind(&self.api_token) == TokenKind::Pat {
+                        return Err(anyhow::anyhow!("{}", pat_guidance(&e)));
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+
+        let mut session = self.open_legacy_session().await?;
+        let (contract_id, buy_price) =
+            Self::proposal_buy_flow(&mut session.ws, side, stake, sl, tp, false).await?;
+        let _ = session.ws.close(None).await;
+        Ok(Self::trade_event(
+            contract_id,
+            buy_price,
+            side,
+            stake,
+            sl,
+            tp,
+        ))
     }
 }
 
@@ -368,7 +815,250 @@ pub fn parse_open_contract(body: &serde_json::Value) -> Option<(DerivOpenContrac
     ))
 }
 
+enum SessionDial {
+    /// Pre-authenticated single-use OTP URL from the current REST API.
+    Otp(String),
+    /// Legacy v3 API with handshake + `authorize` and host failover.
+    Legacy,
+}
+
+/// Dial one monitor session, subscribe to balance/portfolio/open-contract
+/// updates, and run the message loop until the socket drops.
+async fn run_monitor_session(executor: &DerivExecution, hub: &DiagnosticsHub, dial: SessionDial) {
+    let mut ws = match dial {
+        SessionDial::Otp(url) => {
+            info!("Connecting to Deriv monitor WS at {}", redact_ws_url(&url));
+            match DerivExecution::connect_ws(&url).await {
+                Ok(ws) => {
+                    info!("Connected to Deriv WebSocket (authenticated OTP session)");
+                    hub.update_deriv_status(true, true, None, None, None, None)
+                        .await;
+                    ws
+                }
+                Err(e) => {
+                    warn!("Deriv OTP WS connection failed: {e:#}");
+                    hub.update_deriv_status(
+                        false,
+                        false,
+                        None,
+                        None,
+                        None,
+                        Some(format!("Deriv OTP WS connection failed: {e:#}")),
+                    )
+                    .await;
+                    return;
+                }
+            }
+        }
+        SessionDial::Legacy => {
+            info!("Connecting to Deriv legacy monitor WS");
+            match executor.open_legacy_session().await {
+                Ok(session) => {
+                    hub.update_deriv_status(
+                        true,
+                        true,
+                        session.loginid,
+                        session.balance,
+                        session.currency,
+                        None,
+                    )
+                    .await;
+                    session.ws
+                }
+                Err(e) => {
+                    warn!("Deriv legacy WS connection failed: {e:#}");
+                    hub.update_deriv_status(
+                        false,
+                        false,
+                        None,
+                        None,
+                        None,
+                        Some(format!("Deriv WS connection failed: {e:#}")),
+                    )
+                    .await;
+                    return;
+                }
+            }
+        }
+    };
+
+    // Subscribe to live balance updates, open portfolio, and live contract updates.
+    // (OTP sessions arrive pre-authenticated; legacy sessions authorized while dialing.)
+    let subs = [
+        json!({ "balance": 1, "subscribe": 1, "req_id": 2 }),
+        json!({ "portfolio": 1, "req_id": 3 }),
+        json!({ "proposal_open_contract": 1, "subscribe": 1, "req_id": 4 }),
+    ];
+    for req in &subs {
+        if ws
+            .send(Message::Text(req.to_string().into()))
+            .await
+            .is_err()
+        {
+            warn!("Deriv WS subscribe send failed; reconnecting");
+            hub.update_deriv_status(
+                false,
+                false,
+                None,
+                None,
+                None,
+                Some("Deriv WS disconnected — reconnecting".into()),
+            )
+            .await;
+            return;
+        }
+    }
+
+    run_message_loop(&mut ws, hub).await;
+
+    hub.update_deriv_status(
+        false,
+        false,
+        None,
+        None,
+        None,
+        Some("Deriv WS disconnected — reconnecting".into()),
+    )
+    .await;
+}
+
+/// Shared balance/portfolio/open-contract message loop for OTP and legacy
+/// sockets: application-level pings plus protocol ping/pong.
+async fn run_message_loop(ws: &mut DerivWsStream, hub: &DiagnosticsHub) {
+    let mut ping_timer = interval(Duration::from_secs(25));
+    // Consume initial immediate tick
+    ping_timer.tick().await;
+
+    loop {
+        tokio::select! {
+            _ = ping_timer.tick() => {
+                let ping = json!({ "ping": 1 });
+                if ws.send(Message::Text(ping.to_string().into())).await.is_err() {
+                    break;
+                }
+                let portfolio_req = json!({ "portfolio": 1 });
+                let _ = ws.send(Message::Text(portfolio_req.to_string().into())).await;
+            }
+            msg = ws.next() => {
+                let Some(msg) = msg else {
+                    warn!("Deriv WS stream ended");
+                    break;
+                };
+                match msg {
+                    Ok(Message::Text(text)) => {
+                        let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) else {
+                            continue;
+                        };
+                        let msg_type = val["msg_type"].as_str().unwrap_or("");
+
+                        if let Some(err) = val.get("error") {
+                            let err_msg = err["message"]
+                                .as_str()
+                                .unwrap_or("Deriv API error")
+                                .to_string();
+                            warn!("Deriv API error on {msg_type}: {err_msg}");
+                            if msg_type == "authorize" {
+                                hub.update_deriv_status(
+                                    true,
+                                    false,
+                                    None,
+                                    None,
+                                    None,
+                                    Some(err_msg),
+                                )
+                                .await;
+                                break;
+                            }
+                            continue;
+                        }
+
+                        match msg_type {
+                            "authorize" => {
+                                let auth = &val["authorize"];
+                                let loginid = auth["loginid"].as_str().map(String::from);
+                                let balance = auth["balance"].as_f64();
+                                let currency = auth["currency"].as_str().map(String::from);
+
+                                hub.update_deriv_status(
+                                    true,
+                                    true,
+                                    loginid,
+                                    balance,
+                                    currency,
+                                    None,
+                                )
+                                .await;
+
+                                // Subscribe to live balance updates, open portfolio, and live contract updates
+                                let sub_balance = json!({ "balance": 1, "subscribe": 1, "req_id": 2 });
+                                let req_portfolio = json!({ "portfolio": 1, "req_id": 3 });
+                                let sub_poc = json!({ "proposal_open_contract": 1, "subscribe": 1, "req_id": 4 });
+
+                                let _ = ws.send(Message::Text(sub_balance.to_string().into())).await;
+                                let _ = ws.send(Message::Text(req_portfolio.to_string().into())).await;
+                                let _ = ws.send(Message::Text(sub_poc.to_string().into())).await;
+                            }
+                            "balance" => {
+                                let b = &val["balance"];
+                                if let Some(bal) = b["balance"].as_f64() {
+                                    let currency = b["currency"].as_str().map(String::from);
+                                    let loginid = b["loginid"]
+                                        .as_str()
+                                        .or_else(|| b["account_id"].as_str())
+                                        .map(String::from);
+                                    debug!("Deriv balance update: {bal}");
+                                    hub.update_deriv_balance(bal, currency, loginid).await;
+                                }
+                            }
+                            "portfolio" => {
+                                let contracts = parse_portfolio_contracts(&val);
+                                for c in &contracts {
+                                    if let Ok(cid) = c.contract_id.parse::<u64>() {
+                                        let sub_one = json!({
+                                            "proposal_open_contract": 1,
+                                            "contract_id": cid,
+                                            "subscribe": 1
+                                        });
+                                        let _ = ws.send(Message::Text(sub_one.to_string().into())).await;
+                                    }
+                                }
+                                hub.update_deriv_portfolio(contracts).await;
+                            }
+                            "proposal_open_contract" => {
+                                if let Some((contract, is_closed)) = parse_open_contract(&val) {
+                                    hub.upsert_deriv_contract(contract, is_closed).await;
+                                    if is_closed {
+                                        let req_portfolio = json!({ "portfolio": 1 });
+                                        let _ = ws.send(Message::Text(req_portfolio.to_string().into())).await;
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    Ok(Message::Ping(p)) => {
+                        let _ = ws.send(Message::Pong(p)).await;
+                    }
+                    Ok(Message::Close(_)) => {
+                        warn!("Deriv WS closed by remote");
+                        break;
+                    }
+                    Err(e) => {
+                        warn!("Deriv WS error: {e}");
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
 /// Continuously monitors the Deriv Demo account for live balance and open contracts.
+///
+/// Current REST + OTP API first; legacy-token REST rejections automatically
+/// fall back to the legacy WS flow. PAT configuration problems back off longer
+/// since they need a settings change, not a retry.
 pub async fn spawn_deriv_monitor(config: Config, hub: DiagnosticsHub) {
     let Some(token) = config.deriv_demo_api.clone() else {
         info!("DERIV_DEMO_API not set — Deriv account live monitor disabled");
@@ -378,218 +1068,74 @@ pub async fn spawn_deriv_monitor(config: Config, hub: DiagnosticsHub) {
     let executor = DerivExecution::new(&config);
 
     loop {
-        let ws_target = if executor.uses_http_otp() {
-            match executor.get_demo_account_id().await {
-                Ok(acc_id) => match executor.get_otp_url(&acc_id).await {
-                    Ok(url) => url,
-                    Err(e) => {
-                        warn!("Failed to get Deriv OTP URL: {e}");
-                        hub.update_deriv_status(
-                            false,
-                            false,
-                            Some(acc_id),
-                            None,
-                            None,
-                            Some(format!("OTP error: {e}")),
-                        )
-                        .await;
-                        sleep(Duration::from_secs(10)).await;
-                        continue;
-                    }
-                },
-                Err(e) => {
-                    warn!("Failed to fetch Deriv demo account ID: {e}");
+        let config_error = if executor.uses_http_otp() {
+            match executor.fetch_otp_ws().await {
+                Ok(target) => {
+                    // REST already told us the account, balance and currency.
                     hub.update_deriv_status(
+                        true,
                         false,
-                        false,
+                        Some(target.account.id.clone()),
+                        target.account.balance,
+                        target.account.currency.clone(),
                         None,
-                        None,
-                        None,
-                        Some(format!("Account lookup error: {e}")),
                     )
                     .await;
-                    sleep(Duration::from_secs(10)).await;
-                    continue;
+                    run_monitor_session(&executor, &hub, SessionDial::Otp(target.url)).await;
+                    false
+                }
+                Err(e) => {
+                    if token_kind(&token) == TokenKind::Pat {
+                        let msg = pat_guidance(&e);
+                        warn!("{msg}");
+                        hub.update_deriv_status(false, false, None, None, None, Some(msg))
+                            .await;
+                        true
+                    } else if is_no_demo_error(&e) {
+                        let msg = format!("{e:#}");
+                        warn!("{msg}");
+                        hub.update_deriv_status(false, false, None, None, None, Some(msg))
+                            .await;
+                        true
+                    } else {
+                        warn!("Deriv REST/OTP flow failed ({e:#}); falling back to legacy WS flow");
+                        run_monitor_session(&executor, &hub, SessionDial::Legacy).await;
+                        false
+                    }
                 }
             }
         } else {
-            config.deriv_ws_url()
+            run_monitor_session(&executor, &hub, SessionDial::Legacy).await;
+            false
         };
 
-        info!("Connecting to Deriv Demo monitor WS at {}", ws_target);
-        match tokio_tungstenite::connect_async(&ws_target).await {
-            Ok((mut ws, _)) => {
-                info!("Connected to Deriv WebSocket");
-                hub.update_deriv_status(true, false, None, None, None, None)
-                    .await;
-
-                // Authorize session and subscribe to balance + open contracts
-                let auth_msg = json!({
-                    "authorize": token,
-                    "req_id": 1
-                });
-                if let Err(e) = ws.send(Message::Text(auth_msg.to_string().into())).await {
-                    warn!("Deriv WS send authorize failed: {e}");
-                    sleep(Duration::from_secs(5)).await;
-                    continue;
-                }
-
-                let mut ping_timer = interval(Duration::from_secs(25));
-                // Consume initial immediate tick
-                ping_timer.tick().await;
-
-                loop {
-                    tokio::select! {
-                        _ = ping_timer.tick() => {
-                            let ping = json!({ "ping": 1 });
-                            if ws.send(Message::Text(ping.to_string().into())).await.is_err() {
-                                break;
-                            }
-                            let portfolio_req = json!({ "portfolio": 1 });
-                            let _ = ws.send(Message::Text(portfolio_req.to_string().into())).await;
-                        }
-                        msg = ws.next() => {
-                            let Some(msg) = msg else {
-                                warn!("Deriv WS stream ended");
-                                break;
-                            };
-                            match msg {
-                                Ok(Message::Text(text)) => {
-                                    let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) else {
-                                        continue;
-                                    };
-                                    let msg_type = val["msg_type"].as_str().unwrap_or("");
-
-                                    if let Some(err) = val.get("error") {
-                                        let err_msg = err["message"]
-                                            .as_str()
-                                            .unwrap_or("Deriv API error")
-                                            .to_string();
-                                        warn!("Deriv API error on {msg_type}: {err_msg}");
-                                        if msg_type == "authorize" {
-                                            hub.update_deriv_status(
-                                                true,
-                                                false,
-                                                None,
-                                                None,
-                                                None,
-                                                Some(err_msg),
-                                            )
-                                            .await;
-                                            break;
-                                        }
-                                        continue;
-                                    }
-
-                                    match msg_type {
-                                        "authorize" => {
-                                            let auth = &val["authorize"];
-                                            let loginid = auth["loginid"].as_str().map(String::from);
-                                            let balance = auth["balance"].as_f64();
-                                            let currency = auth["currency"].as_str().map(String::from);
-
-                                            hub.update_deriv_status(
-                                                true,
-                                                true,
-                                                loginid,
-                                                balance,
-                                                currency,
-                                                None,
-                                            )
-                                            .await;
-
-                                            // Subscribe to live balance updates, open portfolio, and live contract updates
-                                            let sub_balance = json!({ "balance": 1, "subscribe": 1, "req_id": 2 });
-                                            let req_portfolio = json!({ "portfolio": 1, "req_id": 3 });
-                                            let sub_poc = json!({ "proposal_open_contract": 1, "subscribe": 1, "req_id": 4 });
-
-                                            let _ = ws.send(Message::Text(sub_balance.to_string().into())).await;
-                                            let _ = ws.send(Message::Text(req_portfolio.to_string().into())).await;
-                                            let _ = ws.send(Message::Text(sub_poc.to_string().into())).await;
-                                        }
-                                        "balance" => {
-                                            let b = &val["balance"];
-                                            if let Some(bal) = b["balance"].as_f64() {
-                                                let currency = b["currency"].as_str().map(String::from);
-                                                let loginid = b["loginid"].as_str().map(String::from);
-                                                debug!("Deriv balance update: {bal}");
-                                                hub.update_deriv_balance(bal, currency, loginid).await;
-                                            }
-                                        }
-                                        "portfolio" => {
-                                            let contracts = parse_portfolio_contracts(&val);
-                                            for c in &contracts {
-                                                if let Ok(cid) = c.contract_id.parse::<u64>() {
-                                                    let sub_one = json!({
-                                                        "proposal_open_contract": 1,
-                                                        "contract_id": cid,
-                                                        "subscribe": 1
-                                                    });
-                                                    let _ = ws.send(Message::Text(sub_one.to_string().into())).await;
-                                                }
-                                            }
-                                            hub.update_deriv_portfolio(contracts).await;
-                                        }
-                                        "proposal_open_contract" => {
-                                            if let Some((contract, is_closed)) = parse_open_contract(&val) {
-                                                hub.upsert_deriv_contract(contract, is_closed).await;
-                                                if is_closed {
-                                                    let req_portfolio = json!({ "portfolio": 1 });
-                                                    let _ = ws.send(Message::Text(req_portfolio.to_string().into())).await;
-                                                }
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                Ok(Message::Ping(p)) => {
-                                    let _ = ws.send(Message::Pong(p)).await;
-                                }
-                                Ok(Message::Close(_)) => {
-                                    warn!("Deriv WS closed by remote");
-                                    break;
-                                }
-                                Err(e) => {
-                                    warn!("Deriv WS error: {e}");
-                                    break;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
-
-                hub.update_deriv_status(
-                    false,
-                    false,
-                    None,
-                    None,
-                    None,
-                    Some("Deriv WS disconnected — reconnecting".into()),
-                )
-                .await;
-            }
-            Err(e) => {
-                warn!("Failed to connect to Deriv WS: {e}");
-                hub.update_deriv_status(
-                    false,
-                    false,
-                    None,
-                    None,
-                    None,
-                    Some(format!("Deriv WS connection failed: {e}")),
-                )
-                .await;
-            }
-        }
-
-        sleep(Duration::from_secs(5)).await;
+        sleep(Duration::from_secs(if config_error { 30 } else { 5 })).await;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_executor(api_url: &str, app_id: Option<&str>) -> DerivExecution {
+        let config = Config {
+            node1_ws_url: "wss://example.invalid/ws".into(),
+            port: 10_000,
+            mcp_chelsea_url: None,
+            deriv_demo_api: Some("a1-test-token".into()),
+            deriv_app_id: app_id.map(String::from),
+            deriv_api_url: api_url.into(),
+            volume_threshold: 10_500.0,
+            sl_min_pips: 200.0,
+            sl_max_pips: 300.0,
+            tp_min_pips: 600.0,
+            tp_max_pips: 800.0,
+            rr_min: 2.0,
+            rr_max: 3.0,
+            order_size: 0.01,
+        };
+        DerivExecution::new(&config)
+    }
 
     #[test]
     fn parses_portfolio_and_open_contract_messages() {
@@ -644,5 +1190,120 @@ mod tests {
         assert_eq!(parsed.profit, 4.5);
         assert_eq!(parsed.profit_pct, 45.0);
         assert_eq!(parsed.current_spot, Some(2648.10));
+    }
+
+    #[test]
+    fn detects_pat_tokens() {
+        assert_eq!(token_kind("pat_abc123"), TokenKind::Pat);
+        assert_eq!(token_kind("  PAT_xyz "), TokenKind::Pat);
+        assert_eq!(token_kind("a1-AbC123xYz"), TokenKind::Other);
+        assert_eq!(token_kind("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig"), TokenKind::Other);
+    }
+
+    #[test]
+    fn legacy_candidates_fail_over_across_hosts() {
+        // Default REST config, no app id: 1089-based host failover, then bare URLs.
+        let exec = test_executor("https://api.derivws.com", None);
+        let c = exec.legacy_candidates();
+        assert_eq!(
+            c[0],
+            "wss://ws.derivws.com/websockets/v3?app_id=1089"
+        );
+        assert!(c.contains(&"wss://ws.binaryws.com/websockets/v3?app_id=1089".to_string()));
+        assert!(c.contains(&"wss://wss.derivws.com/websockets/v3?app_id=1089".to_string()));
+        assert!(c.contains(&"wss://ws.derivws.com/websockets/v3".to_string()));
+        // No duplicates.
+        let mut dedup = c.clone();
+        dedup.sort();
+        dedup.dedup();
+        assert_eq!(dedup.len(), c.len());
+    }
+
+    #[test]
+    fn legacy_candidates_honor_configured_url_and_app_id() {
+        let exec = test_executor("wss://ws.derivws.com/websockets/v3", Some("4242"));
+        let c = exec.legacy_candidates();
+        assert_eq!(
+            c[0],
+            "wss://ws.derivws.com/websockets/v3?app_id=4242"
+        );
+        assert!(c.contains(&"wss://ws.binaryws.com/websockets/v3?app_id=4242".to_string()));
+    }
+
+    #[test]
+    fn selects_demo_account_from_rest_payloads() {
+        // Array payload with string balance (as returned by the accounts API).
+        let data = json!([
+            {"account_id": "CR90004580", "balance": 50.0, "currency": "USD", "account_type": "real"},
+            {"account_id": "VRTC90004581", "balance": "10000.00", "currency": "USD", "account_type": "demo"}
+        ]);
+        let demo = select_demo_account(&data).expect("demo selected");
+        assert_eq!(demo.id, "VRTC90004581");
+        assert_eq!(demo.balance, Some(10000.0));
+        assert_eq!(demo.currency.as_deref(), Some("USD"));
+
+        // Single-object payload.
+        let single = json!({"account_id": "VRTC1", "balance": 10.0, "currency": "USD", "account_type": "demo"});
+        assert_eq!(select_demo_account(&single).unwrap().id, "VRTC1");
+
+        // VRTC prefix alone is enough.
+        let prefixed = json!([{"loginid": "VRTC777", "balance": 5.0}]);
+        assert_eq!(select_demo_account(&prefixed).unwrap().id, "VRTC777");
+
+        // Real-only payload selects nothing.
+        let real_only = json!([{"account_id": "CR1", "account_type": "real"}]);
+        assert!(select_demo_account(&real_only).is_none());
+        assert_eq!(found_account_ids(&real_only), vec!["CR1".to_string()]);
+    }
+
+    #[test]
+    fn formats_rest_api_errors() {
+        let body = json!({
+            "errors": [{"status": 401, "code": "Unauthorized", "message": "Invalid or missing authentication credentials"}],
+            "meta": {"endpoint": "/accounts", "method": "GET"}
+        });
+        assert_eq!(
+            rest_api_error(401, &body),
+            "HTTP 401 Unauthorized: Invalid or missing authentication credentials"
+        );
+        assert_eq!(
+            rest_api_error(400, &json!({"message": "bad input"})),
+            "HTTP 400: bad input"
+        );
+    }
+
+    #[test]
+    fn redacts_and_strips_url_secrets() {
+        assert_eq!(
+            redact_ws_url("wss://api.derivws.com/trading/v1/options/ws/demo?otp=abc123xyz"),
+            "wss://api.derivws.com/trading/v1/options/ws/demo?otp=***"
+        );
+        assert_eq!(
+            redact_ws_url("wss://ws.derivws.com/websockets/v3?app_id=1089"),
+            "wss://ws.derivws.com/websockets/v3?app_id=1089"
+        );
+        assert_eq!(
+            strip_app_id_param("wss://ws.derivws.com/websockets/v3?app_id=1089"),
+            Some("wss://ws.derivws.com/websockets/v3".to_string())
+        );
+        assert_eq!(
+            strip_app_id_param("wss://h.test/v3?app_id=1&other=2"),
+            Some("wss://h.test/v3?other=2".to_string())
+        );
+        assert_eq!(strip_app_id_param("wss://h.test/v3"), None);
+    }
+
+    #[test]
+    fn legacy_fallback_rules() {
+        let auth_err = anyhow::anyhow!("Deriv accounts failed: HTTP 401 Unauthorized: nope");
+        assert!(should_fallback_to_legacy("a1-legacy", &auth_err));
+        assert!(!should_fallback_to_legacy("pat_abc", &auth_err));
+
+        let no_demo = anyhow::anyhow!("No demo account found for this token (found account(s): CR1).");
+        assert!(!should_fallback_to_legacy("a1-legacy", &no_demo));
+
+        assert!(is_invalid_token_error("InvalidToken", "whatever"));
+        assert!(is_invalid_token_error("", "The token is invalid token xyz"));
+        assert!(!is_invalid_token_error("InputValidationFailed", "app_id is required"));
     }
 }

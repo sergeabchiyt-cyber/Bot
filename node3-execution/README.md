@@ -72,7 +72,13 @@ PORT=10000
 
 # Execution Venues (Only 1 minimum required)
 DERIV_DEMO_API=your_deriv_token
-DERIV_APP_ID=1089
+# Required ONLY for PAT (pat_...) tokens — register a free app at
+# https://developers.deriv.com (API dashboard) and paste its App ID here.
+# Legacy a1-... tokens do not need it.
+DERIV_APP_ID=
+# Optional override. Default: https://api.derivws.com (current REST + OTP API).
+# Set to wss://ws.derivws.com/websockets/v3 to force the legacy flow.
+DERIV_API_URL=https://api.derivws.com
 # or
 MCP_CHELSEA_URL=http://localhost:3002/mcp
 
@@ -94,3 +100,23 @@ cargo run --release
 # or Docker:
 docker build -t node3-execution . && docker run --env-file .env -p 10000:10000 node3-execution
 ```
+
+## Deriv connection notes
+
+- **Two token types, auto-detected.** Legacy API tokens (`a1-...`, created at
+  `app.deriv.com` → account settings → API token) and current Personal Access
+  Tokens (`pat_...`, created at `developers.deriv.com`) use different Deriv
+  APIs. Node 3 tries the current REST + OTP API first and automatically falls
+  back to the legacy WebSocket flow for legacy tokens — no `app_id` needed
+  unless you use a PAT.
+- **HTTP 520 failover.** Deriv's legacy `wss://ws.derivws.com/websockets/v3`
+  endpoint sits behind Cloudflare and returns HTTP 520 from many cloud/VPS
+  networks. Legacy connections therefore use browser-like handshake headers
+  (`Origin`, `User-Agent`) and fail over across `ws.derivws.com`,
+  `ws.binaryws.com`, and `wss.derivws.com`, with and without `app_id`.
+- **Demo only.** The Deriv venue refuses to trade on anything that is not a
+  demo/virtual (`VRTC...`) account, on both the OTP and legacy flows.
+- **PAT + `DERIV_APP_ID`.** PAT REST calls are rejected by Deriv without a
+  `Deriv-App-ID` header, so PAT users must register a (free) app and set
+  `DERIV_APP_ID`. The `/deriv` endpoint and logs spell this out if it is
+  missing.
