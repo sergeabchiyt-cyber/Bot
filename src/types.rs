@@ -172,6 +172,11 @@ pub struct VpLevels {
     pub swing_high: Option<f64>,
     #[serde(default)]
     pub swing_low: Option<f64>,
+    /// The open price of the PW candle at its Sunday 18:00 NY start, when
+    /// that exact boundary candle is present in the seed. `start` remains the
+    /// window's epoch-millisecond timestamp for backwards compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sunday_open: Option<f64>,
 }
 
 // =====================================================================
@@ -299,4 +304,58 @@ pub enum WsFrame {
         #[serde(default)]
         data: serde_json::Value,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn levels_wire_format_is_tagged_and_includes_the_sunday_open_price() {
+        let frame = WsFrame::Levels {
+            data: VpLevels {
+                window: "PW".into(),
+                poc: 2_340.0,
+                vah: 2_350.0,
+                val: 2_330.0,
+                start: 1_700_000_000_000,
+                end: 1_700_360_000_000,
+                timestamp: 1_700_360_000_001,
+                direction: "neutral".into(),
+                swing_high: None,
+                swing_low: None,
+                sunday_open: Some(2_341.25),
+            },
+        };
+        let wire = serde_json::to_value(&frame).expect("serialize WS levels");
+        assert_eq!(wire["type"], "levels");
+        assert_eq!(wire["data"]["window"], "PW");
+        for field in ["poc", "vah", "val"] {
+            assert!(wire["data"][field].is_number(), "missing {field}: {wire}");
+        }
+        assert_eq!(wire["data"]["sunday_open"], 2_341.25);
+    }
+
+    #[test]
+    fn node3_trade_event_uses_the_tagged_trades_envelope() {
+        let raw = serde_json::json!({
+            "type": "trades",
+            "data": {
+                "trade_id": "n3-1",
+                "symbol": "XAUUSD",
+                "side": "buy",
+                "size": 0.01,
+                "entry": 2340.0,
+                "sl": 2335.0,
+                "tp": 2350.0,
+                "status": "signal",
+                "timestamp": 1_700_000_000_000_i64
+            }
+        });
+        let frame: WsFrame = serde_json::from_value(raw).expect("deserialize Node3 trade");
+        let wire = serde_json::to_value(frame).expect("rebroadcast trade frame");
+        assert_eq!(wire["type"], "trades");
+        assert_eq!(wire["data"]["trade_id"], "n3-1");
+        assert_eq!(wire["data"]["status"], "signal");
+    }
 }

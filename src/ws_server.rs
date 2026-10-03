@@ -23,6 +23,11 @@ use crate::tick_volume::TickVolumeStore;
 use crate::types::{TickVolumeBar, VpLevels, VpCandle, WsFrame};
 use crate::volume_profile::VolumeProfileEngine;
 
+/// Fourteen ATR true ranges need fifteen OHLC bars (the first close is the
+/// reference close for the first range). Replay just this recent candle tail
+/// over WS; clients that need the full chart history can use GET /candles.
+const CANDLE_REPLAY_LIMIT: usize = 15;
+
 #[derive(Clone)]
 pub struct AppState {
     pub tx: broadcast::Sender<WsFrame>,
@@ -225,13 +230,14 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                 topics = t;
                                 subscribed = true;
 
-                                // Replay cached state so new clients fill
-                                // instantly (levels + recent candles + tick
-                                // volume + calendar + status).
+                                // Replay cached state as soon as the client
+                                // subscribes (the first message after connect).
+                                // Clone under the read lock, then release it
+                                // before any network write.
                                 if topics.iter().any(|x| x == "levels") {
-                                    let cached = state.cached_levels.read().await;
-                                    for lvl in cached.iter() {
-                                        let frame = WsFrame::Levels { data: lvl.clone() };
+                                    let cached = state.cached_levels.read().await.clone();
+                                    for lvl in cached {
+                                        let frame = WsFrame::Levels { data: lvl };
                                         let json = serde_json::to_string(&frame).unwrap_or_default();
                                         if sender.send(Message::Text(json.into())).await.is_err() {
                                             return;
@@ -239,9 +245,13 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                     }
                                 }
                                 if topics.iter().any(|x| x == "candle") {
-                                    let cached = state.cached_candles.read().await;
-                                    for c in cached.iter() {
-                                        let frame = WsFrame::Candle { data: c.clone() };
+                                    let cached = {
+                                        let candles = state.cached_candles.read().await;
+                                        let first = candles.len().saturating_sub(CANDLE_REPLAY_LIMIT);
+                                        candles[first..].to_vec()
+                                    };
+                                    for c in cached {
+                                        let frame = WsFrame::Candle { data: c };
                                         let json = serde_json::to_string(&frame).unwrap_or_default();
                                         if sender.send(Message::Text(json.into())).await.is_err() {
                                             return;
@@ -282,6 +292,14 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                 let _ = state.tx.send(frame);
                             }
 
+                            // Node3 (or another execution producer) publishes
+                            // completed orders/signals on `trades`. Rebroadcast
+                            // unchanged so every dashboard subscribed to the
+                            // trades topic sees the same TradeEvent envelope.
+                            WsFrame::Trades { .. } => {
+                                let _ = state.tx.send(frame);
+                            }
+
                             // Node3 answers: cache for GET /ai and fan out to
                             // subscribers of the matching topic.
                             WsFrame::Transcript { .. }
@@ -294,7 +312,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
                             // Requests aimed at the AI node — rebroadcast so
                             // the fan-out forwards them past the topic filter
-                            // (Node3 subscribes only to audio_chunk + learn).
+                            // (Node3 subscribes to audio_chunk + learn).
                             WsFrame::SentimentReq { .. } | WsFrame::PredictReq { .. } => {
                                 let _ = state.tx.send(frame);
                             }

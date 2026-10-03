@@ -110,8 +110,10 @@ If FOMC-RoBERTa missing you'll see `finbert:heuristic_fallback` — still trades
 ```bash
 cp .env.example .env
 cat .env
-# tune if you need:
-# NODE1_WS_URL=wss://engine-southeastasia-sng-main.onrender.com/ws
+# Same-region Singapore deployment: point directly at Node 1's secure WS
+# endpoint (provider-private DNS/networking if available; otherwise its direct
+# public WSS hostname). Never use Node2 or a localhost URL from Node3.
+NODE1_WS_URL=wss://engine-southeastasia-sng-main.onrender.com/ws
 # SESSION_ID=ai-01
 # MOONSHINE_PREFERRED=medium   # small if you want lower latency
 # FINBERT_PREFERRED=fomc       # tone or finbert to force fallback

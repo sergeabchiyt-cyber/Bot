@@ -157,6 +157,7 @@ pub fn compute(
         direction: direction.into(),
         swing_high,
         swing_low,
+        sunday_open: None,
     })
 }
 
