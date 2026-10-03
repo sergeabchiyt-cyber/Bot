@@ -502,21 +502,17 @@ impl DiagnosticsHub {
                 inner.work.last_error = Some(err.clone());
                 Self::push_event_locked(&mut inner, "warn", "deriv", format!("Deriv status: {err}"));
             } else if authorized {
-                Self::push_event_locked(
-                    &mut inner,
-                    "info",
-                    "deriv",
-                    format!(
-                        "Deriv Demo authorized ({}, balance: {:.2} {})",
-                        inner
-                            .deriv_account
-                            .account_id
-                            .as_deref()
-                            .unwrap_or("demo"),
-                        inner.deriv_account.balance.unwrap_or(0.0),
-                        inner.deriv_account.currency
-                    ),
+                let auth_msg = format!(
+                    "Deriv Demo authorized ({}, balance: {:.2} {})",
+                    inner
+                        .deriv_account
+                        .account_id
+                        .as_deref()
+                        .unwrap_or("demo"),
+                    inner.deriv_account.balance.unwrap_or(0.0),
+                    inner.deriv_account.currency
                 );
+                Self::push_event_locked(&mut inner, "info", "deriv", auth_msg);
             }
 
             let deriv_snap = inner.deriv_account.clone();
