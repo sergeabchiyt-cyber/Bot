@@ -1,6 +1,6 @@
-# CI proof — run 37331161204
-commit: 43cff07421046dc710ddce16cbc1abbfdbf6995d
-generated: 2026-10-05T15:16:25Z
+# CI proof — run 37331961033
+commit: feb2be26842468ba1dfe7efedbbbcce5a4021e11
+generated: 2026-10-05T15:22:04Z
 
 ## Unit tests
    Compiling libc v0.2.190
@@ -18,50 +18,50 @@ generated: 2026-10-05T15:16:25Z
    Compiling errno v0.3.14
    Compiling signal-hook-registry v1.4.8
    Compiling parking_lot v0.12.5
-   Compiling mio v1.2.4
    Compiling socket2 v0.6.5
+   Compiling mio v1.2.4
    Compiling getrandom v0.2.17
    Compiling getrandom v0.3.4
    Compiling tokio v1.53.2
    Compiling potential_utf v0.1.6
-   Compiling icu_collections v2.3.0
    Compiling rand_core v0.9.5
+   Compiling icu_collections v2.3.0
    Compiling ring v0.17.14
    Compiling icu_provider v2.3.1
    Compiling icu_normalizer v2.3.0
    Compiling ppv-lite86 v0.2.21
-   Compiling icu_properties v2.3.0
-   Compiling rand_chacha v0.9.0
    Compiling rustls-webpki v0.103.15
-   Compiling rand v0.9.5
+   Compiling rand_chacha v0.9.0
    Compiling rustls v0.23.45
-   Compiling idna_adapter v1.2.2
+   Compiling rand v0.9.5
+   Compiling icu_properties v2.3.0
    Compiling brotli v9.0.0
-   Compiling base64 v0.23.1
-   Compiling idna v1.1.0
    Compiling hyper v1.11.1
-   Compiling tokio-rustls v0.26.6
-   Compiling compression-codecs v0.4.45
+   Compiling idna_adapter v1.2.2
+   Compiling base64 v0.23.1
    Compiling hyper-util v0.1.21
+   Compiling compression-codecs v0.4.45
+   Compiling idna v1.1.0
+   Compiling tokio-rustls v0.26.6
    Compiling tower v0.5.3
    Compiling siphasher v1.0.4
-   Compiling async-compression v0.4.50
-   Compiling phf_shared v0.12.1
-   Compiling tokio-util v0.7.19
    Compiling url v2.5.8
+   Compiling phf_shared v0.12.1
+   Compiling async-compression v0.4.50
+   Compiling tokio-util v0.7.19
    Compiling tungstenite v0.29.0
    Compiling lazy_static v1.5.1
-   Compiling tower-http v0.6.11
-   Compiling tokio-tungstenite v0.29.0
    Compiling tungstenite v0.26.2
+   Compiling tower-http v0.6.11
    Compiling sharded-slab v0.1.7
+   Compiling tokio-tungstenite v0.29.0
    Compiling phf v0.12.1
    Compiling hyper-rustls v0.27.10
+   Compiling axum v0.8.9
+   Compiling tracing-subscriber v0.3.23
+   Compiling reqwest v0.12.28
    Compiling dashmap v6.2.1
    Compiling tokio-tungstenite v0.26.2
-   Compiling tracing-subscriber v0.3.23
-   Compiling axum v0.8.9
-   Compiling reqwest v0.12.28
    Compiling chrono-tz v0.10.4
    Compiling xauusd-engine v0.3.0 (/home/runner/work/Bot/Bot)
 warning: field `symbol_type` is never read
@@ -100,45 +100,45 @@ warning: field `subscriptions` is never read
    = note: `AppState` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
 
 warning: `xauusd-engine` (bin "xauusd-engine" test) generated 3 warnings
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 21.89s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 22.25s
      Running unittests src/main.rs (target/debug/deps/xauusd_engine-a43c736f72c15a5f)
 
 running 86 tests
-test calendar::live_tests::real_forexfactory_feed_returns_events ... ignored, requires network
 test ai_cache::tests::health_is_kept_verbatim_plus_timestamp ... ok
+test calendar::live_tests::real_forexfactory_feed_returns_events ... ignored, requires network
 test ai_cache::tests::records_transcripts_and_reports_todays_counts ... ok
-test ai_cache::tests::stale_entries_are_pruned ... ok
-test calendar::tests::handles_empty_feed ... ok
 test calendar::tests::impact_colors_are_normalized ... ok
-test calendar::tests::rejects_html_rate_limit_page ... ok
+test ai_cache::tests::stale_entries_are_pruned ... ok
 test calendar::tests::markdown_fallback_skips_headers_and_separators ... ok
 test calendar::tests::parses_forexfactory_weekly_json ... ok
+test calendar::tests::rejects_html_rate_limit_page ... ok
+test calendar::tests::handles_empty_feed ... ok
 test config::tests::cors_origin_is_normalized_for_header_comparison ... ok
 test config::tests::default_origin_is_already_in_header_form ... ok
 test econ_monitor::tests::all_currency_matches_everything ... ok
 test econ_monitor::tests::b64_matches_known_vectors ... ok
-test calendar::tests::source_has_fallback_urls ... ok
-test econ_monitor::tests::fed_events_are_recognized ... ok
-test econ_monitor::tests::tone_chunk_is_f32le_of_expected_length ... ok
 test config::tests::from_env_falls_back_to_the_node2_site ... ok
+test calendar::tests::source_has_fallback_urls ... ok
 test econ_monitor::tests::extracts_live_urls_and_prefers_live ... ok
+test econ_monitor::tests::fed_events_are_recognized ... ok
 test econ_monitor::tests::window_selects_only_active_high_impact_usd_events ... ok
 test sifting_rest::tests::a_short_chart_response_is_rejected_instead_of_seeding_a_partial_page ... ok
-test sifting_rest::tests::a_sparse_profile_page_is_rejected_even_when_it_reaches_both_ends ... ok
+test econ_monitor::tests::tone_chunk_is_f32le_of_expected_length ... ok
 test sifting_rest::tests::chart_history_request_is_a_single_fixed_two_thousand_bar_page ... ok
+test sifting_rest::tests::a_sparse_profile_page_is_rejected_even_when_it_reaches_both_ends ... ok
 test sifting_rest::tests::history_tail_drops_the_boundary_bar_and_keeps_the_newer_ones ... ok
-test sifting_rest::tests::response_validation_rejects_wrong_symbol_or_interval ... ok
 test sifting_rest::tests::profile_history_request_carries_interval_and_encoded_cursor ... ok
+test sifting_rest::tests::response_validation_rejects_wrong_symbol_or_interval ... ok
 test sifting_ws::tests::bucket_roll_emits_one_closed_bar_then_a_fresh_live_bar ... ok
 test sifting_ws::tests::candle_volume_is_the_tick_count_like_sifting_history ... ok
 test sifting_ws::tests::handle_text_writes_the_store_and_broadcasts_candle_plus_tick_volume ... ok
 test sifting_ws::tests::profile_candle_closes_on_one_minute_boundaries ... ok
-test sifting_ws::tests::tick_rule_splits_up_down_and_flat ... ok
 test sifting_ws::tests::resubscribe_snapshot_and_late_ticks_are_not_counted ... ok
 test sifting_ws::tests::rolling_rate_counts_the_last_ten_seconds ... ok
-test tick_volume::tests::out_of_order_bars_stay_sorted ... ok
+test sifting_ws::tests::tick_rule_splits_up_down_and_flat ... ok
 test sifting_ws::tests::tick_volume_frame_wire_shape ... ok
 test tick_volume::tests::capacity_is_enforced_oldest_first ... ok
+test tick_volume::tests::out_of_order_bars_stay_sorted ... ok
 test tick_volume::tests::upsert_replaces_the_live_bar_and_appends_new_ones ... ok
 test types::tests::levels_wire_format_is_tagged_and_includes_the_sunday_open_price ... ok
 test types::tests::node3_trade_event_uses_the_tagged_trades_envelope ... ok
@@ -149,47 +149,47 @@ test volume_profile::histogram::tests::poc_sits_in_the_heaviest_band_and_value_a
 test volume_profile::histogram::tests::price_rows_are_aligned_to_the_fixed_half_dollar_grid ... ok
 test volume_profile::histogram::tests::rows_are_not_snapped_to_the_half_dollar_grid_in_rows_mode ... ok
 test volume_profile::histogram::tests::rows_layout_creates_a_short_top_row_for_a_partial_range ... ok
-test volume_profile::histogram::tests::rows_layout_rounds_row_height_to_whole_ticks_like_tradingview ... ok
 test volume_profile::histogram::tests::up_and_down_volume_follow_the_bar_direction ... ok
-test volume_profile::session::tests::session_boundary_survives_dst_change ... ok
+test volume_profile::histogram::tests::rows_layout_rounds_row_height_to_whole_ticks_like_tradingview ... ok
 test volume_profile::histogram::tests::value_area_tie_break_prefers_the_row_closer_to_the_poc ... ok
-test volume_profile::session::tests::session_close_is_1800_new_york ... ok
+test volume_profile::session::tests::session_boundary_survives_dst_change ... ok
 test volume_profile::session::tests::session_shift_keeps_the_1800_anchor_across_dst ... ok
+test sifting_rest::tests::complete_profile_history_passes_the_density_check ... ok
+test volume_profile::session::tests::session_close_is_1800_new_york ... ok
 test volume_profile::swing::tests::bearish_swing_is_anchored_high_to_low ... ok
 test volume_profile::swing::tests::bullish_swing_is_anchored_low_to_high ... ok
 test volume_profile::swing::tests::plateau_highs_anchor_at_the_most_recent_touch ... ok
-test volume_profile::swing::tests::fallback_leg_is_bounded_to_recent_bars ... ok
-test volume_profile::tests::custom_range_profiles_an_arbitrary_window ... ok
-test sifting_rest::tests::complete_profile_history_passes_the_density_check ... ok
-test volume_profile::tests::duplicate_candle_timestamp_is_replaced ... ok
 test volume_profile::tests::custom_range_rejects_inverted_and_unretained_ranges ... ok
-test volume_profile::tests::cw_appears_once_monday_closes_and_freezes_intraday ... ok
+test volume_profile::tests::custom_range_profiles_an_arbitrary_window ... ok
+test volume_profile::swing::tests::fallback_leg_is_bounded_to_recent_bars ... ok
+test volume_profile::tests::duplicate_candle_timestamp_is_replaced ... ok
 test volume_profile::tests::ingesting_a_candle_after_a_close_refreshes_ps ... ok
+test volume_profile::tests::cw_appears_once_monday_closes_and_freezes_intraday ... ok
 test volume_profile::tests::ps_skips_the_weekend_gap ... ok
 test volume_profile::tests::ps_rolls_forward_at_every_session_close ... ok
 test volume_profile::tests::refresh_fires_once_per_close_and_ignores_empty_weekend_sessions ... ok
 test volume_profile::tests::time_profiles_and_swing_can_use_separate_history_resolutions ... ok
 test volume_profile::timeframe::tests::aggregation_merges_out_of_order_chunks ... ok
+test volume_profile::tests::pw_marks_the_sunday_start_candle_open_price ... ok
 test volume_profile::timeframe::tests::aggregation_sums_volume_and_keeps_the_bucket_ohlc ... ok
 test volume_profile::timeframe::tests::labels_round_trip ... ok
 test volume_profile::timeframe::tests::prepare_input_never_downscales_coarse_history ... ok
 test volume_profile::timeframe::tests::prepare_input_reports_one_minute_for_short_windows ... ok
-test volume_profile::tests::pw_marks_the_sunday_start_candle_open_price ... ok
 test volume_profile::weekly::tests::previous_week_runs_sunday_open_to_friday_close ... ok
 test volume_profile::weekly::tests::week_start_is_the_sunday_1800_open ... ok
-test volume_profile::timeframe::tests::weekly_windows_use_5m_and_sessions_use_1m_like_tradingview ... ok
 test ws_server::tests::ai_route_reports_todays_digest ... ok
 test volume_profile::tests::week_windows_do_not_overlap_the_session_window ... ok
-test ws_server::tests::cors_grant_is_scoped_to_the_configured_origin ... ok
+test volume_profile::timeframe::tests::weekly_windows_use_5m_and_sessions_use_1m_like_tradingview ... ok
 test ws_server::tests::envelope_normalization_wraps_loose_producer_payloads ... ok
 test ws_server::tests::malformed_origin_panics_at_boot ... ok
-test ws_server::tests::allowed_origin_may_read_every_rest_route ... ok
+test ws_server::tests::cors_grant_is_scoped_to_the_configured_origin ... ok
 test ws_server::tests::payload_shape_is_untouched_by_the_layer ... ok
-test ws_server::tests::tick_volume_route_serves_the_live_bars_uncached ... ok
+test ws_server::tests::allowed_origin_may_read_every_rest_route ... ok
 test ws_server::tests::preflight_is_answered_for_the_allowed_origin_only ... ok
+test ws_server::tests::tick_volume_route_serves_the_live_bars_uncached ... ok
 test ws_server::tests::vp_custom_range_validates_its_parameters ... ok
-test volume_profile::tests::pw_excludes_weekend_candles_and_is_stable_all_week ... ok
 test ws_server::tests::only_the_configured_origin_is_ever_allowed ... ok
+test volume_profile::tests::pw_excludes_weekend_candles_and_is_stable_all_week ... ok
 
 test result: ok. 85 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.03s
 
@@ -248,7 +248,7 @@ LIVE CALENDAR: 79 events
   2026-10-05T07:50:00+00:00 | EUR | Low | French Final Services PMI | forecast=Some("51.4") previous=Some("51.4") gold=false
 test calendar::live_tests::real_forexfactory_feed_returns_events ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 85 filtered out; finished in 0.06s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 85 filtered out; finished in 0.10s
 
 
 ## Runtime smoke test
@@ -256,10 +256,10 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 85 filtered out; fin
 ok <- /health ok
 
 --- /status ---
-{"candles":{"bars":2000,"edge_lag_minutes":16,"first_bar":1789413300000,"interval":"15m","last_bar":1791212400000,"seed_bars":2000},"status":{"feeds":{"alltick":{"last_msg":0,"msgs":0,"state":"off (no token)"},"binance":{"last_msg":0,"msgs":0,"state":"connecting"},"bitget":{"last_msg":0,"msgs":0,"state":"connecting"},"bybit":{"last_msg":0,"msgs":0,"state":"connecting"},"calendar":{"last_msg":0,"msgs":0,"state":"starting"},"econ_monitor":{"last_msg":0,"msgs":0,"state":"idle (no active event windows)"},"gate":{"last_msg":0,"msgs":0,"state":"connecting"},"itick":{"last_msg":0,"msgs":0,"state":"off (no token)"},"kraken":{"last_msg":0,"msgs":0,"state":"connecting"},"okx":{"last_msg":0,"msgs":0,"state":"connecting"},"sifting":{"last_msg":0,"msgs":0,"state":"off (no key)"}},"ts":1791213381669},"venue":"None","version":"0.3.0","volume_profile":{"audit":"/vp?window=PW","bin_size":0.5,"input":"tv","row_mode":"rows","rows":128,"va_pct":70.0}}
+{"candles":{"bars":2000,"edge_lag_minutes":22,"first_bar":1789413300000,"interval":"15m","last_bar":1791212400000,"seed_bars":2000},"status":{"feeds":{"alltick":{"last_msg":0,"msgs":0,"state":"off (no token)"},"binance":{"last_msg":0,"msgs":0,"state":"connecting"},"bitget":{"last_msg":0,"msgs":0,"state":"connecting"},"bybit":{"last_msg":0,"msgs":0,"state":"connecting"},"calendar":{"last_msg":0,"msgs":0,"state":"starting"},"econ_monitor":{"last_msg":0,"msgs":0,"state":"idle (no active event windows)"},"gate":{"last_msg":0,"msgs":0,"state":"connecting"},"itick":{"last_msg":0,"msgs":0,"state":"off (no token)"},"kraken":{"last_msg":0,"msgs":0,"state":"connecting"},"okx":{"last_msg":0,"msgs":0,"state":"connecting"},"sifting":{"last_msg":0,"msgs":0,"state":"off (no key)"}},"ts":1791213720335},"venue":"None","version":"0.3.0","volume_profile":{"audit":"/vp?window=PW","bin_size":0.5,"input":"tv","row_mode":"rows","rows":128,"va_pct":70.0}}
 
 --- /levels ---
-[{"window":"PW","poc":3416.1949999999997,"vah":3431.0,"val":3399.04,"start":1790546400000,"end":1790978400000,"timestamp":1791213381650,"direction":"neutral","swing_high":null,"swing_low":null,"sunday_open":3405.4121497812007,"meta":{"row_mode":"rows","row_height":0.47000000000000003,"rows":128,"range_high":3443.8051371481047,"range_low":3384.0,"input_interval":"15m","input_bars":480,"total_volume":59453.99999997467,"va_pct":0.7}},{"window":"PS","poc":3453.2650000000003,"vah":3456.83,"val":3434.98,"start":1791064800000,"end":1791151200000,"timestamp":1791213381651,"direction":"neutral","swing_high":null,"swing_low":null,"meta":{"row_mode":"rows","row_height":0.23,"rows":130,"range_high":3458.8051371481047,"range_low":3429.0,"input_interval":"15m","input_bars":96,"total_volume":11823.000000001122,"va_pct":0.7}},{"window":"SWING_BEAR","poc":3460.755,"vah":3463.38,"val":3442.59,"start":1791162900000,"end":1791207000000,"timestamp":1791213381651,"direction":"bearish","swing_high":3463.5,"swing_low":3436.5,"meta":{"row_mode":"rows","row_height":0.21,"rows":129,"range_high":3463.5,"range_low":3436.5,"input_interval":"15m","input_bars":49,"total_volume":6097.000000001011,"va_pct":0.7}}]
+[{"window":"PW","poc":3416.1949999999997,"vah":3431.0,"val":3399.04,"start":1790546400000,"end":1790978400000,"timestamp":1791213720316,"direction":"neutral","swing_high":null,"swing_low":null,"sunday_open":3405.4121497812007,"meta":{"row_mode":"rows","row_height":0.47000000000000003,"rows":128,"range_high":3443.8051371481047,"range_low":3384.0,"input_interval":"15m","input_bars":480,"total_volume":59453.99999997467,"va_pct":0.7}},{"window":"PS","poc":3453.2650000000003,"vah":3456.83,"val":3434.98,"start":1791064800000,"end":1791151200000,"timestamp":1791213720316,"direction":"neutral","swing_high":null,"swing_low":null,"meta":{"row_mode":"rows","row_height":0.23,"rows":130,"range_high":3458.8051371481047,"range_low":3429.0,"input_interval":"15m","input_bars":96,"total_volume":11823.000000001122,"va_pct":0.7}},{"window":"SWING_BEAR","poc":3460.755,"vah":3463.38,"val":3442.59,"start":1791162900000,"end":1791207000000,"timestamp":1791213720316,"direction":"bearish","swing_high":3463.5,"swing_low":3436.5,"meta":{"row_mode":"rows","row_height":0.21,"rows":129,"range_high":3463.5,"range_low":3436.5,"input_interval":"15m","input_bars":49,"total_volume":6097.000000001011,"va_pct":0.7}}]
 windows present: ['PS', 'PW', 'SWING_BEAR']
 PS window ends at 2026-10-04T18:00:00-04:00 (New York)
 PS session window: 2026-10-03T22:00:00+00:00 -> 2026-10-04T22:00:00+00:00 (24.0h)
@@ -308,7 +308,7 @@ CALENDAR CHECK PASSED
 
 --- /candles payload shape (must be untouched by the CORS layer) ---
 grid: 15m (1999/1999 gaps are exactly one bucket)
-history edge: 16 minutes behind now
+history edge: 22 minutes behind now
 candles: 2000 bars, sources=['synthetic']
 first: time=1789413300000 close=3300.25
 last:  time=1791212400000 close=3439.4875271016076
@@ -344,14 +344,14 @@ TICK VOLUME CHECK PASSED
   headers are CORS-only
 5) /ws still upgrades and replays frames through the layer
 handshake: HTTP/1.1 101 Switching Protocols
-  sec-websocket-accept: x63X1ahlqcs7enWodkN/TZ8zy1A=
+  sec-websocket-accept: 2y5NiPLlw/7wj354bJiJsux1IsQ=
   access-control-allow-origin: https://static-dash-frontend.onrender.com
   vary: origin, access-control-request-method, access-control-request-headers
 replay: 3 levels, 15 candles
 candle: source=synthetic close=3439.4875271016076
 levels: PW poc=3416.1949999999997
 handshake: HTTP/1.1 101 Switching Protocols
-  sec-websocket-accept: 6CSL1gK5p/oCUl5+N8M+adpyLaQ=
+  sec-websocket-accept: y0Zpcx+rm2tpY/BptTKLT5T22sg=
   access-control-allow-origin: https://static-dash-frontend.onrender.com
   vary: origin, access-control-request-method, access-control-request-headers
 trade fan-out: Node3 TradeEvent reached the trades subscriber unchanged
@@ -368,17 +368,17 @@ WS CHECK PASSED
 ECON AUDIO CHECK OK
 
 --- engine log: session/level/calendar/CORS lines ---
-2026-10-05T15:16:21.651084Z  INFO xauusd_engine: PW: poc=3416.195 vah=3431.000 val=3399.040 direction=neutral
-2026-10-05T15:16:21.651094Z  INFO xauusd_engine: PS: poc=3453.265 vah=3456.830 val=3434.980 direction=neutral
-2026-10-05T15:16:21.651097Z  INFO xauusd_engine: SWING_BEAR: poc=3460.755 vah=3463.380 val=3442.590 direction=bearish
-2026-10-05T15:16:21.651318Z  INFO xauusd_engine::ws_server: CORS: browser access to the REST API allowed for this origin origin=https://static-dash-frontend.onrender.com
-2026-10-05T15:16:21.651505Z  INFO xauusd_engine: Listening on 0.0.0.0:3000 — /health /status /levels /candles /tick-volume /calendar /ai /ws
-2026-10-05T15:16:21.695641Z  INFO xauusd_engine::calendar: Calendar: 79 events from direct feed
-2026-10-05T15:16:22.233753Z  INFO xauusd_engine::ws_server: WS session sess-1791213382233746424 opened
-2026-10-05T15:16:22.233866Z  INFO xauusd_engine::ws_server: WS session sess-1791213382233746424 subscribed to ["candle", "levels", "trades"]
-2026-10-05T15:16:22.274751Z  INFO xauusd_engine::ws_server: WS session sess-1791213382274747655 opened
-2026-10-05T15:16:22.274898Z  INFO xauusd_engine::ws_server: WS session sess-1791213382274747655 subscribed to ["trades"]
-2026-10-05T15:16:22.315170Z  INFO xauusd_engine::ws_server: WS session sess-1791213382233746424 disconnected
-2026-10-05T15:16:22.315222Z  INFO xauusd_engine::ws_server: WS session sess-1791213382274747655 disconnected
+2026-10-05T15:22:00.316246Z  INFO xauusd_engine: PW: poc=3416.195 vah=3431.000 val=3399.040 direction=neutral
+2026-10-05T15:22:00.316257Z  INFO xauusd_engine: PS: poc=3453.265 vah=3456.830 val=3434.980 direction=neutral
+2026-10-05T15:22:00.316260Z  INFO xauusd_engine: SWING_BEAR: poc=3460.755 vah=3463.380 val=3442.590 direction=bearish
+2026-10-05T15:22:00.316473Z  INFO xauusd_engine::ws_server: CORS: browser access to the REST API allowed for this origin origin=https://static-dash-frontend.onrender.com
+2026-10-05T15:22:00.316599Z  INFO xauusd_engine: Listening on 0.0.0.0:3000 — /health /status /levels /candles /tick-volume /calendar /ai /ws
+2026-10-05T15:22:00.388460Z  INFO xauusd_engine::calendar: Calendar: 79 events from direct feed
+2026-10-05T15:22:00.868929Z  INFO xauusd_engine::ws_server: WS session sess-1791213720868923110 opened
+2026-10-05T15:22:00.869021Z  INFO xauusd_engine::ws_server: WS session sess-1791213720868923110 subscribed to ["candle", "levels", "trades"]
+2026-10-05T15:22:00.909958Z  INFO xauusd_engine::ws_server: WS session sess-1791213720909955704 opened
+2026-10-05T15:22:00.910029Z  INFO xauusd_engine::ws_server: WS session sess-1791213720909955704 subscribed to ["trades"]
+2026-10-05T15:22:00.950533Z  INFO xauusd_engine::ws_server: WS session sess-1791213720868923110 disconnected
+2026-10-05T15:22:00.950576Z  INFO xauusd_engine::ws_server: WS session sess-1791213720909955704 disconnected
 
 SMOKE TEST PASSED
