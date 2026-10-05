@@ -32,8 +32,9 @@ use chrono::Utc;
 
 use crate::types::{VpCandle, VpLevels};
 
-/// Keep the complete fixed 2,000-candle Sifting seed (about 21 days of 15m
-/// bars) plus room for live closes and session/week boundaries.
+/// Keep the complete fixed 2,000-candle Sifting 15m swing seed (about 21
+/// days) plus room for live closes and session/week boundaries. The 1m profile
+/// seed is shorter, spanning the previous week through the current minute.
 const RETAIN_MS: i64 = 35 * 24 * 60 * 60 * 1000;
 
 pub struct VolumeProfileEngine {
@@ -57,7 +58,13 @@ pub struct VolumeProfileEngine {
     /// which skips over empty weekend/holiday sessions — so each close is
     /// detected exactly once and empty sessions don't retrigger every tick.
     last_close_seen: Option<i64>,
-    candles: Vec<VpCandle>,
+    /// Fine-grained bars used for time-window volume profiles (PW/PS/CW).
+    /// Production seeds this with 1m bars and continues with live 1m bars;
+    /// legacy/offline callers may still provide 15m bars.
+    profile_candles: Vec<VpCandle>,
+    /// 15m bars used for the directional swing profile, kept independent of
+    /// the finer profile bars so its pivot sensitivity does not change.
+    swing_candles: Vec<VpCandle>,
 }
 
 impl VolumeProfileEngine {
@@ -71,32 +78,71 @@ impl VolumeProfileEngine {
             cw_session_end: None,
             cw_week_start: None,
             last_close_seen: None,
-            candles: Vec::new(),
+            profile_candles: Vec::new(),
+            swing_candles: Vec::new(),
         }
     }
 
-    fn upsert_candle(&mut self, candle: VpCandle) {
-        if let Some(existing) = self.candles.iter_mut().find(|c| c.time == candle.time) {
-            *existing = candle;
-        } else {
-            self.candles.push(candle);
-        }
-        self.candles.sort_by_key(|c| c.time);
+    fn upsert_profile_candle(&mut self, candle: VpCandle) {
+        upsert_candle(&mut self.profile_candles, candle);
     }
 
-    /// Add or replace one candle and recompute all profiles.
+    fn upsert_swing_candle(&mut self, candle: VpCandle) {
+        upsert_candle(&mut self.swing_candles, candle);
+    }
+
+    /// Add or replace one legacy candle in both the time-window and swing
+    /// inputs. Production can ingest 1m profile bars and 15m swing bars
+    /// independently through the dedicated methods below.
     pub fn ingest_candle(&mut self, candle: VpCandle) {
-        self.upsert_candle(candle);
+        self.upsert_profile_candle(candle.clone());
+        self.upsert_swing_candle(candle);
         self.recompute(Utc::now().timestamp_millis());
     }
 
-    /// Seed the engine in one pass. This avoids recomputing a 2,000-candle
-    /// history 2,000 times during cold start.
+    /// Seed the engine in one pass with a single candle resolution.
     pub fn ingest_candles(&mut self, candles: Vec<VpCandle>) {
-        for candle in candles {
-            self.upsert_candle(candle);
-        }
+        self.ingest_history(candles.clone(), candles);
+    }
+
+    /// Seed independent profile and swing histories, then compute once. This
+    /// avoids caching an empty CW snapshot between two seed operations.
+    pub fn ingest_history(
+        &mut self,
+        profile_candles: Vec<VpCandle>,
+        swing_candles: Vec<VpCandle>,
+    ) {
+        upsert_candles(&mut self.profile_candles, profile_candles);
+        upsert_candles(&mut self.swing_candles, swing_candles);
         self.recompute(Utc::now().timestamp_millis());
+    }
+
+    /// Add/replace one fine-grained candle for PW/PS/CW only.
+    pub fn ingest_profile_candle(&mut self, candle: VpCandle) {
+        self.upsert_profile_candle(candle);
+        self.recompute_time_windows(Utc::now().timestamp_millis());
+    }
+
+    /// Seed PW/PS/CW from fine-grained bars in one pass.
+    pub fn ingest_profile_candles(&mut self, candles: Vec<VpCandle>) {
+        upsert_candles(&mut self.profile_candles, candles);
+        self.recompute_time_windows(Utc::now().timestamp_millis());
+    }
+
+    /// Add/replace a 15m candle for the swing profile only.
+    pub fn ingest_swing_candle(&mut self, candle: VpCandle) {
+        self.upsert_swing_candle(candle);
+        self.swing_candles
+            .retain(|c| c.time >= Utc::now().timestamp_millis() - RETAIN_MS);
+        self.swing_levels = swing::compute_swing(&self.swing_candles);
+    }
+
+    /// Seed the swing detector independently from the profile-history bars.
+    pub fn ingest_swing_candles(&mut self, candles: Vec<VpCandle>) {
+        upsert_candles(&mut self.swing_candles, candles);
+        self.swing_candles
+            .retain(|c| c.time >= Utc::now().timestamp_millis() - RETAIN_MS);
+        self.swing_levels = swing::compute_swing(&self.swing_candles);
     }
 
     /// Recompute every window against `now_ms`.
@@ -109,6 +155,11 @@ impl VolumeProfileEngine {
     ///       remains frozen during the in-progress day and resets each week.
     /// SWING = the most recent completed pivot-to-pivot directional leg.
     pub fn recompute(&mut self, now_ms: i64) {
+        self.recompute_time_windows(now_ms);
+        self.swing_levels = swing::compute_swing(&self.swing_candles);
+    }
+
+    fn recompute_time_windows(&mut self, now_ms: i64) {
         let week_start = weekly::most_recent_week_start_utc(now_ms);
         let (pw_start, pw_end) = weekly::previous_week_bounds_utc(now_ms);
 
@@ -116,10 +167,13 @@ impl VolumeProfileEngine {
         // Keep out-of-order candles in storage; the individual windows apply
         // their own time bounds. This also lets a historical backfill arrive
         // before a caller advances its synthetic/test clock.
-        self.candles.retain(|c| c.time >= retain_floor);
+        self.profile_candles
+            .retain(|c| c.time >= retain_floor);
+        self.swing_candles
+            .retain(|c| c.time >= now_ms - RETAIN_MS);
 
         let pw: Vec<_> = self
-            .candles
+            .profile_candles
             .iter()
             .filter(|c| c.time >= pw_start && c.time < pw_end)
             .cloned()
@@ -135,7 +189,7 @@ impl VolumeProfileEngine {
         if cw_needs_refresh {
             if completed_day_end > week_start {
                 let cw: Vec<_> = self
-                    .candles
+                    .profile_candles
                     .iter()
                     .filter(|c| c.time >= week_start && c.time < completed_day_end)
                     .cloned()
@@ -171,14 +225,14 @@ impl VolumeProfileEngine {
             // Preserve the Sunday 18:00 NY start timestamp in `start`, and
             // expose the boundary candle's open separately as a price level.
             levels.sunday_open = self
-                .candles
+                .profile_candles
                 .iter()
                 .find(|c| c.time == pw_start && c.open.is_finite())
                 .map(|c| c.open);
         }
         // ---- Previous session (rolls at every session close) ----
         let (ps_start, ps_end, ps_candles) =
-            session::previous_session_slice(&self.candles, now_ms);
+            session::previous_session_slice(&self.profile_candles, now_ms);
         self.ps_levels = histogram::compute(
             &ps_candles,
             "PS",
@@ -191,8 +245,6 @@ impl VolumeProfileEngine {
         );
         self.ps_session_end = Some(ps_end);
         self.last_close_seen = Some(completed_day_end);
-
-        self.swing_levels = swing::compute_swing(&self.candles);
     }
 
     /// Recompute only when the session boundary has moved past the close
@@ -203,7 +255,7 @@ impl VolumeProfileEngine {
         if self.last_close_seen == Some(current_end) {
             return false;
         }
-        self.recompute(now_ms);
+        self.recompute_time_windows(now_ms);
         true
     }
 
@@ -213,7 +265,7 @@ impl VolumeProfileEngine {
     }
 
     pub fn candle_count(&self) -> usize {
-        self.candles.len()
+        self.profile_candles.len()
     }
 
     /// Most recent 18:00 America/New_York boundary at or before `now_ms`.
@@ -252,6 +304,22 @@ impl VolumeProfileEngine {
     }
 }
 
+fn upsert_candle(candles: &mut Vec<VpCandle>, candle: VpCandle) {
+    match candles.binary_search_by_key(&candle.time, |existing| existing.time) {
+        Ok(index) => candles[index] = candle,
+        Err(index) => candles.insert(index, candle),
+    }
+}
+
+fn upsert_candles(candles: &mut Vec<VpCandle>, incoming: Vec<VpCandle>) {
+    let mut by_time: std::collections::BTreeMap<i64, VpCandle> =
+        candles.drain(..).map(|candle| (candle.time, candle)).collect();
+    for candle in incoming {
+        by_time.insert(candle.time, candle);
+    }
+    *candles = by_time.into_values().collect();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,11 +354,11 @@ mod tests {
     fn fill(engine: &mut VolumeProfileEngine, from: i64, to: i64, low: f64, high: f64) {
         let mut t = from;
         while t < to {
-            engine.candles.push(candle(t, low, high, 100.0));
+            engine.profile_candles.push(candle(t, low, high, 100.0));
             t += 15 * MIN;
         }
-        engine.candles.sort_by_key(|c| c.time);
-        engine.candles.dedup_by_key(|c| c.time);
+        engine.profile_candles.sort_by_key(|c| c.time);
+        engine.profile_candles.dedup_by_key(|c| c.time);
     }
 
     /// The actual bug report: PS must change when a session closes.
@@ -457,7 +525,7 @@ mod tests {
         let (start, end) = VolumeProfileEngine::previous_week_bounds_utc(now);
         fill(&mut e, start, end, 3100.0, 3110.0);
         let sunday_open = 3107.25;
-        e.candles
+        e.profile_candles
             .iter_mut()
             .find(|c| c.time == start)
             .expect("exact Sunday 18:00 candle")
@@ -471,6 +539,22 @@ mod tests {
         let wire = serde_json::to_value(pw).expect("serialize PW levels");
         assert_eq!(wire["window"], "PW");
         assert_eq!(wire["sunday_open"], sunday_open);
+    }
+
+    #[test]
+    fn time_profiles_and_swing_can_use_separate_history_resolutions() {
+        let now = Utc::now().timestamp_millis();
+        let (pw_start, _) = VolumeProfileEngine::previous_week_bounds_utc(now);
+        let mut e = VolumeProfileEngine::new();
+        e.ingest_history(
+            vec![candle(pw_start, 4155.0, 4156.0, 10.0)],
+            vec![candle(now - 15 * MIN, 4160.0, 4161.0, 10.0)],
+        );
+
+        assert_eq!(e.profile_candles.len(), 1);
+        assert_eq!(e.swing_candles.len(), 1);
+        assert!(e.pw_levels.is_some());
+        assert!(e.swing_levels.is_none());
     }
 
     #[test]

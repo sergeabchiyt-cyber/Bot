@@ -23,7 +23,7 @@ There is no `/` route — the engine is API-only.
 | `/health`  | `ok`                                                |
 | `/status`  | JSON snapshot of every feed's liveness              |
 | `/levels`  | Current PW/PS/CW PoC/VaH/VaL levels (+ window `start`/`end`) |
-| `/candles` | SiftingIO 15m candles used by the chart and VP (latest fixed seed + live closes); `volume` = tick count |
+| `/candles` | SiftingIO 15m candles used by the chart/swing profile (latest fixed seed + live closes); `volume` = tick count |
 | `/tick-volume` | Live tick-volume bars built since boot (up/down/flat split, tick rate); newest may be in progress |
 | `/calendar`| Latest economic calendar snapshot (`source`, `count`, `events`) |
 | `/ai`      | What the econ news delivered today: Node3's `transcript`/`sentiment` frames (+ last health), filtered to the current UTC day |
@@ -121,7 +121,7 @@ PORT=3000
 BINANCE_SYMBOL=XAUUSDT
 SIFTING_API_KEY=            SIFTING_SYMBOL=XAUUSD
 SIFTING_WS_URL=             SIFTING_HIST_URL=https://api.sifting.io
-# Sifting REST VP seed is always exactly 2,000 15m candles; no Binance REST fallback.
+# Sifting REST chart/swing seed is exactly 2,000 15m candles; no Binance price fallback.
 FEED_BINANCE=on|off|auto    FEED_BYBIT=on|off|auto      FEED_OKX=on|off|auto
 FEED_BITGET=on|off|auto     FEED_GATE=on|off|auto       FEED_KRAKEN=on|off|auto
 FEED_ALLTICK=on|off|auto    FEED_ITICK=on|off|auto      FEED_SIFTING=on|off|auto
@@ -172,12 +172,15 @@ Tool names are discovered via `tools/list` (`browser_navigate` +
 | `CW` | Current week (from the week open after Friday's 18:00 close) through the last completed 18:00 NY daily session | at each daily close; first snapshot when Monday closes; reset at the new week boundary |
 | `SWING_BULL` / `SWING_BEAR` | Most recent confirmed directional leg | on every closed candle |
 
-The VP seed is one SiftingIO REST request for **exactly 2,000** latest 15m
-candles. A short or invalid page is rejected rather than padded or replaced
-with Binance prices. SiftingIO's live WebSocket supplies the current chart
-candle and completed candle updates (volume = tick count, the same unit as the
-REST seed's `v`); Binance remains isolated to the aggTrade
-order-flow analyzer.
+The chart and swing seed is one SiftingIO REST request for **exactly 2,000**
+latest 15m candles; a short or invalid page is rejected rather than padded or
+replaced with Binance prices. PW/PS/CW use paginated **1m** SiftingIO bars from
+the PW start through the most recently completed minute, so weekly profiles
+don't smear each 15m candle's entire volume across its full wick range. Live
+Sifting ticks are folded into completed 1m profile bars and 15m chart/swing
+bars. If the 1m history does not cover the PW window, the engine logs a warning
+and falls back to the 15m profile input; Binance remains isolated to the
+aggTrade order-flow analyzer.
 
 `PS` is not a boot-time constant. A 30-second ticker compares the current
 18:00 America/New_York session boundary against the last close already seen;
@@ -200,11 +203,14 @@ profile anchored from the best high to the best low; the most recent low
 followed by a high creates a bullish profile anchored from the best low to the
 best high. Equal highs/lows still count, anchoring at their most recent touch,
 and a short or trend-straight history falls back to a leg bounded to the most
-recent session's bars rather than spanning stale history. Candle volume is
-allocated to bins by actual high/low overlap, then POC and the 70% VA are
-expanded from the POC. Each `VpLevels` payload carries `start` / `end`
-(epoch ms), `direction`, and swing anchor prices so clients can audit exactly
-which move produced the levels.
+recent session's bars rather than spanning stale history. Time-window profiles
+use 1m candle volume allocated to fixed, price-aligned $0.50 rows by each
+candle's actual high/low overlap, then POC and the 70% VA are expanded from the
+POC. Each `VpLevels` payload carries `start` / `end` (epoch ms), `direction`,
+and swing anchor prices so clients can audit exactly which move produced the
+levels. TradingView parity still requires matching its symbol/feed, session
+anchors, row size, and value-area settings; lower-timeframe bars reduce the
+15m approximation error but do not turn OHLC bars into true tick-at-price data.
 
 The implementation is split by window for accuracy: `volume_profile/session.rs`
 (18:00 → 18:00 sessions), `volume_profile/weekly.rs` (week anchors),

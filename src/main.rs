@@ -74,6 +74,26 @@ fn near_level(levels: &[types::VpLevels], price: f64, pips: f64) -> bool {
     false
 }
 
+fn same_level_values(a: &types::VpLevels, b: &types::VpLevels) -> bool {
+    a.window == b.window
+        && a.poc == b.poc
+        && a.vah == b.vah
+        && a.val == b.val
+        && a.start == b.start
+        && a.end == b.end
+        && a.direction == b.direction
+        && a.swing_high == b.swing_high
+        && a.swing_low == b.swing_low
+        && a.sunday_open == b.sunday_open
+}
+
+fn level_changed(previous: &[types::VpLevels], next: &types::VpLevels) -> bool {
+    previous
+        .iter()
+        .find(|old| old.window == next.window)
+        .is_none_or(|old| !same_level_values(old, next))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -88,6 +108,9 @@ async fn main() -> anyhow::Result<()> {
     // Sifting is the sole live price/candle source. Binance remains on the
     // separate aggTrade channel below for order flow only.
     let (sifting_candle_tx, mut sifting_candle_rx) = mpsc::channel::<VpCandle>(256);
+    // Fine 1m bars feed PW/PS/CW. The chart and swing detector stay on 15m.
+    let (sifting_profile_candle_tx, mut sifting_profile_candle_rx) =
+        mpsc::channel::<VpCandle>(1024);
     // Closed-candle fan-out for the execution trigger.
     let (exec_tx, mut exec_rx) = mpsc::channel::<types::VpCandle>(64);
 
@@ -106,10 +129,12 @@ async fn main() -> anyhow::Result<()> {
     })));
 
     // ---------- Cold-start history ----------
-    // SiftingIO is the only historical price source. The REST adapter rejects
-    // any response other than exactly 2,000 15m candles, so Binance's futures
-    // price series can never leak into the VP calculation.
+    // Keep the 15m chart/swing seed, but use 1m bars for the time-window
+    // profiles. Reconstructing a weekly distribution from 15m OHLC ranges
+    // smears each bar's volume over much more price action than TradingView's
+    // intrabar profile does.
     let mut seeded = false;
+    let mut profile_uses_1m = false;
     if !config.sifting_api_key.is_empty() {
         match sifting_rest::fetch_sifting_klines_15m(
             &config.sifting_hist_url,
@@ -118,18 +143,65 @@ async fn main() -> anyhow::Result<()> {
         )
         .await
         {
-            Ok(candles) => {
+            Ok(candles_15m) => {
                 debug_assert_eq!(
-                    candles.len(),
+                    candles_15m.len(),
                     sifting_rest::SIFTING_HISTORY_CANDLE_LIMIT
                 );
                 info!(
-                    "Seeded exactly {} historical 15M candles from SiftingIO",
-                    candles.len()
+                    "Seeded exactly {} historical 15M chart/swing candles from SiftingIO",
+                    candles_15m.len()
                 );
-                *cached_candles.write().await = candles.clone();
+                *cached_candles.write().await = candles_15m.clone();
+
+                let now_ms = chrono::Utc::now().timestamp_millis();
+                let (profile_start, profile_end) =
+                    VolumeProfileEngine::previous_week_bounds_utc(now_ms);
+                let profile_end_exclusive = now_ms - now_ms.rem_euclid(60_000);
+                let fine_candles = sifting_rest::fetch_sifting_profile_candles_1m(
+                    &config.sifting_hist_url,
+                    &config.sifting_api_key,
+                    &config.sifting_symbol,
+                    profile_start,
+                    profile_end_exclusive,
+                )
+                .await;
+
+                let profile_seed = match fine_candles {
+                    Ok(candles) => {
+                        // Allow normal broker maintenance gaps around the NY
+                        // week-open/close, but reject a cursor/plan-limited page
+                        // that only covers a fragment of the prior week.
+                        const BOUNDARY_TOLERANCE_MS: i64 = 2 * 60 * 60_000;
+                        let covers_previous_week = candles.first().is_some_and(|first| {
+                            first.time <= profile_start + BOUNDARY_TOLERANCE_MS
+                        }) && candles.last().is_some_and(|last| {
+                            last.time >= profile_end - BOUNDARY_TOLERANCE_MS
+                        });
+                        if covers_previous_week {
+                            info!(
+                                "Seeded {} historical 1M profile candles from SiftingIO (PW coverage verified)",
+                                candles.len()
+                            );
+                            profile_uses_1m = true;
+                            candles
+                        } else {
+                            warn!(
+                                "SiftingIO 1M history is empty or does not cover the complete PW window; using 15M bars for profiles"
+                            );
+                            candles_15m.clone()
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            "SiftingIO 1M profile history fetch failed; using 15M bars for profiles: {e}"
+                        );
+                        candles_15m.clone()
+                    }
+                };
+
                 let mut vp_w = vp.write().await;
-                vp_w.ingest_candles(candles);
+                vp_w.ingest_history(profile_seed, candles_15m);
                 let levels = vp_w.all_levels();
                 drop(vp_w);
                 *cached_levels.write().await = levels;
@@ -176,11 +248,21 @@ async fn main() -> anyhow::Result<()> {
         let symbol = config.sifting_symbol.clone();
         let bc = bc_tx.clone();
         let candle_tx = sifting_candle_tx.clone();
+        let profile_candle_tx = profile_uses_1m.then(|| sifting_profile_candle_tx.clone());
         let store = tick_volume.clone();
         let st = status.clone();
         tokio::spawn(async move {
-            if let Err(e) =
-                sifting_ws::run_sifting_stream(url, key, symbol, bc, candle_tx, store, st).await
+            if let Err(e) = sifting_ws::run_sifting_stream(
+                url,
+                key,
+                symbol,
+                bc,
+                candle_tx,
+                profile_candle_tx,
+                store,
+                st,
+            )
+            .await
             {
                 tracing::error!("Sifting stream terminated: {e}");
             }
@@ -326,16 +408,17 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // ---------- Sifting candle consumer (chart + VP + execution fan-out) ----------
-    // SiftingIO broadcasts in-progress candles directly from the WS adapter;
-    // completed candles arrive here and are the only live price candles that
-    // can update the VP. No Binance kline/REST price path remains.
+    // ---------- Sifting 15m candle consumer (chart + swing + execution) ----------
+    // SiftingIO broadcasts in-progress chart candles directly from the WS
+    // adapter. Closed 15m candles keep the chart and swing detector current;
+    // time-window profiles use the separate 1m stream below when available.
     {
         let vp = vp.clone();
         let cached = cached_levels.clone();
         let cached_c = cached_candles.clone();
         let bc = bc_tx.clone();
         let exec = exec_tx.clone();
+        let profile_uses_1m = profile_uses_1m;
         tokio::spawn(async move {
             while let Some(candle) = sifting_candle_rx.recv().await {
                 {
@@ -349,22 +432,48 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
 
+                let previous_levels = cached.read().await.clone();
                 let mut vp_w = vp.write().await;
-                let previous_cw = vp_w.cw_levels.clone();
-                vp_w.ingest_candle(candle.clone());
+                if profile_uses_1m {
+                    vp_w.ingest_swing_candle(candle.clone());
+                } else {
+                    // When minute history is unavailable, keep the legacy
+                    // 15m profile running rather than mixing resolutions.
+                    vp_w.ingest_candle(candle.clone());
+                }
                 let levels = vp_w.all_levels();
                 drop(vp_w);
                 *cached.write().await = levels.clone();
                 for lvl in levels {
-                    // CW is a daily snapshot. Do not redraw/rebroadcast the
-                    // same CW values for every 15m candle; it is emitted when
-                    // the NY daily close creates a new snapshot.
-                    if lvl.window == "CW" && previous_cw.as_ref() == Some(&lvl) {
-                        continue;
+                    if level_changed(&previous_levels, &lvl) {
+                        let _ = bc.send(WsFrame::Levels { data: lvl });
                     }
-                    let _ = bc.send(WsFrame::Levels { data: lvl });
                 }
                 let _ = exec.send(candle).await;
+            }
+        });
+    }
+
+    // ---------- Fine 1m profile consumer ----------
+    // The finer live bars replace the old 15m OHLC-range approximation for
+    // PW/PS/CW, while the chart payload remains 15m.
+    if profile_uses_1m {
+        let vp = vp.clone();
+        let cached = cached_levels.clone();
+        let bc = bc_tx.clone();
+        tokio::spawn(async move {
+            while let Some(candle) = sifting_profile_candle_rx.recv().await {
+                let previous_levels = cached.read().await.clone();
+                let mut vp_w = vp.write().await;
+                vp_w.ingest_profile_candle(candle);
+                let levels = vp_w.all_levels();
+                drop(vp_w);
+                *cached.write().await = levels.clone();
+                for lvl in levels {
+                    if level_changed(&previous_levels, &lvl) {
+                        let _ = bc.send(WsFrame::Levels { data: lvl });
+                    }
+                }
             }
         });
     }
