@@ -285,6 +285,14 @@ the chart:
 * POC = the centre of the heaviest row, VaH/VaL = the top/bottom edges of the
   outermost value-area rows — exactly where the FRVP draws its lines.
 
+A **Fixed Range** profile is drawn by hand, so its window is whatever the
+chart selected — `GET /vp?start=<epoch-ms>&end=<epoch-ms>` profiles exactly
+that range from the retained 1m history (`window=CUSTOM`) and picks the input
+resolution from that range's own bar count, the same way TradingView does.
+An inverted range or a non-numeric bound is a 400; a range that reaches beyond
+the retained history is a 409 that reports the retained bounds, so a
+hand-copied timestamp from the chart cannot be mistaken for an engine fault.
+
 Different data feeds (SiftingIO spot ticks vs a broker's CFD feed) can still
 move the POC by a few ticks; matching the window, the row model and the input
 resolution removes the structural differences.

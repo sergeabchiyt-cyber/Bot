@@ -62,6 +62,26 @@ struct StoredProfile {
     input_bars: usize,
 }
 
+/// Why `GET /vp?start=&end=` could not return a profile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CustomRangeError {
+    /// Inverted range, or one longer than the retained history can supply.
+    Invalid,
+    /// Fewer than two fine bars of the requested range are still retained.
+    NotRetained,
+}
+
+impl CustomRangeError {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Invalid => "start must be before end, and the range at most 35 days",
+            Self::NotRetained => {
+                "the requested range has no retained 1m history to profile"
+            }
+        }
+    }
+}
+
 /// Full profile audit returned by `GET /vp`: every histogram row and the
 /// settings that produced it.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -400,6 +420,75 @@ impl VolumeProfileEngine {
             vah_row: hist.vah_index,
             histogram: hist.rows,
         })
+    }
+
+    /// Profile an arbitrary `[start, end)` range from the retained fine bars.
+    ///
+    /// This is the hand-selected Fixed Range Volume Profile case: the caller
+    /// (the chart) already knows the range it drew, so nothing about the
+    /// TradingView mapping changes — same row model, same lower-timeframe
+    /// ladder (picked from *this* range's bar count), same value-area rules.
+    /// It exists so an externally measured range can be reproduced here
+    /// instead of being approximated by one of the engine's own windows.
+    pub fn audit_custom_range(
+        &self,
+        start_ms: i64,
+        end_ms: i64,
+        rows_override: Option<usize>,
+    ) -> Result<VpAudit, CustomRangeError> {
+        if end_ms <= start_ms || end_ms - start_ms > RETAIN_MS {
+            return Err(CustomRangeError::Invalid);
+        }
+        let window_candles: Vec<VpCandle> = self
+            .profile_candles
+            .iter()
+            .filter(|c| c.time >= start_ms && c.time < end_ms)
+            .cloned()
+            .collect();
+        // One bar is a single price band with no distribution to speak of;
+        // TradingView needs at least two bars to draw a profile at all.
+        if window_candles.len() < 2 {
+            return Err(CustomRangeError::NotRetained);
+        }
+        let (input, interval) = timeframe::prepare_input(&window_candles, self.lower_tf);
+        let model = match rows_override {
+            Some(rows) => ProfileModel {
+                rows: rows.clamp(2, 5_000),
+                ..self.model
+            },
+            None => self.model,
+        };
+        let hist = histogram::histogram(&input, None, &model)
+            .ok_or(CustomRangeError::NotRetained)?;
+        Ok(VpAudit {
+            window: "CUSTOM".into(),
+            start: start_ms,
+            end: end_ms,
+            poc: hist.poc(),
+            vah: hist.vah(),
+            val: hist.val(),
+            row_mode: hist.model.row_mode.as_str().into(),
+            row_height: hist.row_height,
+            rows: hist.rows.len(),
+            range_low: hist.range_low,
+            range_high: hist.range_high,
+            va_pct: hist.model.va_pct,
+            total_volume: hist.total_volume,
+            input_interval: interval.into(),
+            input_bars: input.len(),
+            poc_row: hist.poc_index,
+            val_row: hist.val_index,
+            vah_row: hist.vah_index,
+            histogram: hist.rows,
+        })
+    }
+
+    /// First/last retained fine-bar timestamps, for a "range not retained"
+    /// error that says what *is* available.
+    pub fn retained_bounds(&self) -> Option<(i64, i64)> {
+        let first = self.profile_candles.first()?.time;
+        let last = self.profile_candles.last()?.time;
+        Some((first, last))
     }
 
     /// Recompute only when the session boundary has moved past the close
@@ -760,5 +849,57 @@ mod tests {
         e.ingest_candle(candle(time, 200.0, 201.0, 10.0));
         assert_eq!(e.candle_count(), 1);
         assert!(e.swing_levels.is_none());
+    }
+
+    // ---- hand-selected ranges (the Fixed Range Volume Profile case) -------
+
+    #[test]
+    fn custom_range_profiles_an_arbitrary_window() {
+        let mut e = VolumeProfileEngine::new();
+        let base = 1_700_000_000_000 - (1_700_000_000_000 % (15 * MIN));
+        fill(&mut e, base, base + 24 * 60 * MIN, 4000.0, 4040.0);
+
+        // Two hours in the middle of the retained history.
+        let start = base + 6 * 60 * MIN;
+        let end = start + 2 * 60 * MIN;
+        let audit = e
+            .audit_custom_range(start, end, None)
+            .expect("two hours of 15m bars");
+
+        assert_eq!(audit.window, "CUSTOM");
+        assert_eq!((audit.start, audit.end), (start, end));
+        assert_eq!(audit.input_interval, "15m"); // the stored bars already are
+        assert_eq!(audit.input_bars, 8); // 2h / 15m
+        assert!(audit.range_low >= 4000.0 && audit.range_high <= 4040.0);
+        assert!(audit.val <= audit.poc && audit.poc <= audit.vah);
+        assert_eq!(audit.rows, audit.histogram.len());
+        assert!(audit.rows >= 2);
+
+        // Rows mode derives the grid from the range: asking for fewer rows
+        // must never produce a finer one.
+        let coarse = e.audit_custom_range(start, end, Some(4)).expect("4 rows");
+        assert!(coarse.row_height > audit.row_height);
+    }
+
+    #[test]
+    fn custom_range_rejects_inverted_and_unretained_ranges() {
+        let mut e = VolumeProfileEngine::new();
+        let base = 1_700_000_000_000 - (1_700_000_000_000 % (15 * MIN));
+        fill(&mut e, base, base + 2 * 60 * MIN, 4000.0, 4001.0);
+
+        assert_eq!(
+            e.audit_custom_range(base + MIN, base, None).unwrap_err(),
+            CustomRangeError::Invalid
+        );
+        // A range reaching years back has no retained bars to profile.
+        let err = e
+            .audit_custom_range(
+                base - 400 * 24 * 60 * MIN,
+                base - 399 * 24 * 60 * MIN,
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(err, CustomRangeError::NotRetained);
+        assert_eq!(e.retained_bounds(), Some((base, base + 105 * MIN)));
     }
 }
