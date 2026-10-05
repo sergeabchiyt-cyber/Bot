@@ -1,0 +1,52 @@
+name: deriv-probe
+
+# Records what Deriv's Options API currently offers for the underlying Node 3
+# trades (`frxXAUUSD`) and which proposal shapes it accepts, straight from
+# Deriv's public WebSockets:
+#
+#   * the current API public socket (`/trading/v1/options/ws/public`), which
+#     speaks the same schema as the OTP sockets Node 3 buys on;
+#   * the legacy `/websockets/v3` socket used for `a1-...` token failover.
+#
+# It is the evidence behind the barrier fix: an intraday CALL/PUT on XAUUSD is
+# an at-the-money Rise/Fall contract, so a non-zero `barrier` is rejected with
+# `ContractBuyValidationError: Invalid barrier.` (subcode `InvalidBarrier`).
+# Runs on a GitHub runner because the development sandbox cannot reach Deriv.
+#
+# Trigger: push a change to the probe, or run it by hand from the Actions tab.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "ci/deriv_probe.py"
+      - ".github/workflows/deriv-probe.yml"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install probe dependencies
+        run: python3 -m pip install --quiet "websockets>=12,<16"
+
+      - name: Probe Deriv contract offerings and proposal shapes
+        run: |
+          set -o pipefail
+          python3 ci/deriv_probe.py 2>&1 | tee /tmp/deriv-probe.log
+
+      - name: Step summary
+        if: always()
+        run: |
+          {
+            echo "### Deriv options probe — \`frxXAUUSD\`"
+            echo
+            echo '```'
+            cat /tmp/deriv-probe.log 2>/dev/null || echo "(probe produced no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
