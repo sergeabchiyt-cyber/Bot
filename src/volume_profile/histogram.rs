@@ -51,7 +51,7 @@ pub fn compute(
         return None;
     }
 
-    let (lo, hi) = range.unwrap_or_else(|| {
+    let (raw_lo, raw_hi) = range.unwrap_or_else(|| {
         let lo = valid
             .iter()
             .map(|c| c.low)
@@ -62,6 +62,14 @@ pub fn compute(
             .fold(f64::NEG_INFINITY, f64::max);
         (lo, hi)
     });
+    if !raw_lo.is_finite() || !raw_hi.is_finite() || raw_hi <= raw_lo {
+        return None;
+    }
+    // Keep row boundaries on a stable price grid. Anchoring each profile's
+    // first row to its exact low shifts all rows by a different fractional
+    // amount each week, making otherwise identical profiles incomparable.
+    let lo = (raw_lo / BIN_SIZE).floor() * BIN_SIZE;
+    let hi = (raw_hi / BIN_SIZE).ceil() * BIN_SIZE;
     if !lo.is_finite() || !hi.is_finite() || hi <= lo {
         return None;
     }
@@ -212,6 +220,19 @@ mod tests {
             lv.poc
         );
         assert!(lv.val <= lv.poc && lv.poc <= lv.vah);
+    }
+
+    #[test]
+    fn price_rows_are_aligned_to_the_fixed_half_dollar_grid() {
+        let candles = vec![
+            candle(1_700_000_000_000, 100.10, 100.30, 10.0),
+            candle(1_700_000_000_001, 100.10, 100.30, 10.0),
+        ];
+        let levels = compute(&candles, "PW", 0, 1, None, "neutral", None, None)
+            .expect("aligned profile");
+        assert_eq!(levels.poc, 100.25);
+        assert_eq!(levels.val, 100.0);
+        assert_eq!(levels.vah, 100.5);
     }
 
     #[test]

@@ -14,6 +14,7 @@ use crate::types::{TickVolumeBar, VpCandle, WsFrame};
 const PING_INTERVAL_SECS: u64 = 30; // Sifting closes silent connections after 90s
 const RECONNECT_SECS: u64 = 5;
 const BUCKET_MS: i64 = 15 * 60 * 1000; // 15-minute chart candles
+const PROFILE_BUCKET_MS: i64 = 60 * 1000; // 1-minute profile candles
 const RATE_WINDOW_MS: i64 = 10_000; // rolling window for `ticks_per_sec`
 const SOURCE: &str = "sifting";
 
@@ -35,14 +36,12 @@ impl TickDir {
     }
 }
 
-/// One 15m bucket being built from ticks.
+/// One interval bucket being built from Sifting ticks (1m or 15m).
 ///
 /// `ticks` is the bucket's volume. SiftingIO's historical bars define `v` as
-/// "the number of price updates in the bucket", so live candles count updates
-/// too. That keeps the 2,000-bar REST seed and the live edge in one unit, for
-/// both the chart's volume pane and the volume profile. (Summing `P`, the
-/// last-trade size, used to mix a size-weighted live edge into a tick-count
-/// history.)
+/// "the number of price updates in the bucket", so both the 15m chart candles
+/// and 1m profile candles count updates too. Summing `P` (last-trade size)
+/// would mix size-weighted live bars into the historical tick-count series.
 struct Aggregator {
     start_time: i64,
     open: f64,
@@ -126,6 +125,7 @@ impl Aggregator {
 #[derive(Debug)]
 struct TickOutcome {
     closed: Option<(VpCandle, TickVolumeBar)>,
+    closed_profile: Option<VpCandle>,
     live: (VpCandle, TickVolumeBar),
 }
 
@@ -134,6 +134,7 @@ struct TickOutcome {
 /// bucket's close.
 struct TickState {
     agg: Option<Aggregator>,
+    profile_agg: Option<Aggregator>,
     last_price: Option<f64>,
     /// `(t, p, P)` of the last accepted tick, to drop the cached snapshot
     /// tick Sifting replays on every (re)subscribe.
@@ -147,6 +148,7 @@ impl TickState {
     fn new() -> Self {
         Self {
             agg: None,
+            profile_agg: None,
             last_price: None,
             last_key: None,
             recent: VecDeque::new(),
@@ -169,11 +171,18 @@ impl TickState {
             return None;
         }
         let bucket = ts - ts.rem_euclid(BUCKET_MS);
-        if let Some(current) = self.agg.as_ref() {
-            if bucket < current.start_time {
-                debug!(ts, bucket, current = current.start_time, "late Sifting tick dropped");
-                return None;
-            }
+        let profile_bucket = ts - ts.rem_euclid(PROFILE_BUCKET_MS);
+        if self
+            .agg
+            .as_ref()
+            .is_some_and(|current| bucket < current.start_time)
+            || self
+                .profile_agg
+                .as_ref()
+                .is_some_and(|current| profile_bucket < current.start_time)
+        {
+            debug!(ts, bucket, profile_bucket, "late Sifting tick dropped");
+            return None;
         }
         self.last_key = Some(key);
 
@@ -181,8 +190,7 @@ impl TickState {
         self.last_price = Some(price);
 
         let mut closed = None;
-        let same_bucket = matches!(self.agg.as_ref(), Some(c) if c.start_time == bucket);
-        if same_bucket {
+        if matches!(self.agg.as_ref(), Some(c) if c.start_time == bucket) {
             if let Some(current) = self.agg.as_mut() {
                 current.update(price, ts, dir);
             }
@@ -193,6 +201,18 @@ impl TickState {
                 closed = Some((previous.candle(), previous.tick_volume(rate, true)));
             }
             self.agg = Some(Aggregator::new(bucket, price, ts, dir));
+        }
+
+        let mut closed_profile = None;
+        if matches!(self.profile_agg.as_ref(), Some(c) if c.start_time == profile_bucket) {
+            if let Some(current) = self.profile_agg.as_mut() {
+                current.update(price, ts, dir);
+            }
+        } else {
+            if let Some(previous) = self.profile_agg.take() {
+                closed_profile = Some(previous.candle());
+            }
+            self.profile_agg = Some(Aggregator::new(profile_bucket, price, ts, dir));
         }
 
         self.recent.push_back(ts);
@@ -210,6 +230,7 @@ impl TickState {
         let current = self.agg.as_ref().expect("aggregator was just set");
         Some(TickOutcome {
             closed,
+            closed_profile,
             live: (current.candle(), current.tick_volume(tps, false)),
         })
     }
@@ -225,8 +246,9 @@ impl TickState {
 /// Every accepted tick broadcasts the in-progress `candle` and its
 /// `tick_volume` bar. When a bucket rolls, the finished candle and a
 /// `closed: true` tick-volume bar go out first, and the candle is also sent to
-/// `candle_tx` so the backend updates its cached chart and VP (never from
-/// Binance price candles). Tick-volume bars are written to `tick_store`
+/// `candle_tx` so the backend updates its cached chart and swing profile.
+/// Closed 1m bars are sent to `profile_candle_tx` when fine profile history
+/// was available at startup. Tick-volume bars are written to `tick_store`
 /// before they're broadcast, so a client subscribing mid-bucket replays the
 /// live bar.
 pub async fn run_sifting_stream(
@@ -235,6 +257,7 @@ pub async fn run_sifting_stream(
     symbol: String,
     bc_tx: broadcast::Sender<WsFrame>,
     candle_tx: mpsc::Sender<VpCandle>,
+    profile_candle_tx: Option<mpsc::Sender<VpCandle>>,
     tick_store: TickVolumeStore,
     status: FeedStatus,
 ) -> anyhow::Result<()> {
@@ -298,6 +321,7 @@ pub async fn run_sifting_stream(
                                     &mut state,
                                     &bc_tx,
                                     &candle_tx,
+                                    profile_candle_tx.as_ref(),
                                     &tick_store,
                                 );
                             }
@@ -332,6 +356,7 @@ fn handle_text(
     state: &mut TickState,
     bc_tx: &broadcast::Sender<WsFrame>,
     candle_tx: &mpsc::Sender<VpCandle>,
+    profile_candle_tx: Option<&mpsc::Sender<VpCandle>>,
     tick_store: &TickVolumeStore,
 ) {
     let Some((price, ts, size)) = parse_tick(text, symbol) else {
@@ -340,6 +365,10 @@ fn handle_text(
     let Some(outcome) = state.on_tick(price, ts, size) else {
         return;
     };
+
+    if let (Some(candle), Some(profile_tx)) = (outcome.closed_profile, profile_candle_tx) {
+        let _ = profile_tx.try_send(candle);
+    }
 
     if let Some((candle, bar)) = outcome.closed {
         tick_store.upsert(bar.clone());
@@ -408,6 +437,7 @@ fn parse_tick(text: &str, symbol: &str) -> Option<(f64, i64, Option<f64>)> {
 mod tests {
     use super::*;
 
+    const M1: i64 = PROFILE_BUCKET_MS;
     const M15: i64 = BUCKET_MS;
     const T0: i64 = 1_700_000_100_000 - (1_700_000_100_000 % BUCKET_MS);
 
@@ -441,6 +471,17 @@ mod tests {
         let bar = st.on_tick(100.0, T0 + 10, None).unwrap().live.1;
         // first=flat, +up, =flat, -down, +up, -down
         assert_eq!((bar.ticks, bar.up_ticks, bar.down_ticks, bar.flat_ticks), (6, 2, 2, 2));
+    }
+
+    #[test]
+    fn profile_candle_closes_on_one_minute_boundaries() {
+        let mut st = TickState::new();
+        st.on_tick(100.0, T0, None);
+
+        let out = st.on_tick(100.5, T0 + M1, None).unwrap();
+        let profile = out.closed_profile.expect("1m profile candle must close");
+        assert_eq!((profile.time, profile.volume), (T0, 1.0));
+        assert!(out.closed.is_none(), "15m chart candle is still open");
     }
 
     #[test]
@@ -493,15 +534,32 @@ mod tests {
     fn handle_text_writes_the_store_and_broadcasts_candle_plus_tick_volume() {
         let (bc, mut rx) = broadcast::channel(64);
         let (ctx, mut crx) = mpsc::channel(8);
+        let (profile_tx, mut profile_rx) = mpsc::channel(8);
         let store = TickVolumeStore::new(16);
         let mut st = TickState::new();
 
         for (p, t) in [(100.0, T0), (100.5, T0 + 1), (101.0, T0 + M15)] {
-            handle_text(&tick(p, t), "XAUUSD", &mut st, &bc, &ctx, &store);
+            handle_text(
+                &tick(p, t),
+                "XAUUSD",
+                &mut st,
+                &bc,
+                &ctx,
+                Some(&profile_tx),
+                &store,
+            );
         }
         // Control frames and other symbols are ignored.
-        handle_text(r#"{"f":"pong"}"#, "XAUUSD", &mut st, &bc, &ctx, &store);
-        handle_text(&tick(1.0, T0 + M15 + 1).replace("XAUUSD", "XAGUSD"), "XAUUSD", &mut st, &bc, &ctx, &store);
+        handle_text(r#"{"f":"pong"}"#, "XAUUSD", &mut st, &bc, &ctx, Some(&profile_tx), &store);
+        handle_text(
+            &tick(1.0, T0 + M15 + 1).replace("XAUUSD", "XAGUSD"),
+            "XAUUSD",
+            &mut st,
+            &bc,
+            &ctx,
+            Some(&profile_tx),
+            &store,
+        );
 
         let mut kinds = Vec::new();
         while let Ok(f) = rx.try_recv() {
@@ -517,9 +575,15 @@ mod tests {
             ["candle", "tv", "candle", "tv", "candle", "tv_closed", "candle", "tv"]
         );
 
-        let closed = crx.try_recv().expect("closed candle goes to the VP consumer");
+        let closed = crx.try_recv().expect("closed candle goes to the chart consumer");
         assert_eq!((closed.time, closed.volume), (T0, 2.0));
         assert!(crx.try_recv().is_err());
+
+        let closed_profile = profile_rx
+            .try_recv()
+            .expect("closed 1m candle goes to the volume profile");
+        assert_eq!((closed_profile.time, closed_profile.volume), (T0, 2.0));
+        assert!(profile_rx.try_recv().is_err());
 
         let snap = store.snapshot();
         assert_eq!(snap.len(), 2);
