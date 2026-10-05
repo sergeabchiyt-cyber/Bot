@@ -153,10 +153,6 @@ impl VolumeProfileEngine {
         self.model
     }
 
-    pub fn lower_tf(&self) -> LowerTf {
-        self.lower_tf
-    }
-
     fn upsert_profile_candle(&mut self, candle: VpCandle) {
         upsert_candle(&mut self.profile_candles, candle);
     }

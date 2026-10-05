@@ -272,10 +272,11 @@ mod tests {
         assert_eq!(agg.len(), 2);
         assert_eq!(agg[0].time, 0);
         assert_eq!(agg[0].open, 4100.0);
-        assert_eq!(agg[0].high, 4102.0);
+        // The bucket holds the 0m..3m bars: 5 + 7 + 3 + 1 ticks.
+        assert_eq!(agg[0].high, 4103.0);
         assert_eq!(agg[0].low, 4099.0);
-        assert_eq!(agg[0].close, 4100.5);
-        assert_eq!(agg[0].volume, 15.0);
+        assert_eq!(agg[0].close, 4101.0);
+        assert_eq!(agg[0].volume, 16.0);
         // The 5-minute bucket starting at 5m holds the last bar only.
         assert_eq!(agg[1].time, 300_000);
         assert_eq!(agg[1].volume, 2.0);

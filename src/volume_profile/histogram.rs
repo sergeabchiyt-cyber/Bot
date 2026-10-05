@@ -541,12 +541,21 @@ mod tests {
 
     #[test]
     fn rows_layout_creates_a_short_top_row_for_a_partial_range() {
-        // 0.10 range over a 0.01 tick: 12 requested rows -> 1 tick rows
-        // (10 rows) vs 2 tick rows (5 rows); 10 is closer to 12.
-        let (lo, height, n) = row_grid(4150.0, 4150.10, &rows_model(12)).expect("grid");
-        assert_eq!(lo, 4150.0);
-        assert!((height - 0.01).abs() < 1e-12);
-        assert_eq!(n, 10);
+        // $0.50 range, tick $0.01, 12 requested rows: 4-tick rows give
+        // ceil(50/4) = 13 rows, 5-tick rows give 10 — 13 is closer to 12, so
+        // the 4-tick grid wins and the final row is a partial one.
+        let (lo, height, n) = row_grid(4150.0, 4150.5, &rows_model(12)).expect("grid");
+        assert_eq!(lo, 4150.0, "rows are anchored at the profile low");
+        assert!((height - 0.04).abs() < 1e-12, "height {height}");
+        assert_eq!(n, 13);
+
+        let candles = vec![
+            candle(1, 4150.0, 4150.5, 10.0),
+            candle(2, 4150.0, 4150.5, 10.0),
+        ];
+        let hist = histogram(&candles, None, &rows_model(12)).expect("profile");
+        assert_eq!(hist.rows.last().unwrap().high, 4150.5, "top row clipped to the profile high");
+        assert_eq!(hist.range_high, 4150.5);
     }
 
     #[test]
@@ -563,24 +572,29 @@ mod tests {
     }
 
     /// TradingView breaks an exact volume tie in favour of the row closer to
-    /// the POC (and, at equal distance, the row above). With a symmetric
+    /// the POC (and, at equal distance, the row above). With an asymmetric
     /// ladder the rule is the only thing that pulls the value area lower.
     #[test]
     fn value_area_tie_break_prefers_the_row_closer_to_the_poc() {
-        // Seven $0.01 rows, volumes 4,4,10,4,4,4,4 (total 34, target 23.8).
+        // Seven $0.50 rows, volumes 4,4,10,4,4,4,4 (total 34, target 23.8).
         // POC on row 2. Steps: up (tie at distance 1), up (tie at distance 2),
-        // then the tie at distances 3 vs 2 must go DOWN, and the final
-        // expansion back up lands on rows 0..=5.
+        // then the tie at distances 3 vs 2 must go DOWN; the final expansion
+        // back up stops on row 5.
+        let model = ProfileModel {
+            tick_size: 0.50,
+            rows: 7,
+            ..ProfileModel::default()
+        };
         let volumes = [4.0, 4.0, 10.0, 4.0, 4.0, 4.0, 4.0];
         let candles: Vec<VpCandle> = volumes
             .iter()
             .enumerate()
             .map(|(i, volume)| {
-                let low = i as f64 * 0.01;
-                candle(i as i64 + 1, low, low + 0.01, *volume)
+                let low = i as f64 * 0.50;
+                candle(i as i64 + 1, low, low + 0.50, *volume)
             })
             .collect();
-        let hist = histogram(&candles, Some((0.0, 0.07)), &rows_model(7)).expect("profile");
+        let hist = histogram(&candles, Some((0.0, 3.5)), &model).expect("profile");
         assert_eq!(hist.rows.len(), 7);
         assert_eq!(hist.poc_index, 2);
         assert_eq!(hist.val_index, 0, "the nearer row below must win the tie");
