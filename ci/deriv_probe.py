@@ -6,19 +6,16 @@ This exists because of a production failure:
     ERROR xauusd_node3_execution: Trade execution failed: Deriv proposal error:
     {"code":"ContractBuyValidationError","message":"Invalid barrier.","subcode":"InvalidBarrier"}
 
-Node 3 used to derive a barrier from ``|tp - sl| / 2`` and send it with every
-``CALL``/``PUT`` proposal. On ``frxXAUUSD`` an intraday ``CALL``/``PUT`` is an
-at-the-money *Rise/Fall* contract, so Derev rejects the proposal as soon as a
-non-zero barrier is attached.
-
-The probe records what Deriv really offers, straight from Deriv:
+Node 3 used to derive a ``barrier`` from ``|tp - sl| / 2`` and send it with every
+proposal. The probe records, straight from Deriv, everything needed to send a
+shape Deriv accepts:
 
 * ``contracts_for frxXAUUSD`` - contract types, expiry type, number of barriers
-  and the duration window of each entry (this is what a server can sell now);
-* the raw ``proposal`` response for the at-the-money shape Node 3 sends after
-  the fix (no ``barrier`` field at all);
-* the raw ``proposal`` response for the shape that failed in production
-  (``barrier: "+2.500"``), so the ``InvalidBarrier`` regression stays visible.
+  and the duration window of each entry (what Deriv is selling right now), plus
+  the raw JSON of the intraday ``CALL``/``PUT`` entries;
+* a barrier sweep of ``proposal`` requests at the contract's minimum stake, so
+  the accepted barrier range (and the exact rejection for the production
+  ``+2.500``) is visible instead of guessed.
 
 It talks to two endpoints:
 
@@ -27,12 +24,14 @@ It talks to two endpoints:
   schema as the OTP sockets Node 3 trades on, no token required;
 * the legacy ``/websockets/v3`` public endpoint with Deriv's official test
   ``app_id`` (1089), which is the failover flow Node 3 keeps for ``a1-...``
-  tokens.
+  tokens (Cloudflare answers 520 for it from many cloud networks - the probe
+  records that rather than hiding it).
 
 Runs on a GitHub runner (see ``.github/workflows/deriv-probe.yml``) because the
-development sandbox cannot reach Deriv. ``--dry-run`` prints the exact payloads
-without opening a socket, and ``DERIV_PROBE_LEGACY_URL`` /
-``DERIV_PROBE_PUBLIC_URL`` override the endpoints (the local mock test uses
+development sandbox cannot reach Deriv; the report lands in
+``ci/deriv/DERIV.md``. ``--dry-run`` prints the exact payloads without opening a
+socket, and ``DERIV_PROBE_LEGACY_URL`` / ``DERIV_PROBE_PUBLIC_URL`` /
+``DERIV_PROBE_STAKE`` override the endpoints and stake (the local mock test uses
 that).
 """
 
@@ -53,9 +52,11 @@ except ImportError:  # pragma: no cover - the workflow installs it
 # Mirrors node3-execution/src/execution_deriv.rs.
 SYMBOL = "frxXAUUSD"
 CURRENCY = "USD"
-STAKE = 0.35  # Deriv's minimum stake for this account type.
 DURATION = 5
 DURATION_UNIT = "m"
+# Deriv's own minimum-stake message for this contract is
+# `Please enter a stake amount that's at least 0.50.` (subcode InvalidMinStake).
+STAKE = float(os.environ.get("DERIV_PROBE_STAKE", "0.50"))
 
 LEGACY_DEFAULT = "wss://ws.derivws.com/websockets/v3?app_id=1089"
 PUBLIC_DEFAULT = "wss://api.derivws.com/trading/v1/options/ws/public"
@@ -66,13 +67,24 @@ LEGACY_FAILOVER = [
 
 TIMEOUT = 25.0
 
-# (contract_type, barrier, label) - the first entry is the shape Node 3 sends
-# after the fix, the rest are the shapes that were rejected in production.
-SHAPES = [
-    ("CALL", None, "ATM rise, no barrier (Node 3 fix shape)"),
-    ("PUT", None, "ATM fall, no barrier (Node 3 fix shape)"),
-    ("CALL", "+2.500", "CALL + relative barrier (production failure shape)"),
-    ("PUT", "-2.500", "PUT + relative barrier (production failure shape)"),
+# (contract_type, barrier, label)
+SWEEP = [
+    ("CALL", None, "CALL, no barrier"),
+    ("CALL", "+0.01", "CALL barrier +0.01"),
+    ("CALL", "+0.05", "CALL barrier +0.05"),
+    ("CALL", "+0.10", "CALL barrier +0.10"),
+    ("CALL", "+0.50", "CALL barrier +0.50"),
+    ("CALL", "+1.00", "CALL barrier +1.00"),
+    ("CALL", "+2.50", "CALL barrier +2.50 (production shape)"),
+    ("CALL", "+6.00", "CALL barrier +6.00 (TP distance on gold)"),
+    ("CALL", "+15.00", "CALL barrier +15.00"),
+    ("CALL", "-2.50", "CALL barrier -2.50 (wrong sign)"),
+    ("PUT", None, "PUT, no barrier"),
+    ("PUT", "-0.01", "PUT barrier -0.01"),
+    ("PUT", "-0.10", "PUT barrier -0.10"),
+    ("PUT", "-0.50", "PUT barrier -0.50"),
+    ("PUT", "-2.50", "PUT barrier -2.50 (production shape)"),
+    ("PUT", "-6.00", "PUT barrier -6.00 (TP distance on gold)"),
 ]
 
 
@@ -80,8 +92,8 @@ def contracts_for_payload(new_api: bool) -> dict:
     """``contracts_for`` request for the endpoint flavour Node 3 would use."""
     payload: dict = {"contracts_for": SYMBOL}
     if not new_api:
-        # The current API dropped currency / product_type (contract pricing is
-        # bound to the authenticated account); the legacy API still accepts them.
+        # The current API dropped currency / product_type (pricing follows the
+        # authenticated account); the legacy API still accepts them.
         payload["currency"] = CURRENCY
         payload["product_type"] = "basic"
     return payload
@@ -133,7 +145,7 @@ def print_contracts_for(data: dict) -> None:
     print(f"    contracts_for: {len(available)} entries")
     for item in available:
         print(
-            "      - {ct:<7} expiry={ex:<9} barriers={b:<2} duration={mn}..{mx} market={mkt}".format(
+            "      - {ct:<11} expiry={ex:<9} barriers={b:<2} duration={mn}..{mx} market={mkt}".format(
                 ct=item.get("contract_type", "?"),
                 ex=item.get("expiry_type", "?"),
                 b=item.get("barriers", "?"),
@@ -142,8 +154,19 @@ def print_contracts_for(data: dict) -> None:
                 mkt=item.get("market", "?"),
             )
         )
+
+    intraday = [
+        item
+        for item in available
+        if item.get("contract_type") in ("CALL", "PUT", "HIGHER", "LOWER")
+        and str(item.get("expiry_type", "")).startswith("intraday")
+    ]
+    if intraday:
+        print("    raw entries Node 3 can trade intraday (all fields Deriv returns):")
+        for item in intraday:
+            print(f"      {json.dumps(item, sort_keys=True)}")
     if not available:
-        print(f"      (raw response: {json.dumps(data)[:400]})")
+        print(f"    (raw response: {json.dumps(data)[:400]})")
 
 
 def print_proposal(label: str, data: dict) -> bool:
@@ -152,16 +175,17 @@ def print_proposal(label: str, data: dict) -> bool:
     if err:
         subcode = err.get("subcode")
         suffix = f" (subcode {subcode})" if subcode else ""
-        print(f"    [{label}] REJECTED {err.get('code')}: {err.get('message')}{suffix}")
+        print(f"    [{label:<42}] REJECTED {err.get('code')}: {err.get('message')}{suffix}")
         return False
     proposal = data.get("proposal") or {}
     print(
-        "    [{label}] OK id={id} ask_price={ask} payout={payout} spot={spot}".format(
+        "    [{label:<42}] OK id={id} ask_price={ask} payout={payout} spot={spot} barrier={barrier}".format(
             label=label,
             id=proposal.get("id"),
             ask=proposal.get("ask_price"),
             payout=proposal.get("payout"),
             spot=proposal.get("spot"),
+            barrier=proposal.get("barrier", "-"),
         )
     )
     longcode = proposal.get("longcode")
@@ -170,21 +194,36 @@ def print_proposal(label: str, data: dict) -> bool:
     return True
 
 
+def print_sweep_summary(results: list[tuple[str, str, bool, str]]) -> None:
+    """results: (contract_type, barrier, priced, outcome)."""
+    for contract_type in ("CALL", "PUT"):
+        rows = [r for r in results if r[0] == contract_type]
+        if not rows:
+            continue
+        accepted = [r[1] for r in rows if r[2]]
+        print(
+            "    sweep {ct}: accepted barriers = {ok}; rejected = {bad}".format(
+                ct=contract_type,
+                ok=", ".join(accepted) if accepted else "none",
+                bad=", ".join(r[1] for r in rows if not r[2]) or "none",
+            )
+        )
+
+
 async def probe(label: str, url: str, new_api: bool) -> str:
-    """Probe one endpoint. Returns 'ok', 'unreachable' or 'partial'."""
+    """Probe one endpoint. Returns 'ok' or 'unreachable'."""
     print(f"\n=== {label}\n    url: {url}")
     try:
         async with websockets.connect(url, open_timeout=TIMEOUT) as ws:
             print_contracts_for(await request(ws, contracts_for_payload(new_api), "contracts_for"))
-            priced = rejected = 0
-            for contract_type, barrier, note in SHAPES:
-                payload = proposal_payload(new_api, contract_type, barrier)
-                response = await request(ws, payload, "proposal")
-                if print_proposal(note, response):
-                    priced += 1
-                else:
-                    rejected += 1
-            print(f"    summary: {priced} priced, {rejected} rejected")
+            print(f"    proposal sweep at stake {STAKE} {CURRENCY}, {DURATION}{DURATION_UNIT}:")
+            results: list[tuple[str, str, bool, str]] = []
+            for contract_type, barrier, note in SWEEP:
+                response = await request(ws, proposal_payload(new_api, contract_type, barrier), "proposal")
+                priced = print_proposal(note, response)
+                outcome = "" if priced else (response.get("error") or {}).get("message", "")
+                results.append((contract_type, barrier or "none", priced, outcome))
+            print_sweep_summary(results)
             return "ok"
     except Exception as exc:  # noqa: BLE001 - the probe reports, it does not raise
         print(f"    UNREACHABLE: {type(exc).__name__}: {exc}")
@@ -195,7 +234,7 @@ async def main() -> int:
     if "--dry-run" in sys.argv:
         print("contracts_for (legacy):", json.dumps(contracts_for_payload(False)))
         print("contracts_for (new):   ", json.dumps(contracts_for_payload(True)))
-        for contract_type, barrier, note in SHAPES:
+        for contract_type, barrier, note in SWEEP:
             print(f"proposal ({note}):")
             print("  legacy:", json.dumps(proposal_payload(False, contract_type, barrier)))
             print("  new:   ", json.dumps(proposal_payload(True, contract_type, barrier)))
