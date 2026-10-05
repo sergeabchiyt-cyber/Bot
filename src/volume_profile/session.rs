@@ -62,7 +62,15 @@ fn ny_close_on(year: i32, month: u32, day: u32) -> i64 {
 }
 
 /// Walks back from the most recent session close until it finds a session
-/// that actually contains candles (skips the weekend / holiday gap).
+/// that actually traded (skips the weekend / holiday gap).
+///
+/// SiftingIO keeps publishing a bodyless bar (`open == close`) for every
+/// bucket the venue is shut, and those fillers carry volume — so a weekend
+/// session is not empty, it is *flat*. Measuring it produced a PS profile of
+/// a $1.5 sliver sitting on the Friday close (seen live: PS PoC 4137.55 while
+/// the market traded 4150+). A session therefore only counts when at least one
+/// of its bars has a body, which is the same closed-market signature the
+/// dashboard uses to drop filler runs.
 pub fn previous_session_slice(
     candles: &[VpCandle],
     now_ms: i64,
@@ -78,7 +86,7 @@ pub fn previous_session_slice(
             .filter(|c| c.time >= start && c.time < end)
             .cloned()
             .collect();
-        if !slice.is_empty() {
+        if slice.iter().any(|c| c.open != c.close) {
             return (start, end, slice);
         }
         if end == first_end {
@@ -124,6 +132,48 @@ mod tests {
         let after = last_session_close_utc(ny(2025, 11, 3, 23, 0));
         assert_eq!(before, ny(2025, 10, 31, 18, 0));
         assert_eq!(after, ny(2025, 11, 3, 18, 0));
+    }
+
+    /// A weekend session full of bodyless filler bars must be skipped: PS has
+    /// to describe the last session that really traded.
+    #[test]
+    fn filler_only_sessions_are_skipped_for_the_previous_session() {
+        let minute = 60_000;
+        let fri_close = ny(2025, 6, 6, 18, 0); // start of the Friday session
+        let sat_close = ny(2025, 6, 7, 18, 0); // start of the weekend session
+        let mut candles: Vec<VpCandle> = Vec::new();
+        // Friday session [Fri 18:00, Sat 18:00): real bars, one with a body.
+        for i in 0..30 {
+            candles.push(VpCandle {
+                time: fri_close + i * minute,
+                open: 3300.0,
+                high: 3301.0,
+                low: 3299.0,
+                close: if i == 7 { 3300.5 } else { 3300.0 },
+                volume: 10.0,
+                source: "test".into(),
+            });
+        }
+        // Weekend session [Sat 18:00, Sun 18:00): SiftingIO filler only.
+        for i in 0..30 {
+            candles.push(VpCandle {
+                time: sat_close + i * minute,
+                open: 3300.0,
+                high: 3301.5,
+                low: 3299.5,
+                close: 3300.0,
+                volume: 10.0,
+                source: "test".into(),
+            });
+        }
+
+        // Sunday 19:00 NY: the most recent close is Sunday 18:00, so the
+        // session being described would be the (closed) weekend session.
+        let (start, end, slice) = previous_session_slice(&candles, ny(2025, 6, 8, 19, 0));
+        assert_eq!(end, sat_close, "PS ends where the last traded session closed");
+        assert_eq!(start, fri_close, "PS starts at the previous 18:00 NY");
+        assert_eq!(slice.len(), 30, "PS carries the Friday session's bars");
+        assert!(slice.iter().any(|c| c.open != c.close));
     }
 
     #[test]

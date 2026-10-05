@@ -219,6 +219,16 @@ def main() -> int:
         med = statistics.median(minutes) if minutes else 0
         print(f"* the deployed engine serves **{tf_label(med)}** chart candles "
               f"({len(candles)} bars, {ts(candles[0]['time'])} -> {ts(candles[-1]['time'])})")
+    candles_block = (status or {}).get("candles") or {}
+    if candles_block.get("edge_lag_minutes") is not None:
+        lag = candles_block["edge_lag_minutes"]
+        print(f"* `/status` reports the chart edge: {candles_block.get('bars')} bars, "
+              f"last {ts(candles_block.get('last_bar'))}, **{lag} min behind now**"
+              + (" -- the boot tail fetch did not close the gap (the REST history does not "
+                 "have those bars)" if lag and lag > 120 else ""))
+    elif status:
+        print("* the deployed build does not report the live edge yet (`/status.candles."
+              "edge_lag_minutes`) — the Node1 merge has not been deployed")
     if status and not status.get("candles"):
         print("* the deployed build **predates the current branch** (no `/status.candles`, "
               "no `/vp`): redeploy to pick up the TradingView-parity profile and the audit endpoint")
