@@ -391,6 +391,8 @@ cargo test                         # session-rollover, calendar parsing, CORS po
 cargo test -- --ignored --nocapture  # hits the live ForexFactory feed
 bash ci/smoke.sh                   # boots the binary and asserts:
                                    #   /levels window bounds, /calendar contents,
+                                   #   /vp histogram (contiguous rows, volume conservation,
+                                   #   POC = heaviest row, VAL <= POC <= VAH),
                                    #   /candles + /tick-volume payload shape, the CORS allow-list,
                                    #   the econ audio pipeline (audio_chunk/learn on /ws, /ai digest)
                                    #   (allowed / preflight / foreign origin) and
