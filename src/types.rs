@@ -147,6 +147,33 @@ pub struct TickVolumeBar {
     pub source: String,
 }
 
+/// Audit trail for one computed profile: how the histogram was built.
+///
+/// Every field maps 1:1 onto a TradingView Fixed Range Volume Profile input,
+/// so a client (or a human with the chart open) can check that the engine was
+/// fed the same range, the same row model and the same value-area percentage
+/// before blaming the numbers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProfileMeta {
+    /// `"rows"` (TV "Number Of Rows" layout) or `"price"` (fixed $ rows).
+    pub row_mode: String,
+    /// Row height in price units actually used.
+    pub row_height: f64,
+    /// Number of histogram rows actually produced (TV may exceed the input).
+    pub rows: usize,
+    /// Profile high / low = TV's histogram top / bottom.
+    pub range_high: f64,
+    pub range_low: f64,
+    /// Resolution of the bars fed into the histogram (`"1m"`, `"5m"`, `"15m"`).
+    pub input_interval: String,
+    /// How many of those bars fell inside the window.
+    pub input_bars: usize,
+    /// Total volume in the histogram (tick count).
+    pub total_volume: f64,
+    /// TV "Value Area Volume" (70 = 70%).
+    pub va_pct: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VpLevels {
     pub window: String,
@@ -177,6 +204,10 @@ pub struct VpLevels {
     /// window's epoch-millisecond timestamp for backwards compatibility.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sunday_open: Option<f64>,
+    /// How this profile was built (row model, input resolution, range). Absent
+    /// on payloads produced by older builds; clients must not require it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<ProfileMeta>,
 }
 
 // =====================================================================
@@ -325,6 +356,7 @@ mod tests {
                 swing_high: None,
                 swing_low: None,
                 sunday_open: Some(2_341.25),
+                meta: None,
             },
         };
         let wire = serde_json::to_value(&frame).expect("serialize WS levels");

@@ -3,7 +3,7 @@ use std::time::Duration;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        Query, State,
     },
     http::{header, HeaderValue, Method},
     response::{IntoResponse, Response},
@@ -89,6 +89,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/levels", get(levels_snapshot))
+        .route("/vp", get(vp_audit))
         .route("/candles", get(candles_snapshot))
         .route("/tick-volume", get(tick_volume_snapshot))
         .route("/calendar", get(calendar_snapshot))
@@ -106,6 +107,54 @@ async fn health() -> &'static str {
 async fn levels_snapshot(State(state): State<AppState>) -> Json<Vec<VpLevels>> {
     let vp = state.vp.read().await;
     Json(vp.all_levels())
+}
+
+/// Full volume-profile histogram for one window, for auditing against the
+/// TradingView chart: which range, which row model and which input resolution
+/// produced the emitted POC/VAH/VAL.
+///
+/// `GET /vp`                  -> the configured model for PW
+/// `GET /vp?window=PS`        -> another window (PW/PS/CW/SWING_BULL/SWING_BEAR)
+/// `GET /vp?window=PW&rows=64`-> recompute that window with a different row
+///                               count, to line the numbers up with a specific
+///                               TradingView "Row Size" setting
+async fn vp_audit(
+    State(state): State<AppState>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let window = params
+        .get("window")
+        .map(|w| w.trim().to_ascii_uppercase())
+        .filter(|w| !w.is_empty())
+        .unwrap_or_else(|| "PW".to_string());
+    let rows_override: Option<usize> = match params.get("rows") {
+        Some(raw) => match raw.trim().parse::<usize>() {
+            Ok(rows) => Some(rows.clamp(2, 5_000)),
+            Err(_) => {
+                return (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": "rows must be an integer between 2 and 5000"
+                    })),
+                )
+                    .into_response();
+            }
+        },
+        None => None,
+    };
+
+    let vp = state.vp.read().await;
+    match vp.audit(&window, rows_override) {
+        Some(audit) => Json(audit).into_response(),
+        None => (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "error": "no profile computed for this window yet",
+                "window": window,
+            })),
+        )
+            .into_response(),
+    }
 }
 
 async fn candles_snapshot(State(state): State<AppState>) -> Json<Vec<VpCandle>> {
@@ -177,10 +226,34 @@ fn normalize_envelope(raw: &str, frame: WsFrame) -> WsFrame {
 }
 
 async fn status_snapshot(State(state): State<AppState>) -> Response {
+    // Explicit feed contract: the chart feed is 15m by design, the profile
+    // windows use their own (TradingView-selected) resolution.
+    let (row_mode, rows, bin_size, va_pct) = {
+        let vp = state.vp.read().await;
+        let model = vp.model();
+        (
+            model.row_mode.as_str(),
+            model.rows,
+            model.bin_size,
+            model.va_pct,
+        )
+    };
     let body = serde_json::json!({
         "status": state.status.snapshot(),
         "venue": format!("{:?}", state.config.execution_venue()),
         "version": env!("CARGO_PKG_VERSION"),
+        "candles": {
+            "interval": "15m",
+            "seed_bars": crate::sifting_rest::SIFTING_HISTORY_CANDLE_LIMIT,
+        },
+        "volume_profile": {
+            "row_mode": row_mode,
+            "rows": rows,
+            "bin_size": bin_size,
+            "va_pct": va_pct * 100.0,
+            "input": state.config.vp_lower_tf,
+            "audit": "/vp?window=PW",
+        },
     });
     (
         [(header::CACHE_CONTROL, "no-store")],

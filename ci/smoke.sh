@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Boots the release binary and proves, against the live process:
 #   1. /levels exposes a bounded PS window ending on a 18:00 NY session close
+#   1b. /vp serves the TradingView-parity histogram behind those levels
 #   2. /calendar is actually populated with real ForexFactory events
 #   3. CORS lets the Node2 static origin (and only that origin) read the REST API
 #   4. /ws upgrades, replays levels + 15 candles, and fans Node3 trades to dashboards
@@ -50,6 +51,11 @@ echo
 python3 ci/verify_levels.py /tmp/levels.json || fail "/levels verification failed"
 
 echo
+echo "--- /vp histogram audit (TradingView row model + input resolution) ---"
+curl -sf "$BASE/vp?window=PS" -o /tmp/vp.json || fail "/vp request failed"
+python3 ci/verify_vp.py /tmp/vp.json PS || fail "/vp verification failed"
+
+echo
 echo "--- /calendar (waiting for first fetch) ---"
 for _ in $(seq 1 30); do
   COUNT=$(curl -sf "$BASE/calendar" \
@@ -86,7 +92,7 @@ cors_headers() {
 one_line() { printf '%s' "$1" | tr '\n' '|'; }
 
 echo "1) allowed origin gets access-control-allow-origin on every route"
-for r in /health /levels /candles /tick-volume /calendar /ai /status; do
+for r in /health /levels /candles /tick-volume /calendar /ai /status /vp; do
   h=$(cors_headers GET "$r" -H "Origin: $CORS_ALLOWED")
   printf '%s\n' "$h" | head -n1 | grep -q " 200" \
     || fail "$r: expected 200, got '$(printf '%s\n' "$h" | head -n1)'"
@@ -108,7 +114,7 @@ printf '%s\n' "$h" | grep -qi "^access-control-max-age: 600\$" \
 printf '  %s\n' "$(one_line "$(printf '%s\n' "$h" | grep -Ei '^(HTTP/|access-control|vary)')")"
 
 echo "3) every other origin gets NO allow-header"
-for r in /health /levels /candles /tick-volume /calendar /ai /status; do
+for r in /health /levels /candles /tick-volume /calendar /ai /status /vp; do
   h=$(cors_headers GET "$r" -H "Origin: $CORS_FOREIGN")
   printf '%s\n' "$h" | grep -qi "^access-control-allow-origin" \
     && fail "$r: leaked an allow-header to $CORS_FOREIGN [$(one_line "$h")]"

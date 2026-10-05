@@ -22,7 +22,8 @@ There is no `/` route — the engine is API-only.
 |------------|-----------------------------------------------------|
 | `/health`  | `ok`                                                |
 | `/status`  | JSON snapshot of every feed's liveness              |
-| `/levels`  | Current PW/PS/CW PoC/VaH/VaL levels (+ window `start`/`end`) |
+| `/levels`  | Current PW/PS/CW PoC/VaH/VaL levels (+ window `start`/`end`, row/input audit in `meta`) |
+| `/vp`      | Full volume-profile histogram for one window (`?window=PW`, `?rows=128`) — the TradingView audit trail |
 | `/candles` | SiftingIO 15m candles used by the chart/swing profile (latest fixed seed + live closes); `volume` = tick count |
 | `/tick-volume` | Live tick-volume bars built since boot (up/down/flat split, tick rate); newest may be in progress |
 | `/calendar`| Latest economic calendar snapshot (`source`, `count`, `events`) |
@@ -140,6 +141,14 @@ ECON_CHUNK_MS=1000          ECON_USE_MCP=true
 ECON_MAX_STREAM_SECS=7200   ECON_YTDLP=yt-dlp   ECON_FFMPEG=ffmpeg
 ECON_TEST_TONE=1            # CI/offline plumbing test: synthetic 16kHz tone instead of live audio
 LEVEL_PROXIMITY_PIPS=5      SL_MIN_PIPS=10  SL_MAX_PIPS=50  TP_MIN_PIPS=15  TP_MAX_PIPS=100
+# Volume-profile histogram model (TradingView parity; see README section)
+VP_ROW_MODE=rows            # rows = TV "Number Of Rows" layout | price = fixed-height rows
+VP_ROWS=128                 # TV "Row Size" when VP_ROW_MODE=rows
+VP_BIN_SIZE=0.50            # row height when VP_ROW_MODE=price
+VP_TICK_SIZE=0.01           # XAUUSD tick: row height is rounded to whole ticks
+VP_VA_PCT=70                # TV "Value Area Volume"
+VP_LOWER_TF=tv              # tv = TradingView's 5,000-bar ladder per window | 1m/5m/15m/...
+VP_FALLBACK_INTERVAL=5m     # second try when 1m history cannot cover PW
 CORS_ALLOWED_ORIGIN=https://static-dash-frontend.onrender.com   # only origin allowed to call the REST API from a browser
 RR_MIN=1 RR_MAX=3           DERIV_DEMO_API=  DERIV_APP_ID=  DERIV_API_URL=
 MCP_CHELSEA_URL=            (set to route orders through the ChelseaAI MCP tool)
@@ -203,20 +212,82 @@ profile anchored from the best high to the best low; the most recent low
 followed by a high creates a bullish profile anchored from the best low to the
 best high. Equal highs/lows still count, anchoring at their most recent touch,
 and a short or trend-straight history falls back to a leg bounded to the most
-recent session's bars rather than spanning stale history. Time-window profiles
-use 1m candle volume allocated to fixed, price-aligned $0.50 rows by each
-candle's actual high/low overlap, then POC and the 70% VA are expanded from the
-POC. Each `VpLevels` payload carries `start` / `end` (epoch ms), `direction`,
-and swing anchor prices so clients can audit exactly which move produced the
-levels. TradingView parity still requires matching its symbol/feed, session
-anchors, row size, and value-area settings; lower-timeframe bars reduce the
-15m approximation error but do not turn OHLC bars into true tick-at-price data.
+recent session's bars rather than spanning stale history. The histogram itself
+is a TradingView-parity model (see **TradingView parity** below): rows are laid
+out exactly like the FRVP tool, volume is allocated to the rows each bar's
+high/low actually overlaps, and the value area expands from the POC with
+TradingView's tie-breaks. Each `VpLevels` payload carries `start` / `end`
+(epoch ms), `direction`, swing anchor prices and a `meta` block (row mode, row
+height, produced row count, profile range, input resolution and bar count,
+total volume, value-area percentage) so clients can audit exactly which move —
+and which row model — produced the levels. OHLC bars are still not
+tick-at-price data: the finest history available decides how sharp a profile
+can be, and the input resolution is reported rather than assumed.
 
 The implementation is split by window for accuracy: `volume_profile/session.rs`
 (18:00 → 18:00 sessions), `volume_profile/weekly.rs` (week anchors),
 `volume_profile/swing.rs` (the directional leg), and
 `volume_profile/histogram.rs` (the shared POC/VA math), with
 `volume_profile.rs` orchestrating ingest, refresh, and fan-out.
+
+## TradingView parity
+
+The engine computes the same histogram a TradingView **Fixed Range Volume
+Profile** would, given the same range. The mapping is 1:1, so the settings can
+be copied straight off the chart:
+
+| TradingView FRVP input | Engine | Default |
+|---|---|---|
+| Rows Layout = Number Of Rows | `VP_ROW_MODE=rows` | `rows` |
+| Row Size = 128 | `VP_ROWS=128` | `128` |
+| Rows Layout = Ticks Per Row | `VP_ROW_MODE=price` + `VP_BIN_SIZE` | `0.50` |
+| Volume = Up/Down | every `/vp` row reports `up_volume` / `down_volume` (POC/VA always use the total) | — |
+| Value Area Volume = 70 | `VP_VA_PCT=70` | `70` |
+| Extend Right | n/a (the engine always covers its window) | — |
+
+**Rows.** With "Number Of Rows" the row height is not a fixed dollar amount:
+TradingView derives it from the profile range and rounds it to whole symbol
+ticks — `Ticks Per Row = round((Histogram Top - Histogram Bottom) / Rows / Tick Size)`
+— and adds rows when the range is not an exact multiple. For XAUUSD
+(`tick = 0.01`):
+
+* a $150 weekly range over 128 rows -> `150 / 128 / 0.01 = 117.2` ticks: the
+  candidates are 117 ticks (129 rows) and 118 ticks (128 rows); **118 ticks =
+  $1.18 per row** wins because it lands exactly on the requested 128 rows;
+* the same 100-tick range over 30 rows -> `3.3` ticks -> **3 ticks per row**,
+  34 rows (TradingView's own worked example);
+* the old fixed $0.50 grid is only correct when the range happens to divide
+  evenly — it is still available as `VP_ROW_MODE=price`, but it shifts every
+  POC/VAH/VAL by up to half a bin versus the chart.
+
+**Input resolution.** TradingView does not build a profile from the chart's
+bars: it walks the `1, 5, 15, 30, 60, 240, 1D` ladder and takes the first
+resolution whose bar count for the selected range stays under 5,000. For gold
+(~23 trading hours per day) that means a **weekly** range (~6,900 1m bars) is
+built from **5m** bars, while a single 18:00 -> 18:00 session (~1,380 1m bars)
+stays on **1m**. `VP_LOWER_TF=tv` (default) reproduces that per window from the
+engine's own 1m history; pin a resolution (`VP_LOWER_TF=1m`) to always use the
+finest bars instead. If 1m history cannot cover the previous week, the engine
+retries with `VP_FALLBACK_INTERVAL` (5m) and only then falls back to the 15m
+chart seed — which is logged loudly and disclosed in `meta.input_interval`.
+
+**Auditing a mismatch.** `GET /vp?window=PW` returns every row of the profile
+behind the emitted levels plus the settings that produced it (`row_mode`,
+`row_height`, `rows`, `range_low`/`range_high`, `input_interval`, `input_bars`,
+`total_volume`, `va_pct`, row volumes with the up/down split). Compare it with
+the chart:
+
+* `range_low` / `range_high` must match the FRVP's histogram top and bottom —
+  the engine's PW window is Sunday 18:00 -> Friday 18:00 America/New_York;
+* `rows` / `row_height` must match what the chart shows after its rounding;
+* `input_interval` should be the resolution TradingView picks (5m for a weekly
+  range), and `input_bars` should be in the same ballpark;
+* POC = the centre of the heaviest row, VaH/VaL = the top/bottom edges of the
+  outermost value-area rows — exactly where the FRVP draws its lines.
+
+Different data feeds (SiftingIO spot ticks vs a broker's CFD feed) can still
+move the POC by a few ticks; matching the window, the row model and the input
+resolution removes the structural differences.
 
 ## Economic calendar
 

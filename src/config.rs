@@ -111,6 +111,25 @@ pub struct Config {
     /// endpoints are exercisable. Never enabled by default.
     pub seed_synthetic_candles: bool,
 
+    // ---- Volume-profile histogram model (TradingView parity) ----
+    /// `rows` (TradingView "Number Of Rows" layout, default) or `price`
+    /// (constant-height rows).
+    pub vp_row_mode: String,
+    /// Row count for the `rows` mode — TradingView's "Row Size" input, 128 in
+    /// the reference charts.
+    pub vp_rows: usize,
+    /// Row height in price for the `price` mode (the legacy $0.50 grid).
+    pub vp_bin_size: f64,
+    /// Symbol tick: row heights are rounded to whole ticks like TradingView.
+    pub vp_tick_size: f64,
+    /// TradingView "Value Area Volume" percentage.
+    pub vp_va_pct: f64,
+    /// Profile input resolution: `tv` (default) replays TradingView's
+    /// 5,000-bar lower-timeframe ladder per window, or pin one (`1m`, `5m`).
+    pub vp_lower_tf: String,
+    /// Second-chance interval if the 1m profile history cannot cover PW.
+    pub vp_fallback_interval: String,
+
     // ---- Execution ----
     pub mcp_chelsea_url: Option<String>,
     pub deriv_api_url: String,
@@ -244,6 +263,14 @@ impl Config {
             econ_ffmpeg: env_str("ECON_FFMPEG", "ffmpeg"),
 
             seed_synthetic_candles: env_bool("SEED_SYNTHETIC_CANDLES", false),
+
+            vp_row_mode: env_str("VP_ROW_MODE", "rows").to_ascii_lowercase(),
+            vp_rows: env_u64("VP_ROWS", 128).clamp(2, 5_000) as usize,
+            vp_bin_size: env_f64("VP_BIN_SIZE", 0.50),
+            vp_tick_size: env_f64("VP_TICK_SIZE", 0.01),
+            vp_va_pct: env_f64("VP_VA_PCT", 70.0),
+            vp_lower_tf: env_str("VP_LOWER_TF", "tv").to_ascii_lowercase(),
+            vp_fallback_interval: env_str("VP_FALLBACK_INTERVAL", "5m").to_ascii_lowercase(),
 
             mcp_chelsea_url: env_opt("MCP_CHELSEA_URL"),
             deriv_api_url: env_str("DERIV_API_URL", "wss://ws.derivws.com/websockets/v3"),

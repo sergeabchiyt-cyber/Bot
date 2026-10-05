@@ -85,6 +85,7 @@ fn same_level_values(a: &types::VpLevels, b: &types::VpLevels) -> bool {
         && a.swing_high == b.swing_high
         && a.swing_low == b.swing_low
         && a.sunday_open == b.sunday_open
+        && a.meta == b.meta
 }
 
 fn level_changed(previous: &[types::VpLevels], next: &types::VpLevels) -> bool {
@@ -115,7 +116,29 @@ async fn main() -> anyhow::Result<()> {
     let (exec_tx, mut exec_rx) = mpsc::channel::<types::VpCandle>(64);
 
     let status = FeedStatus::new(bc_tx.clone());
-    let vp = Arc::new(RwLock::new(VolumeProfileEngine::new()));
+    // TradingView-parity histogram model + profile input resolution.
+    let vp_model = volume_profile::ProfileModel {
+        row_mode: volume_profile::RowMode::parse(&config.vp_row_mode),
+        rows: config.vp_rows,
+        bin_size: config.vp_bin_size,
+        tick_size: config.vp_tick_size,
+        va_pct: config.vp_va_pct / 100.0,
+    }
+    .sanitized();
+    let vp_lower_tf = volume_profile::LowerTf::parse(&config.vp_lower_tf);
+    info!(
+        "Volume profile model: row_mode={} rows={} bin_size={:.2} tick={:.4} value_area={:.0}% input={}",
+        vp_model.row_mode.as_str(),
+        vp_model.rows,
+        vp_model.bin_size,
+        vp_model.tick_size,
+        vp_model.va_pct * 100.0,
+        vp_lower_tf.as_str(),
+    );
+    let vp = Arc::new(RwLock::new(VolumeProfileEngine::with_settings(
+        vp_model,
+        vp_lower_tf,
+    )));
     let cached_levels = Arc::new(RwLock::new(Vec::new()));
     let cached_candles = Arc::new(RwLock::new(Vec::<VpCandle>::new()));
     let recent_bubbles: Arc<RwLock<Vec<OrderflowEvent>>> = Arc::new(RwLock::new(Vec::new()));
@@ -129,12 +152,14 @@ async fn main() -> anyhow::Result<()> {
     })));
 
     // ---------- Cold-start history ----------
-    // Keep the 15m chart/swing seed, but use 1m bars for the time-window
-    // profiles. Reconstructing a weekly distribution from 15m OHLC ranges
-    // smears each bar's volume over much more price action than TradingView's
-    // intrabar profile does.
+    // The chart/swing seed stays exactly 2,000 x 15m bars. The profile windows
+    // are fed the finest history that really covers the previous week: 1m
+    // first, then `VP_FALLBACK_INTERVAL` (5m by default — the same resolution
+    // TradingView picks for a weekly range), and only then the 15m chart seed.
+    // Reconstructing a weekly distribution from 15m OHLC ranges smears each
+    // bar's volume over much more price action than an intrabar profile does.
     let mut seeded = false;
-    let mut profile_uses_1m = false;
+    let mut profile_uses_fine_bars = false;
     if !config.sifting_api_key.is_empty() {
         match sifting_rest::fetch_sifting_klines_15m(
             &config.sifting_hist_url,
@@ -158,47 +183,76 @@ async fn main() -> anyhow::Result<()> {
                 let (profile_start, profile_end) =
                     VolumeProfileEngine::previous_week_bounds_utc(now_ms);
                 let profile_end_exclusive = now_ms - now_ms.rem_euclid(60_000);
-                let fine_candles = sifting_rest::fetch_sifting_profile_candles_1m(
-                    &config.sifting_hist_url,
-                    &config.sifting_api_key,
-                    &config.sifting_symbol,
-                    profile_start,
-                    profile_end_exclusive,
-                )
-                .await;
+                // Allow normal broker maintenance gaps around the NY
+                // week-open/close, but reject a cursor/plan-limited page that
+                // only covers a fragment of the prior week — that page would
+                // silently smear the profile and move the POC.
+                const BOUNDARY_TOLERANCE_MS: i64 = 2 * 60 * 60_000;
+                let covers_previous_week = |candles: &[VpCandle], interval_ms: i64| {
+                    sifting_rest::profile_history_covers(
+                        candles,
+                        profile_start,
+                        profile_end,
+                        interval_ms,
+                        BOUNDARY_TOLERANCE_MS,
+                    )
+                };
 
-                let profile_seed = match fine_candles {
-                    Ok(candles) => {
-                        // Allow normal broker maintenance gaps around the NY
-                        // week-open/close, but reject a cursor/plan-limited page
-                        // that only covers a fragment of the prior week.
-                        const BOUNDARY_TOLERANCE_MS: i64 = 2 * 60 * 60_000;
-                        let covers_previous_week = candles.first().is_some_and(|first| {
-                            first.time <= profile_start + BOUNDARY_TOLERANCE_MS
-                        }) && candles.last().is_some_and(|last| {
-                            last.time >= profile_end - BOUNDARY_TOLERANCE_MS
-                        });
-                        if covers_previous_week {
+                let mut intervals: Vec<String> = vec!["1m".to_string()];
+                if config.vp_fallback_interval != "1m" {
+                    intervals.push(config.vp_fallback_interval.clone());
+                }
+                let interval_ms =
+                    |label: &str| volume_profile::parse_label(label).unwrap_or(60_000);
+                let mut chosen: Option<(Vec<VpCandle>, String)> = None;
+                for interval in &intervals {
+                    match sifting_rest::fetch_sifting_profile_candles(
+                        &config.sifting_hist_url,
+                        &config.sifting_api_key,
+                        &config.sifting_symbol,
+                        profile_start,
+                        profile_end_exclusive,
+                        interval,
+                    )
+                    .await
+                    {
+                        Ok(candles) if covers_previous_week(&candles, interval_ms(interval)) => {
                             info!(
-                                "Seeded {} historical 1M profile candles from SiftingIO (PW coverage verified)",
-                                candles.len()
+                                "Seeded {} historical {} profile candles from SiftingIO (PW window covered)",
+                                candles.len(),
+                                interval
                             );
-                            profile_uses_1m = true;
-                            candles
-                        } else {
-                            warn!(
-                                "SiftingIO 1M history is empty or does not cover the complete PW window; using 15M bars for profiles"
-                            );
-                            candles_15m.clone()
+                            chosen = Some((candles, interval.clone()));
+                            break;
                         }
+                        Ok(candles) => warn!(
+                            "SiftingIO {} profile history has {} bars and does not cover the complete PW window; trying the next resolution",
+                            interval,
+                            candles.len()
+                        ),
+                        Err(e) => warn!(
+                            "SiftingIO {} profile history fetch failed: {e}; trying the next resolution",
+                            interval
+                        ),
                     }
-                    Err(e) => {
+                }
+
+                let (profile_seed, profile_interval) = match chosen {
+                    Some((candles, interval)) => {
+                        profile_uses_fine_bars = true;
+                        (candles, interval)
+                    }
+                    None => {
                         warn!(
-                            "SiftingIO 1M profile history fetch failed; using 15M bars for profiles: {e}"
+                            "No fine profile history covers the PW window — profiles fall back to the 15M chart seed and will read coarser than TradingView"
                         );
-                        candles_15m.clone()
+                        (candles_15m.clone(), "15m".to_string())
                     }
                 };
+                info!(
+                    "Profile windows fed from {} bars (VP_LOWER_TF={})",
+                    profile_interval, config.vp_lower_tf
+                );
 
                 let mut vp_w = vp.write().await;
                 vp_w.ingest_history(profile_seed, candles_15m);
@@ -248,7 +302,7 @@ async fn main() -> anyhow::Result<()> {
         let symbol = config.sifting_symbol.clone();
         let bc = bc_tx.clone();
         let candle_tx = sifting_candle_tx.clone();
-        let profile_candle_tx = profile_uses_1m.then(|| sifting_profile_candle_tx.clone());
+        let profile_candle_tx = profile_uses_fine_bars.then(|| sifting_profile_candle_tx.clone());
         let store = tick_volume.clone();
         let st = status.clone();
         tokio::spawn(async move {
@@ -418,7 +472,7 @@ async fn main() -> anyhow::Result<()> {
         let cached_c = cached_candles.clone();
         let bc = bc_tx.clone();
         let exec = exec_tx.clone();
-        let profile_uses_1m = profile_uses_1m;
+        let profile_uses_fine_bars = profile_uses_fine_bars;
         tokio::spawn(async move {
             while let Some(candle) = sifting_candle_rx.recv().await {
                 {
@@ -434,7 +488,7 @@ async fn main() -> anyhow::Result<()> {
 
                 let previous_levels = cached.read().await.clone();
                 let mut vp_w = vp.write().await;
-                if profile_uses_1m {
+                if profile_uses_fine_bars {
                     vp_w.ingest_swing_candle(candle.clone());
                 } else {
                     // When minute history is unavailable, keep the legacy
@@ -457,7 +511,7 @@ async fn main() -> anyhow::Result<()> {
     // ---------- Fine 1m profile consumer ----------
     // The finer live bars replace the old 15m OHLC-range approximation for
     // PW/PS/CW, while the chart payload remains 15m.
-    if profile_uses_1m {
+    if profile_uses_fine_bars {
         let vp = vp.clone();
         let cached = cached_levels.clone();
         let bc = bc_tx.clone();

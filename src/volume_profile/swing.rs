@@ -9,6 +9,8 @@
 use crate::types::{VpCandle, VpLevels};
 
 use super::histogram;
+use super::timeframe::LowerTf;
+use super::StoredProfile;
 
 /// Bars on each side of a fractal pivot. 3 × 15m = 45 minutes of
 /// confirmation lag: responsive enough to track the current swing without
@@ -67,7 +69,14 @@ struct SwingLeg {
 }
 
 /// Build the single current swing profile over `candles`.
-pub fn compute_swing(candles: &[VpCandle]) -> Option<VpLevels> {
+///
+/// Returns the wire levels plus the histogram behind them, so the engine can
+/// serve the same audit (`GET /vp`) for the swing window as for PW/PS/CW.
+pub fn compute_swing(
+    candles: &[VpCandle],
+    model: &histogram::ProfileModel,
+    lower_tf: LowerTf,
+) -> Option<(VpLevels, StoredProfile)> {
     if candles.len() < 2 {
         return None;
     }
@@ -80,16 +89,30 @@ pub fn compute_swing(candles: &[VpCandle]) -> Option<VpLevels> {
         .time
         .saturating_add(candle_interval(window));
 
-    histogram::compute(
-        window,
+    let (input, interval) = super::timeframe::prepare_input(window, lower_tf);
+    let input_bars = input.len();
+    let range = Some((leg.low, leg.high));
+    let histogram = histogram::histogram(&input, range, model)?;
+    let levels = histogram.levels(
         leg.direction.label(),
         start,
         end,
-        Some((leg.low, leg.high)),
         leg.direction.as_str(),
         Some(leg.high),
         Some(leg.low),
-    )
+        interval,
+        input_bars,
+    );
+    let stored = StoredProfile {
+        histogram,
+        start,
+        end,
+        range,
+        from_swing_history: true,
+        input_interval: interval,
+        input_bars,
+    };
+    Some((levels, stored))
 }
 
 fn candle_interval(candles: &[VpCandle]) -> i64 {
@@ -285,6 +308,17 @@ mod tests {
             .collect()
     }
 
+    /// The 128-row TradingView model every window uses by default.
+    fn model() -> histogram::ProfileModel {
+        histogram::ProfileModel::default()
+    }
+
+    fn levels_of(
+        computed: Option<(VpLevels, StoredProfile)>,
+    ) -> VpLevels {
+        computed.expect("swing profile").0
+    }
+
     #[test]
     fn bearish_swing_is_anchored_high_to_low() {
         let prices = [
@@ -292,7 +326,7 @@ mod tests {
             100.0, 99.0, 98.0, 97.0, 96.0, 95.0, 96.0, 97.0, 98.0, 99.0, 100.0, 101.0,
             102.0, 103.0, 104.0,
         ];
-        let swing = compute_swing(&swing_history(&prices)).expect("bearish swing");
+        let swing = levels_of(compute_swing(&swing_history(&prices), &model(), LowerTf::Tv));
         assert_eq!(swing.window, "SWING_BEAR");
         assert_eq!(swing.direction, "bearish");
         assert_eq!(swing.swing_high, Some(105.5));
@@ -307,7 +341,7 @@ mod tests {
             106.0, 107.0, 108.0, 109.0, 110.0, 109.0, 108.0, 107.0, 106.0, 105.0, 104.0,
             103.0, 102.0, 101.0,
         ];
-        let swing = compute_swing(&swing_history(&prices)).expect("bullish swing");
+        let swing = levels_of(compute_swing(&swing_history(&prices), &model(), LowerTf::Tv));
         assert_eq!(swing.window, "SWING_BULL");
         assert_eq!(swing.direction, "bullish");
         assert_eq!(swing.swing_low, Some(99.5));
@@ -324,7 +358,7 @@ mod tests {
             99.0, 100.0, 101.0, 102.0, 103.0,
         ];
         let candles = swing_history(&prices);
-        let swing = compute_swing(&candles).expect("bearish swing");
+        let swing = levels_of(compute_swing(&candles, &model(), LowerTf::Tv));
         assert_eq!(swing.window, "SWING_BEAR");
         assert_eq!(swing.direction, "bearish");
         assert_eq!(swing.swing_high, Some(103.5));
@@ -341,7 +375,7 @@ mod tests {
         // whole retained history.
         let prices: Vec<f64> = (0..150).map(|i| 100.0 + i as f64 * 0.1).collect();
         let candles = swing_history(&prices);
-        let swing = compute_swing(&candles).expect("fallback swing");
+        let swing = levels_of(compute_swing(&candles, &model(), LowerTf::Tv));
         assert_eq!(swing.window, "SWING_BULL");
         assert_eq!(swing.direction, "bullish");
         assert!(swing.swing_low.unwrap() < swing.swing_high.unwrap());
