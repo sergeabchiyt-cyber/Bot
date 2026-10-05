@@ -26,16 +26,67 @@
 mod histogram;
 mod session;
 mod swing;
+mod timeframe;
 mod weekly;
+
+use std::collections::HashMap;
 
 use chrono::Utc;
 
 use crate::types::{VpCandle, VpLevels};
+use histogram::Histogram;
+
+// Re-exported so the binary can construct the TradingView-parity model from
+// `Config` without reaching into the submodules.
+pub use histogram::{ProfileModel, RowMode};
+pub use timeframe::{parse_label, LowerTf};
 
 /// Keep the complete fixed 2,000-candle Sifting 15m swing seed (about 21
 /// days) plus room for live closes and session/week boundaries. The 1m profile
 /// seed is shorter, spanning the previous week through the current minute.
 const RETAIN_MS: i64 = 35 * 24 * 60 * 60 * 1000;
+
+/// One window's histogram plus everything needed to audit (or re-run) it.
+#[derive(Clone)]
+struct StoredProfile {
+    histogram: Histogram,
+    start: i64,
+    end: i64,
+    /// Exact price bounds for swing profiles (the leg's high/low); calendar
+    /// windows derive their bounds from the bars.
+    range: Option<(f64, f64)>,
+    /// Which candle store the window was built from.
+    from_swing_history: bool,
+    /// Resolution actually fed to the histogram (`"1m"`, `"5m"`, `"15m"`).
+    input_interval: &'static str,
+    input_bars: usize,
+}
+
+/// Full profile audit returned by `GET /vp`: every histogram row and the
+/// settings that produced it.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct VpAudit {
+    pub window: String,
+    pub start: i64,
+    pub end: i64,
+    pub poc: f64,
+    pub vah: f64,
+    pub val: f64,
+    pub row_mode: String,
+    pub row_height: f64,
+    pub rows: usize,
+    pub range_low: f64,
+    pub range_high: f64,
+    pub va_pct: f64,
+    pub total_volume: f64,
+    pub input_interval: String,
+    pub input_bars: usize,
+    /// Row indices of the POC / VAL / VAH inside `histogram`.
+    pub poc_row: usize,
+    pub val_row: usize,
+    pub vah_row: usize,
+    pub histogram: Vec<histogram::ProfileRow>,
+}
 
 pub struct VolumeProfileEngine {
     pub pw_levels: Option<VpLevels>,
@@ -45,6 +96,13 @@ pub struct VolumeProfileEngine {
     /// `SWING_BULL` or `SWING_BEAR`, so consumers can target the correct leg
     /// without guessing from a time-window profile.
     pub swing_levels: Option<VpLevels>,
+    /// Row/value-area model shared by every window (TradingView parity).
+    model: ProfileModel,
+    /// Input resolution policy for the profile histograms.
+    lower_tf: LowerTf,
+    /// Histograms behind the emitted levels, keyed by window label.
+    stored: HashMap<String, StoredProfile>,
+
     /// End timestamp (ms) of the session PS currently describes.
     ps_session_end: Option<i64>,
     /// The last completed daily session included in CW. CW is deliberately
@@ -69,11 +127,19 @@ pub struct VolumeProfileEngine {
 
 impl VolumeProfileEngine {
     pub fn new() -> Self {
+        Self::with_settings(ProfileModel::default(), LowerTf::Tv)
+    }
+
+    /// Engine with an explicit histogram model and profile input policy.
+    pub fn with_settings(model: ProfileModel, lower_tf: LowerTf) -> Self {
         Self {
             pw_levels: None,
             ps_levels: None,
             cw_levels: None,
             swing_levels: None,
+            model: model.sanitized(),
+            lower_tf,
+            stored: HashMap::new(),
             ps_session_end: None,
             cw_session_end: None,
             cw_week_start: None,
@@ -81,6 +147,10 @@ impl VolumeProfileEngine {
             profile_candles: Vec::new(),
             swing_candles: Vec::new(),
         }
+    }
+
+    pub fn model(&self) -> ProfileModel {
+        self.model
     }
 
     fn upsert_profile_candle(&mut self, candle: VpCandle) {
@@ -134,7 +204,7 @@ impl VolumeProfileEngine {
         self.upsert_swing_candle(candle);
         self.swing_candles
             .retain(|c| c.time >= Utc::now().timestamp_millis() - RETAIN_MS);
-        self.swing_levels = swing::compute_swing(&self.swing_candles);
+        self.recompute_swing();
     }
 
     /// Seed the swing detector independently from the profile-history bars.
@@ -142,7 +212,7 @@ impl VolumeProfileEngine {
         upsert_candles(&mut self.swing_candles, candles);
         self.swing_candles
             .retain(|c| c.time >= Utc::now().timestamp_millis() - RETAIN_MS);
-        self.swing_levels = swing::compute_swing(&self.swing_candles);
+        self.recompute_swing();
     }
 
     /// Recompute every window against `now_ms`.
@@ -156,7 +226,7 @@ impl VolumeProfileEngine {
     /// SWING = the most recent completed pivot-to-pivot directional leg.
     pub fn recompute(&mut self, now_ms: i64) {
         self.recompute_time_windows(now_ms);
-        self.swing_levels = swing::compute_swing(&self.swing_candles);
+        self.recompute_swing();
     }
 
     fn recompute_time_windows(&mut self, now_ms: i64) {
@@ -194,7 +264,7 @@ impl VolumeProfileEngine {
                     .filter(|c| c.time >= week_start && c.time < completed_day_end)
                     .cloned()
                     .collect();
-                self.cw_levels = histogram::compute(
+                match build_profile(
                     &cw,
                     "CW",
                     week_start,
@@ -203,7 +273,15 @@ impl VolumeProfileEngine {
                     "neutral",
                     None,
                     None,
-                );
+                    &self.model,
+                    self.lower_tf,
+                ) {
+                    Some((levels, stored)) => {
+                        self.cw_levels = Some(levels);
+                        self.stored.insert("CW".into(), stored);
+                    }
+                    None => self.cw_levels = None,
+                }
             } else {
                 self.cw_levels = None;
             }
@@ -211,7 +289,7 @@ impl VolumeProfileEngine {
             self.cw_week_start = Some(week_start);
         }
 
-        self.pw_levels = histogram::compute(
+        match build_profile(
             &pw,
             "PW",
             pw_start,
@@ -220,7 +298,15 @@ impl VolumeProfileEngine {
             "neutral",
             None,
             None,
-        );
+            &self.model,
+            self.lower_tf,
+        ) {
+            Some((levels, stored)) => {
+                self.pw_levels = Some(levels);
+                self.stored.insert("PW".into(), stored);
+            }
+            None => self.pw_levels = None,
+        }
         if let Some(levels) = self.pw_levels.as_mut() {
             // Preserve the Sunday 18:00 NY start timestamp in `start`, and
             // expose the boundary candle's open separately as a price level.
@@ -233,7 +319,7 @@ impl VolumeProfileEngine {
         // ---- Previous session (rolls at every session close) ----
         let (ps_start, ps_end, ps_candles) =
             session::previous_session_slice(&self.profile_candles, now_ms);
-        self.ps_levels = histogram::compute(
+        match build_profile(
             &ps_candles,
             "PS",
             ps_start,
@@ -242,9 +328,78 @@ impl VolumeProfileEngine {
             "neutral",
             None,
             None,
-        );
+            &self.model,
+            self.lower_tf,
+        ) {
+            Some((levels, stored)) => {
+                self.ps_levels = Some(levels);
+                self.stored.insert("PS".into(), stored);
+            }
+            None => self.ps_levels = None,
+        }
         self.ps_session_end = Some(ps_end);
         self.last_close_seen = Some(completed_day_end);
+    }
+
+    /// Recompute and store the swing profile with the same row model, so the
+    /// wire metadata matches the other windows.
+    fn recompute_swing(&mut self) {
+        self.stored.retain(|label, _| !label.starts_with("SWING"));
+        match swing::compute_swing(&self.swing_candles, &self.model, self.lower_tf) {
+            Some((levels, stored)) => {
+                self.stored.insert(levels.window.clone(), stored);
+                self.swing_levels = Some(levels);
+            }
+            None => self.swing_levels = None,
+        }
+    }
+
+    /// Full histogram for one window (plus an optional row-count override) for
+    /// the `/vp` audit endpoint.
+    pub fn audit(&self, window: &str, rows_override: Option<usize>) -> Option<VpAudit> {
+        let stored = self.stored.get(window)?;
+        let hist = match rows_override {
+            Some(rows) if rows.clamp(2, 5_000) != stored.histogram.model.rows => {
+                let model = ProfileModel {
+                    rows: rows.clamp(2, 5_000),
+                    ..stored.histogram.model
+                };
+                let history = if stored.from_swing_history {
+                    &self.swing_candles
+                } else {
+                    &self.profile_candles
+                };
+                let window_candles: Vec<VpCandle> = history
+                    .iter()
+                    .filter(|c| c.time >= stored.start && c.time < stored.end)
+                    .cloned()
+                    .collect();
+                let (input, _) = timeframe::prepare_input(&window_candles, self.lower_tf);
+                histogram::histogram(&input, stored.range, &model)?
+            }
+            _ => stored.histogram.clone(),
+        };
+        Some(VpAudit {
+            window: window.into(),
+            start: stored.start,
+            end: stored.end,
+            poc: hist.poc(),
+            vah: hist.vah(),
+            val: hist.val(),
+            row_mode: hist.model.row_mode.as_str().into(),
+            row_height: hist.row_height,
+            rows: hist.rows.len(),
+            range_low: hist.range_low,
+            range_high: hist.range_high,
+            va_pct: hist.model.va_pct,
+            total_volume: hist.total_volume,
+            input_interval: stored.input_interval.into(),
+            input_bars: stored.input_bars,
+            poc_row: hist.poc_index,
+            val_row: hist.val_index,
+            vah_row: hist.vah_index,
+            histogram: hist.rows,
+        })
     }
 
     /// Recompute only when the session boundary has moved past the close
@@ -302,6 +457,46 @@ impl VolumeProfileEngine {
         }
         out
     }
+}
+
+/// Build one window's histogram + wire levels, resolving the input
+/// resolution first (TradingView's lower-timeframe ladder by default).
+#[allow(clippy::too_many_arguments)]
+fn build_profile(
+    candles: &[VpCandle],
+    label: &str,
+    start: i64,
+    end: i64,
+    range: Option<(f64, f64)>,
+    direction: &str,
+    swing_high: Option<f64>,
+    swing_low: Option<f64>,
+    model: &ProfileModel,
+    lower_tf: LowerTf,
+) -> Option<(VpLevels, StoredProfile)> {
+    let (input, interval) = timeframe::prepare_input(candles, lower_tf);
+    let input_bars = input.len();
+    let histogram = histogram::histogram(&input, range, model)?;
+    let levels = histogram.levels(
+        label,
+        start,
+        end,
+        direction,
+        swing_high,
+        swing_low,
+        interval,
+        input_bars,
+    );
+    let stored = StoredProfile {
+        histogram,
+        start,
+        end,
+        range,
+        from_swing_history: false,
+        input_interval: interval,
+        input_bars,
+    };
+    Some((levels, stored))
 }
 
 fn upsert_candle(candles: &mut Vec<VpCandle>, candle: VpCandle) {
