@@ -200,6 +200,14 @@ bars. If the 1m history does not cover the PW window, the engine logs a warning
 and falls back to the 15m profile input; Binance remains isolated to the
 aggTrade order-flow analyzer.
 
+`PS` describes the last session that **traded**. SiftingIO keeps publishing a
+bodyless bar (`open == close`) for every bucket the venue is shut, and those
+fillers carry volume, so the weekend session is not empty — it is a flat line.
+A session therefore only counts when at least one of its bars has a body;
+otherwise the engine walks back to the previous 18:00 NY close. Live, that
+means a Monday morning reports **Friday's** session instead of a $1.5 sliver
+sitting on the Friday close at 4137.5 while the market trades 4150+.
+
 `PS` is not a boot-time constant. A 30-second ticker compares the current
 18:00 America/New_York session boundary against the last close already seen;
 the moment the boundary moves, the profile is recomputed and fresh `levels`
