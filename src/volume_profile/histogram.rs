@@ -597,8 +597,11 @@ mod tests {
         let hist = histogram(&candles, Some((0.0, 3.5)), &model).expect("profile");
         assert_eq!(hist.rows.len(), 7);
         assert_eq!(hist.poc_index, 2);
+        // Trace: up (tie, distance 1 vs 1), down (tie, 2 vs 1), up (tie, 2 vs
+        // 2), down (tie, 3 vs 2) -> 26 of 34 in, VAL row 0, VAH row 4.
+        // Always preferring the upper row would instead end on rows 2..=6.
         assert_eq!(hist.val_index, 0, "the nearer row below must win the tie");
-        assert_eq!(hist.vah_index, 5);
+        assert_eq!(hist.vah_index, 4);
         assert!(hist.val() <= hist.poc() && hist.poc() <= hist.vah());
     }
 
