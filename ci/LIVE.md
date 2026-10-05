@@ -1,6 +1,6 @@
 # Live engine probe
 
-generated: 2026-10-05T15:12:02Z
+generated: 2026-10-05T15:15:26Z
 
 ## /status
 
@@ -15,7 +15,7 @@ generated: 2026-10-05T15:12:02Z
 * deltas (min): [(15.0, 1986), (195.0, 4), (45.0, 2), (165.0, 2), (105.0, 1)]  -> **15m**
 * open==close bars: 486 (24%) in 51 runs; longest 55 bars
 * price range: 4111.09 .. 4399.60
-* newest bar is **927 minutes behind now** -- the REST history seed lags the live stream
+* newest bar is **930 minutes behind now** -- the REST history seed lags the live stream
 
 ## /levels
 
@@ -49,10 +49,10 @@ generated: 2026-10-05T15:12:02Z
 
 ## WebSocket sample
 
-* frames: {'probe': 1, 'heartbeat': 2, 'levels': 3, 'candle': 203, 'tick_volume': 188, 'calendar': 1, 'status': 1}
-* **live `candle` frames: 203, deltas (min) [(0.0, 187), (15.0, 14), (915.0, 1)] -> no bars**
+* frames: {'probe': 1, 'heartbeat': 2, 'levels': 3, 'candle': 262, 'tick_volume': 247, 'calendar': 1, 'status': 1}
+* **live `candle` frames: 262, deltas (min) [(0.0, 245), (15.0, 15), (915.0, 1)] -> no bars**
 * first frame: {"time": 1791144900000, "open": 4137.53, "high": 4138.24, "low": 4137.53, "close": 4137.53, "volume": 4766.0, "source": "sifting"}
-* live `tick_volume` deltas (min): [(0.0, 187)] -> no bars
+* live `tick_volume` deltas (min): [(0.0, 245), (15.0, 1)] -> no bars
 * `levels` frames carrying `meta`: **True**
 
 ## Verdict
