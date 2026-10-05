@@ -1,6 +1,6 @@
 # Live engine probe
 
-generated: 2026-10-05T15:06:21Z
+generated: 2026-10-05T15:09:11Z
 
 ## /status
 
@@ -16,7 +16,7 @@ generated: 2026-10-05T15:06:21Z
 * open==close bars: 486 (24%) in 51 runs; longest 55 bars
 * price range: 4111.09 .. 4399.60
 Traceback (most recent call last):
-  File "/home/runner/work/Bot/Bot/ci/live_report.py", line 222, in <module>
+  File "/home/runner/work/Bot/Bot/ci/live_report.py", line 228, in <module>
     raise SystemExit(main())
                      ^^^^^^
   File "/home/runner/work/Bot/Bot/ci/live_report.py", line 117, in main
