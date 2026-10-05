@@ -73,6 +73,10 @@ def main() -> int:
         if candles:
             print(f"* **candles: interval={candles.get('interval')!r} "
                   f"seed_bars={candles.get('seed_bars')}**")
+            if candles.get("last_bar"):
+                print(f"* history edge: {ts(candles['last_bar'])} "
+                      f"(**{candles.get('edge_lag_minutes')} min behind now**) "
+                      f"over {candles.get('bars')} bars")
         else:
             print("* no `candles` block — the deployed build predates the candle contract")
         if vp:
@@ -110,6 +114,9 @@ def main() -> int:
               f"{'; longest ' + str(max(runs)) + ' bars' if runs else ''}")
         print(f"* price range: {min(c['low'] for c in candles):.2f} .. "
               f"{max(c['high'] for c in candles):.2f}")
+        age_min = (time.time() * 1000 - times[-1]) / 60_000
+        print(f"* newest bar is **{age_min:.0f} minutes behind now**"
+              + (" -- the REST history seed lags the live stream" if age_min > 120 else ""))
     else:
         print(f"unavailable (http {code(out, 'candles')})")
     print()
@@ -134,7 +141,8 @@ def main() -> int:
 
     print("## /vp audit")
     print()
-    for name in ("vp-PW", "vp-PS", "vp-CW", "vp-PW-64", "vp-bad"):
+    for name in ("vp-PW", "vp-PS", "vp-CW", "vp-PW-64", "vp-6h", "vp-24h",
+                 "vp-bad", "vp-bad-range"):
         vp = load(os.path.join(out, f"{name}.json"))
         http = code(out, name)
         if http != "200" or not isinstance(vp, dict):

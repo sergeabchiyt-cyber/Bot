@@ -21,9 +21,9 @@ There is no `/` route — the engine is API-only.
 | Route      | What                                                |
 |------------|-----------------------------------------------------|
 | `/health`  | `ok`                                                |
-| `/status`  | JSON snapshot of every feed's liveness              |
+| `/status`  | JSON snapshot of every feed's liveness, plus the candle contract (`interval`, `bars`, `first_bar`, `last_bar`, `edge_lag_minutes`) and the active VP model |
 | `/levels`  | Current PW/PS/CW PoC/VaH/VaL levels (+ window `start`/`end`, row/input audit in `meta`) |
-| `/vp`      | Full volume-profile histogram for one window (`?window=PW`, `?rows=128`) — the TradingView audit trail |
+| `/vp`      | Full volume-profile histogram: `?window=PW\|PS\|CW\|SWING_*`, `?rows=128` to test a Row Size, `?start=<ms>&end=<ms>` for a hand-selected (Fixed Range) window — the TradingView audit trail |
 | `/candles` | SiftingIO 15m candles used by the chart/swing profile (latest fixed seed + live closes); `volume` = tick count |
 | `/tick-volume` | Live tick-volume bars built since boot (up/down/flat split, tick rate); newest may be in progress |
 | `/calendar`| Latest economic calendar snapshot (`source`, `count`, `events`) |
@@ -183,7 +183,16 @@ Tool names are discovered via `tools/list` (`browser_navigate` +
 
 The chart and swing seed is one SiftingIO REST request for **exactly 2,000**
 latest 15m candles; a short or invalid page is rejected rather than padded or
-replaced with Binance prices. PW/PS/CW use paginated **1m** SiftingIO bars from
+replaced with Binance prices. SiftingIO's REST history can lag its own live
+stream (measured: the newest seeded bar was 15 hours behind the live bucket),
+and the live stream only ever appends from *now*, so the boot path also asks
+for the tail explicitly (`order=asc` from the seed's edge) and merges it —
+otherwise every restart would leave a permanent hole between the seed and the
+first live close. `/status` reports the result: `candles.bars`,
+`candles.first_bar`, `candles.last_bar` and `candles.edge_lag_minutes` (minutes
+between the newest candle's bucket and now — a healthy feed sits inside the
+in-progress bucket, and a large value is the hole). `ci/verify_candles.py`
+fails if any bar is off the 15-minute grid. PW/PS/CW use paginated **1m** SiftingIO bars from
 the PW start through the most recently completed minute, so weekly profiles
 don't smear each 15m candle's entire volume across its full wick range. Live
 Sifting ticks are folded into completed 1m profile bars and 15m chart/swing

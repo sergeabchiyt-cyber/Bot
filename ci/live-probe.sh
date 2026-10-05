@@ -41,6 +41,13 @@ fetch vp-CW       '/vp?window=CW'
 fetch vp-PW-64    '/vp?window=PW&rows=64'
 fetch vp-bad      '/vp?window=NOPE'
 
+# Hand-selected ranges, including the two that answer "is SiftingIO's *history*
+# current?" — the live stream can be current while the REST history lags.
+NOW_MS=$(python3 -c 'import time; print(int(time.time()*1000))')
+fetch vp-6h       "/vp?start=$((NOW_MS - 6 * 3600 * 1000))&end=$NOW_MS"
+fetch vp-24h      "/vp?start=$((NOW_MS - 24 * 3600 * 1000))&end=$NOW_MS"
+fetch vp-bad-range '/vp?start=abc&end=def'
+
 echo
 if command -v python3 >/dev/null; then
   python3 -m pip install --quiet websocket-client >/dev/null 2>&1 || true

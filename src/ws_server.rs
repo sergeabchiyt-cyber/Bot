@@ -295,6 +295,19 @@ async fn status_snapshot(State(state): State<AppState>) -> Response {
             model.va_pct,
         )
     };
+    // Where the chart history actually ends. `edge_lag_minutes` is the gap
+    // between the newest candle's bucket and now: a healthy live feed sits
+    // inside the in-progress bucket (< 15), while a large value means the
+    // history seed lagged the live stream at boot and the chart is showing a
+    // hole. Reported here because that is exactly the kind of thing a chart
+    // cannot tell you about itself.
+    let (bars, first_bar, last_bar, edge_lag_minutes) = {
+        let candles = state.cached_candles.read().await;
+        let first = candles.first().map(|c| c.time);
+        let last = candles.last().map(|c| c.time);
+        let lag = last.map(|t| (chrono::Utc::now().timestamp_millis() - t).max(0) / 60_000);
+        (candles.len(), first, last, lag)
+    };
     let body = serde_json::json!({
         "status": state.status.snapshot(),
         "venue": format!("{:?}", state.config.execution_venue()),
@@ -302,6 +315,10 @@ async fn status_snapshot(State(state): State<AppState>) -> Response {
         "candles": {
             "interval": "15m",
             "seed_bars": crate::sifting_rest::SIFTING_HISTORY_CANDLE_LIMIT,
+            "bars": bars,
+            "first_bar": first_bar,
+            "last_bar": last_bar,
+            "edge_lag_minutes": edge_lag_minutes,
         },
         "volume_profile": {
             "row_mode": row_mode,
