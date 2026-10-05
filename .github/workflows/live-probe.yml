@@ -40,8 +40,14 @@ jobs:
           cp -r ci/live /tmp/live-snapshot
           cp ci/LIVE.md /tmp/LIVE.md
           for attempt in 1 2 3 4 5; do
+            # The build workflow publishes its proof log at the same time, so a
+            # push can lose the race. Discard the previous attempt completely
+            # (the snapshot itself lives in /tmp) and rebuild the commit on top
+            # of whatever the branch is now.
             git fetch origin "${{ github.ref_name }}"
             git checkout -B "${{ github.ref_name }}" "origin/${{ github.ref_name }}"
+            git reset --hard "origin/${{ github.ref_name }}"
+            git clean -fdq ci || true
             rm -rf ci/live
             cp -r /tmp/live-snapshot ci/live
             cp /tmp/LIVE.md ci/LIVE.md
