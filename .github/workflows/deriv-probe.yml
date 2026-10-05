@@ -11,7 +11,9 @@ name: deriv-probe
 # It is the evidence behind the barrier fix: an intraday CALL/PUT on XAUUSD is
 # an at-the-money Rise/Fall contract, so a non-zero `barrier` is rejected with
 # `ContractBuyValidationError: Invalid barrier.` (subcode `InvalidBarrier`).
-# Runs on a GitHub runner because the development sandbox cannot reach Deriv.
+# Runs on a GitHub runner because the development sandbox cannot reach Deriv:
+# the report is published to `ci/deriv/DERIV.md` (and the job summary) so it is
+# readable from a checkout of the branch.
 #
 # Trigger: push a change to the probe, or run it by hand from the Actions tab.
 
@@ -21,6 +23,13 @@ on:
     paths:
       - "ci/deriv_probe.py"
       - ".github/workflows/deriv-probe.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deriv-probe-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   probe:
@@ -38,15 +47,47 @@ jobs:
       - name: Probe Deriv contract offerings and proposal shapes
         run: |
           set -o pipefail
-          python3 ci/deriv_probe.py 2>&1 | tee /tmp/deriv-probe.log
+          {
+            echo "# Deriv options probe — \`frxXAUUSD\`"
+            echo
+            echo "Recorded by \`.github/workflows/deriv-probe.yml\` on $(date -u '+%Y-%m-%d %H:%M UTC')."
+            echo
+            echo '```'
+            python3 ci/deriv_probe.py 2>&1 || true
+            echo '```'
+          } | tee /tmp/deriv-probe.log
+
+      - name: Publish the report to the branch
+        run: |
+          set -u
+          mkdir -p ci/deriv
+          cp /tmp/deriv-probe.log ci/deriv/DERIV.md
+          for attempt in 1 2 3 4 5; do
+            # The build workflow publishes its error log at the same time, so a
+            # push can lose the race: rebuild the commit on top of whatever the
+            # branch is now (the report itself lives in /tmp).
+            git fetch origin "${{ github.ref_name }}"
+            git checkout -B "${{ github.ref_name }}" "origin/${{ github.ref_name }}"
+            git reset --hard "origin/${{ github.ref_name }}"
+            mkdir -p ci/deriv
+            cp /tmp/deriv-probe.log ci/deriv/DERIV.md
+            git add -f ci/deriv/DERIV.md
+            if git diff --cached --quiet; then
+              echo "no change since the last probe"
+              exit 0
+            fi
+            git config user.email ci@example.invalid
+            git config user.name ci
+            git commit -m "ci: deriv probe report [skip ci]"
+            if git push origin "${{ github.ref_name }}"; then
+              exit 0
+            fi
+            echo "push lost a race (attempt $attempt); retrying"
+            sleep 5
+          done
+          echo "could not publish the probe report" >&2
+          exit 1
 
       - name: Step summary
         if: always()
-        run: |
-          {
-            echo "### Deriv options probe — \`frxXAUUSD\`"
-            echo
-            echo '```'
-            cat /tmp/deriv-probe.log 2>/dev/null || echo "(probe produced no output)"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: cat /tmp/deriv-probe.log >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
