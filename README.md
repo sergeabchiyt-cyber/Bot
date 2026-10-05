@@ -13,7 +13,7 @@ external client (dashboard, charting app, script) at the endpoints below.
 cargo run            # or: docker build -t engine . && docker run -p 10000:10000 engine
 ```
 
-Then hit **http://localhost:3000/status** for a JSON snapshot of every feed.
+Then hit **http://localhost:10000/status** for a JSON snapshot of every feed.
 There is no `/` route — the engine is API-only.
 
 ## HTTP endpoints
