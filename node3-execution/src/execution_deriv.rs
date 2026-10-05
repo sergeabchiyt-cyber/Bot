@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
@@ -432,6 +432,16 @@ struct DerivRejection<'a> {
     subcode: Option<&'a str>,
 }
 
+/// True when a frame can answer a request for `expected`: it either carries
+/// that `msg_type`, or is an error / carries `echo_req` - both of which have to
+/// be surfaced rather than skipped.
+fn answers_request(value: &serde_json::Value, expected: &str) -> bool {
+    let msg_type = value["msg_type"].as_str().unwrap_or("");
+    msg_type.eq_ignore_ascii_case(expected)
+        || value.get("error").is_some()
+        || value.get("echo_req").is_some()
+}
+
 /// Read the `error` object of a response, if there is one.
 fn rejection_of(response: &serde_json::Value) -> Option<DerivRejection<'_>> {
     let err = response.get("error")?;
@@ -760,6 +770,30 @@ impl DerivExecution {
         .map_err(|_| anyhow::anyhow!("timed out waiting for Deriv {what}"))?
     }
 
+    /// Read the response to a request whose `msg_type` is `expected`, skipping
+    /// frames that cannot be it. A plain `next_json` would hand back any
+    /// unsolicited frame (an update, a stray subscribe frame) as if it were the
+    /// reply - which is exactly how a `contracts_for`/`proposal` pair on the
+    /// same socket could read each other's answers.
+    async fn next_response(
+        ws: &mut DerivWsStream,
+        expected: &str,
+        secs: u64,
+    ) -> Result<serde_json::Value> {
+        let deadline = Instant::now() + Duration::from_secs(secs);
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                anyhow::bail!("timed out waiting for Deriv {expected} response");
+            }
+            let value = Self::next_json(ws, expected, remaining.as_secs().max(1)).await?;
+            if answers_request(&value, expected) {
+                return Ok(value);
+            }
+            debug!("Ignoring a Deriv frame while waiting for {expected}: {value}");
+        }
+    }
+
     /// Handshake + `authorize` against the legacy v3 API, failing over across
     /// hosts / `app_id` variants. Refuses non-demo accounts outright.
     async fn open_legacy_session(&self) -> Result<LegacySession> {
@@ -783,7 +817,7 @@ impl DerivExecution {
                 last_err = format!("{url}: failed to send authorize: {e}");
                 continue;
             }
-            let resp = match Self::next_json(&mut ws, "authorize", 15).await {
+            let resp = match Self::next_response(&mut ws, "authorize", 15).await {
                 Ok(v) => v,
                 Err(e) => {
                     last_err = format!("{url}: {e}");
@@ -923,7 +957,7 @@ impl DerivExecution {
             .await
             .map_err(|e| anyhow::anyhow!("failed to send Deriv buy: {e}"))?;
 
-        let buy_resp = Self::next_json(ws, "buy", 20).await?;
+        let buy_resp = Self::next_response(ws, "buy", 20).await?;
         if buy_resp.get("error").is_some() {
             anyhow::bail!(
                 "{}",
@@ -970,7 +1004,7 @@ impl DerivExecution {
         ws.send(Message::Text(proposal.to_string().into()))
             .await
             .map_err(|e| anyhow::anyhow!("failed to send Deriv proposal: {e}"))?;
-        Self::next_json(ws, "proposal", 20).await
+        Self::next_response(ws, "proposal", 20).await
     }
 
     /// Log what Deriv currently sells for the underlying. Informational only:
@@ -1014,7 +1048,7 @@ impl DerivExecution {
         ws.send(Message::Text(req.to_string().into()))
             .await
             .map_err(|e| anyhow::anyhow!("failed to send Deriv contracts_for: {e}"))?;
-        let resp = Self::next_json(ws, "contracts_for", 15).await?;
+        let resp = Self::next_response(ws, "contracts_for", 15).await?;
         if let Some(rejection) = rejection_of(&resp) {
             anyhow::bail!(
                 "Deriv contracts_for error: {}: {}",
@@ -2034,6 +2068,29 @@ mod tests {
             ..spec("CALL", "intraday", 0, "1m", "1d")
         };
         assert!(open_ended.covers(300));
+    }
+
+    #[test]
+    fn a_response_must_answer_the_request_that_was_sent() {
+        // The frame that answers the request.
+        assert!(answers_request(
+            &json!({"msg_type": "proposal", "proposal": {"id": "x"}}),
+            "proposal"
+        ));
+        // Case-insensitive, and an error for the request must be surfaced too.
+        assert!(answers_request(&json!({"msg_type": "PROPOSAL"}), "proposal"));
+        assert!(answers_request(
+            &json!({"msg_type": "proposal", "error": {"code": "InvalidBarrier"}}),
+            "proposal"
+        ));
+        assert!(answers_request(&json!({"echo_req": {"proposal": 1}}), "proposal"));
+        // An unsolicited update, or the answer to the *other* request on the
+        // same socket, must not be mistaken for this response.
+        assert!(!answers_request(
+            &json!({"msg_type": "contracts_for", "contracts_for": {"available": []}}),
+            "proposal"
+        ));
+        assert!(!answers_request(&json!({"msg_type": "tick", "tick": {"quote": 1}}), "contracts_for"));
     }
 
     #[test]
