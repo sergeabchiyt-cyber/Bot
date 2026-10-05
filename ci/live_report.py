@@ -149,6 +149,12 @@ def main() -> int:
             print(f"* `{name}`: http {http} -> {json.dumps(vp)[:120] if vp else 'no body'}")
             continue
         rows = [r for r in vp.get("histogram", []) if isinstance(r, dict)]
+        if name.startswith("vp-6h") or name.startswith("vp-24h"):
+            if vp.get("window") != "CUSTOM":
+                print(f"* `{name}`: the deployed build predates `?start=&end=` "
+                      f"(answered with window={vp.get('window')}) — deploy the branch to "
+                      f"check whether SiftingIO's history covers the last hours")
+                continue
         print(f"* `{name}`: window={vp.get('window')} rows={vp.get('rows')} "
               f"row_height={vp.get('row_height')} row_mode={vp.get('row_mode')}")
         print(f"  range {vp.get('range_low')}..{vp.get('range_high')} "

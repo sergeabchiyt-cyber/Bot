@@ -39,7 +39,11 @@ use ws_server::AppState;
 fn synthetic_history(now_ms: i64) -> Vec<VpCandle> {
     const FIFTEEN_MIN: i64 = 15 * 60 * 1000;
     let bars = sifting_rest::SIFTING_HISTORY_CANDLE_LIMIT as i64;
-    let start = now_ms - bars * FIFTEEN_MIN;
+    // The chart draws epoch-aligned 15m buckets, so the stand-in history is
+    // aligned the same way — `ci/verify_candles.py` asserts the grid, and an
+    // unaligned seed would let a real alignment regression slip through it.
+    let end = now_ms - now_ms.rem_euclid(FIFTEEN_MIN);
+    let start = end - bars * FIFTEEN_MIN;
     let mut out = Vec::with_capacity(bars as usize);
     for i in 0..bars {
         let t = start + i * FIFTEEN_MIN;
