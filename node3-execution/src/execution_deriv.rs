@@ -29,12 +29,25 @@ const LEGACY_TEST_APP_ID: &str = "1089";
 const DERIV_ORIGIN: &str = "https://app.deriv.com";
 const DERIV_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 node3-execution/1.0";
 
+/// Underlying traded by Node 3 and the currency its proposals are priced in.
+const DERIV_SYMBOL: &str = "frxXAUUSD";
+const DERIV_CURRENCY: &str = "USD";
+
+/// Fixed duration of every automated contract.
+const DERIV_DURATION: u64 = 5;
+const DERIV_DURATION_UNIT: &str = "m";
+
+/// Digits used to render a relative barrier; XAUUSD has a pip size of 0.01.
+const DERIV_BARRIER_DECIMALS: usize = 2;
+
 pub struct DerivExecution {
     pub api_token: String,
     pub app_id: Option<String>,
     pub api_url: String,
     pub ws_url: String,
     pub http: reqwest::Client,
+    /// Stakes below this are clamped up: Deriv refuses to price them.
+    pub min_stake: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -282,6 +295,232 @@ fn pat_guidance(err: &anyhow::Error, app_id_configured: bool) -> String {
     format!("Deriv auth failed: {err:#}. {remedy}")
 }
 
+/// Duration as reported by `contracts_for` (`"15s"`, `"5m"`, `"1d"`, `"5t"`).
+///
+/// Tick windows are kept in ticks on purpose: they describe a tick count, not
+/// a wall-clock window, so they must never be compared against the duration of
+/// a time-based order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DurationSpec {
+    Secs(u64),
+    Ticks(u64),
+}
+
+impl DurationSpec {
+    fn parse(raw: &str) -> Option<Self> {
+        let raw = raw.trim().to_ascii_lowercase();
+        let split = raw.find(|c: char| !c.is_ascii_digit())?;
+        let (digits, unit) = raw.split_at(split);
+        let value: u64 = digits.parse().ok()?;
+        match unit.trim() {
+            "s" => Some(Self::Secs(value)),
+            "m" => Some(Self::Secs(value * 60)),
+            "h" => Some(Self::Secs(value * 3_600)),
+            "d" => Some(Self::Secs(value * 86_400)),
+            "t" => Some(Self::Ticks(value)),
+            _ => None,
+        }
+    }
+
+    /// Wall-clock seconds, or `None` for tick-based windows.
+    fn secs(self) -> Option<u64> {
+        match self {
+            Self::Secs(secs) => Some(secs),
+            Self::Ticks(_) => None,
+        }
+    }
+}
+
+/// Duration of a fixed order in seconds.
+fn duration_secs(value: u64, unit: &str) -> u64 {
+    match unit {
+        "m" => value * 60,
+        "h" => value * 3_600,
+        "d" => value * 86_400,
+        _ => value,
+    }
+}
+
+/// One entry of a `contracts_for` response: a contract Deriv is willing to
+/// sell for the underlying right now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ContractSpec {
+    contract_type: String,
+    expiry_type: String,
+    /// Barrier count Deriv advertises for the contract. Kept for the log line
+    /// only: it is *not* a reliable signal of whether a proposal needs a
+    /// `barrier` field - `frxXAUUSD` advertises `barriers: 1` on its intraday
+    /// `CALL`/`PUT` entries (with a `"barrier": "+2.20"` example) while
+    /// rejecting every barrier and pricing only the barrier-less shape.
+    barriers: u32,
+    min_duration: Option<DurationSpec>,
+    max_duration: Option<DurationSpec>,
+}
+
+impl ContractSpec {
+    /// True when `secs` sits inside this contract's duration window.
+    fn covers(&self, secs: u64) -> bool {
+        let at_least_min = match self.min_duration {
+            None => true,
+            Some(min) => min.secs().map(|min| secs >= min).unwrap_or(false),
+        };
+        let at_most_max = match self.max_duration {
+            None => true,
+            Some(max) => max.secs().map(|max| secs <= max).unwrap_or(false),
+        };
+        at_least_min && at_most_max
+    }
+}
+
+/// Parse the `available` array of a `contracts_for` response.
+fn parse_contract_specs(body: &serde_json::Value) -> Vec<ContractSpec> {
+    let Some(items) = body["contracts_for"]["available"].as_array() else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let contract_type = item["contract_type"].as_str()?.trim().to_ascii_uppercase();
+            if contract_type.is_empty() {
+                return None;
+            }
+            Some(ContractSpec {
+                contract_type,
+                expiry_type: item["expiry_type"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_ascii_lowercase(),
+                barriers: item["barriers"].as_u64().unwrap_or(0).min(u32::MAX as u64) as u32,
+                min_duration: item["min_contract_duration"]
+                    .as_str()
+                    .and_then(DurationSpec::parse),
+                max_duration: item["max_contract_duration"]
+                    .as_str()
+                    .and_then(DurationSpec::parse),
+            })
+        })
+        .collect()
+}
+
+/// At-the-money contract for a direction: `CALL` = rise, `PUT` = fall.
+fn default_contract_type(side: &str) -> &'static str {
+    if side == "sell" {
+        "PUT"
+    } else {
+        "CALL"
+    }
+}
+
+/// Signed relative barrier for `side`, rounded to the symbol's pip size
+/// (`2.5` -> `"+2.50"` for a rise, `"-2.50"` for a fall).
+fn relative_barrier(side: &str, distance: f64) -> Option<String> {
+    if !distance.is_finite() {
+        return None;
+    }
+    // Never render "+0.00": Deriv reads that as at-the-money and rejects it
+    // for the barrier contracts this is used for.
+    let min_step = 10f64.powi(-(DERIV_BARRIER_DECIMALS as i32));
+    let magnitude = distance.abs().max(min_step);
+    let sign = if side == "sell" { '-' } else { '+' };
+    Some(format!("{sign}{magnitude:.prec$}", prec = DERIV_BARRIER_DECIMALS))
+}
+
+/// What Deriv said about a request it rejected.
+struct DerivRejection<'a> {
+    code: &'a str,
+    message: &'a str,
+    subcode: Option<&'a str>,
+}
+
+/// Read the `error` object of a response, if there is one.
+fn rejection_of(response: &serde_json::Value) -> Option<DerivRejection<'_>> {
+    let err = response.get("error")?;
+    Some(DerivRejection {
+        code: err["code"].as_str().unwrap_or(""),
+        message: err["message"].as_str().unwrap_or("request failed"),
+        subcode: err["subcode"].as_str(),
+    })
+}
+
+impl DerivRejection<'_> {
+    /// True when the rejection is about the `barrier` field - either Deriv
+    /// wanted one (Higher/Lower style contracts) or did not accept the one it
+    /// was sent. Those are the only failures worth re-proposing in the other
+    /// shape.
+    fn is_about_barrier(&self) -> bool {
+        self.subcode
+            .map(|subcode| subcode.eq_ignore_ascii_case("InvalidBarrier"))
+            .unwrap_or(false)
+            || self.message.to_ascii_lowercase().contains("barrier")
+    }
+}
+
+fn describe_duration(duration: DurationSpec) -> String {
+    match duration {
+        DurationSpec::Secs(secs) => format!("{secs}s"),
+        DurationSpec::Ticks(ticks) => format!("{ticks}t"),
+    }
+}
+
+/// One-line summary of a `contracts_for` snapshot, for the logs and for error
+/// messages that have to explain what Deriv *does* offer.
+fn describe_offered_specs(specs: &[ContractSpec]) -> String {
+    if specs.is_empty() {
+        return "no tradable contracts reported".to_string();
+    }
+    specs
+        .iter()
+        .map(|spec| {
+            format!(
+                "{} {} barriers={} {}..{}",
+                spec.contract_type,
+                spec.expiry_type,
+                spec.barriers,
+                spec.min_duration
+                    .map(describe_duration)
+                    .unwrap_or_else(|| "-".to_string()),
+                spec.max_duration
+                    .map(describe_duration)
+                    .unwrap_or_else(|| "-".to_string()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Fix for a rejected Deriv request, keyed off the code/subcode Deriv returns.
+fn contract_error_hint(
+    code: &str,
+    message: &str,
+    subcode: Option<&str>,
+) -> Option<&'static str> {
+    let message = message.to_ascii_lowercase();
+    let subcode = subcode.unwrap_or("");
+    if subcode.eq_ignore_ascii_case("InvalidBarrier") || message.contains("barrier") {
+        return Some(
+            "Deriv's frxXAUUSD intraday CALL/PUT is an at-the-money Rise/Fall contract: it prices without a `barrier`, while every barrier - relative or absolute, large or small - comes back `InvalidBarrier`, including the example `barrier` that `contracts_for` advertises for those entries. Node 3 proposes the barrier-less shape first and only re-proposes with one when Deriv asks for it; if this keeps failing, the `contracts_for` offerings logged with the order show what Deriv currently prices.",
+        );
+    }
+    if code.eq_ignore_ascii_case("OfferingsValidationError")
+        || message.contains("not offered for this duration")
+    {
+        return Some(
+            "Deriv does not offer this contract type for the requested duration on frxXAUUSD - check the `contracts_for` offerings logged with this order.",
+        );
+    }
+    if message.contains("stake amount") || message.contains("minimum stake") {
+        return Some(
+            "the stake is below Deriv's minimum: raise ORDER_SIZE (or DERIV_MIN_STAKE) to the amount named in the message.",
+        );
+    }
+    if message.contains("currency") {
+        return Some(
+            "proposals are priced in the account currency - DERIV_CURRENCY must match the demo account reported on GET /deriv.",
+        );
+    }
+    None
+}
+
 impl DerivExecution {
     pub fn new(config: &Config) -> Self {
         // Blank / whitespace-only values must behave exactly like "not set",
@@ -299,6 +538,7 @@ impl DerivExecution {
             api_url: config.deriv_api_url.clone(),
             ws_url: config.deriv_ws_url(),
             http: reqwest::Client::new(),
+            min_stake: config.deriv_min_stake,
         }
     }
 
@@ -600,49 +840,79 @@ impl DerivExecution {
     }
 
     /// Shared `proposal` -> `buy` flow used on both OTP and legacy sockets.
+    ///
     /// OTP sockets speak the current API (no `symbol` field); legacy sockets
     /// keep the historical payload untouched.
+    ///
+    /// Contract shape, measured against Deriv (see `ci/deriv_probe.py` and
+    /// `ci/deriv/DERIV.md`): an intraday `CALL`/`PUT` on `frxXAUUSD` is
+    /// **at-the-money Rise/Fall** and is priced *without* a `barrier` field.
+    /// Every barrier - relative or absolute, `+/-0.01` to `+/-15.00`,
+    /// including the `"barrier": "+2.20"` example that `contracts_for`
+    /// advertises on those entries - comes back
+    /// `ContractBuyValidationError: Invalid barrier.` The previous code
+    /// derived a barrier from `|tp - sl| / 2` and attached it to every
+    /// proposal, so no trade could ever be opened.
+    ///
+    /// The proposal is therefore sent barrier-less first, and re-proposed with
+    /// a signed relative barrier (the take-profit distance, rounded to the
+    /// symbol's pip size) only when Deriv *rejects* the barrier-less shape and
+    /// says the problem is the barrier - which is how a symbol whose contract
+    /// really is Higher/Lower grows into the right shape instead of guessing.
     async fn proposal_buy_flow(
+        &self,
         ws: &mut DerivWsStream,
         side: &str,
         stake: f64,
-        sl: f64,
+        entry: f64,
         tp: f64,
         otp_socket: bool,
     ) -> Result<(String, f64)> {
-        let contract_type = if side == "buy" { "CALL" } else { "PUT" };
-        let barrier = match side {
-            "buy" => format!("+{:.3}", (tp - sl).abs() / 2.0),
-            _ => format!("-{:.3}", (tp - sl).abs() / 2.0),
-        };
+        // The stop loss is tracked by Node 3 itself (see `diagnostics`): a
+        // Deriv contract has no stop-loss leg, only an expiry.
+        let stake = self.clamp_stake(stake);
+        let contract_type = default_contract_type(side);
+        self.log_contract_offerings(ws, otp_socket).await;
 
-        let mut proposal = json!({
-            "proposal": 1,
-            "amount": stake,
-            "basis": "stake",
-            "contract_type": contract_type,
-            "currency": "USD",
-            "underlying_symbol": "frxXAUUSD",
-            "duration": 5,
-            "duration_unit": "m",
-            "barrier": barrier,
-            "req_id": 1
-        });
-        if !otp_socket {
-            proposal["symbol"] = json!("frxXAUUSD");
+        let mut barrier: Option<String> = None;
+        let mut prop = Self::request_proposal(ws, otp_socket, contract_type, stake, None).await?;
+        let barrier_complaint = rejection_of(&prop)
+            .filter(|rejection| rejection.is_about_barrier())
+            .map(|rejection| (rejection.code.to_string(), rejection.message.to_string()));
+        if let Some((code, message)) = barrier_complaint {
+            if let Some(retry_barrier) = relative_barrier(side, (tp - entry).abs()) {
+                warn!(
+                    "Deriv rejected the barrier-less {contract_type} proposal ({code}: {message}); re-proposing with the relative barrier {retry_barrier}"
+                );
+                barrier = Some(retry_barrier);
+                prop = Self::request_proposal(
+                    ws,
+                    otp_socket,
+                    contract_type,
+                    stake,
+                    barrier.as_deref(),
+                )
+                .await?;
+            }
         }
-        ws.send(Message::Text(proposal.to_string().into()))
-            .await
-            .map_err(|e| anyhow::anyhow!("failed to send Deriv proposal: {e}"))?;
+        if prop.get("error").is_some() {
+            anyhow::bail!(
+                "{}",
+                Self::contract_rejection("proposal", contract_type, barrier.as_deref(), stake, &prop)
+            );
+        }
 
-        let prop = Self::next_json(ws, "proposal", 20).await?;
-        if let Some(err) = prop.get("error") {
-            anyhow::bail!("Deriv proposal error: {err}");
-        }
-        let proposal_id = prop["proposal"]["id"]
-            .as_str()
+        let proposal_id = json_id_to_string(&prop["proposal"]["id"])
             .ok_or_else(|| anyhow::anyhow!("no proposal id in Deriv response: {prop}"))?;
-        let ask_price = prop["proposal"]["ask_price"].as_f64().unwrap_or(stake);
+        // The current API answers with strings for money fields, the legacy API
+        // with numbers: accept both.
+        let ask_price = parse_f64(&prop["proposal"]["ask_price"]).unwrap_or(stake);
+        if let Some(longcode) = prop["proposal"]["longcode"].as_str() {
+            info!(
+                "Deriv proposal for {contract_type} (barrier {}) -> {longcode}",
+                barrier.as_deref().unwrap_or("none"),
+            );
+        }
 
         let buy = json!({
             "buy": proposal_id,
@@ -654,14 +924,153 @@ impl DerivExecution {
             .map_err(|e| anyhow::anyhow!("failed to send Deriv buy: {e}"))?;
 
         let buy_resp = Self::next_json(ws, "buy", 20).await?;
-        if let Some(err) = buy_resp.get("error") {
-            anyhow::bail!("Deriv buy error: {err}");
+        if buy_resp.get("error").is_some() {
+            anyhow::bail!(
+                "{}",
+                Self::contract_rejection("buy", contract_type, barrier.as_deref(), stake, &buy_resp)
+            );
         }
 
-        let contract_id = json_id_to_string(&buy_resp["buy"]["contract_id"])
-            .unwrap_or_else(|| "0".to_string());
-        let buy_price = buy_resp["buy"]["buy_price"].as_f64().unwrap_or(0.0);
+        let contract_id = json_id_to_string(&buy_resp["buy"]["contract_id"]).unwrap_or_else(|| {
+            warn!("Deriv buy response carried no contract_id: {buy_resp}");
+            "0".to_string()
+        });
+        let buy_price = parse_f64(&buy_resp["buy"]["buy_price"]).unwrap_or(ask_price);
         Ok((contract_id, buy_price))
+    }
+
+    /// One `proposal` request. The response is returned as-is, errors included,
+    /// so the caller can decide whether the other shape is worth a retry.
+    async fn request_proposal(
+        ws: &mut DerivWsStream,
+        otp_socket: bool,
+        contract_type: &str,
+        stake: f64,
+        barrier: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        let mut proposal = json!({
+            "proposal": 1,
+            "amount": stake,
+            "basis": "stake",
+            "contract_type": contract_type,
+            "currency": DERIV_CURRENCY,
+            "duration": DERIV_DURATION,
+            "duration_unit": DERIV_DURATION_UNIT,
+            "req_id": 1
+        });
+        if otp_socket {
+            proposal["underlying_symbol"] = json!(DERIV_SYMBOL);
+        } else {
+            proposal["symbol"] = json!(DERIV_SYMBOL);
+        }
+        if let Some(barrier) = barrier {
+            proposal["barrier"] = json!(barrier);
+        }
+
+        ws.send(Message::Text(proposal.to_string().into()))
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to send Deriv proposal: {e}"))?;
+        Self::next_json(ws, "proposal", 20).await
+    }
+
+    /// Log what Deriv currently sells for the underlying. Informational only:
+    /// which shape is priced is decided by Deriv's answer to the proposal, not
+    /// by this snapshot - `frxXAUUSD` advertises `"barriers": 1` **and** a
+    /// `"barrier": "+2.20"` example on its intraday `CALL`/`PUT` entries, yet
+    /// only the barrier-less proposal is accepted.
+    async fn log_contract_offerings(&self, ws: &mut DerivWsStream, otp_socket: bool) {
+        match Self::fetch_contract_specs(ws, otp_socket).await {
+            Ok(specs) => {
+                info!(
+                    "Deriv offerings for {DERIV_SYMBOL}: {}",
+                    describe_offered_specs(&specs)
+                );
+                let duration = duration_secs(DERIV_DURATION, DERIV_DURATION_UNIT);
+                if !specs.iter().any(|spec| spec.covers(duration)) {
+                    warn!(
+                        "none of Deriv's offerings covers {DERIV_DURATION}{DERIV_DURATION_UNIT} - the proposal response will show what Deriv actually supports"
+                    );
+                }
+            }
+            Err(e) => {
+                warn!("Deriv contracts_for lookup failed ({e:#}); continuing without the offering snapshot");
+            }
+        }
+    }
+
+    /// Ask Deriv what it is selling for the underlying right now.
+    /// `contracts_for` is public, so it works on the OTP socket too.
+    async fn fetch_contract_specs(
+        ws: &mut DerivWsStream,
+        otp_socket: bool,
+    ) -> Result<Vec<ContractSpec>> {
+        let mut req = json!({ "contracts_for": DERIV_SYMBOL, "req_id": 0 });
+        if !otp_socket {
+            // Both were removed from the current API: it prices in the
+            // account currency and no longer takes a product type.
+            req["currency"] = json!(DERIV_CURRENCY);
+            req["product_type"] = json!("basic");
+        }
+        ws.send(Message::Text(req.to_string().into()))
+            .await
+            .map_err(|e| anyhow::anyhow!("failed to send Deriv contracts_for: {e}"))?;
+        let resp = Self::next_json(ws, "contracts_for", 15).await?;
+        if let Some(rejection) = rejection_of(&resp) {
+            anyhow::bail!(
+                "Deriv contracts_for error: {}: {}",
+                rejection.code,
+                rejection.message
+            );
+        }
+        Ok(parse_contract_specs(&resp))
+    }
+
+    /// Operator-facing text for a rejected Deriv request: the raw error, the
+    /// exact shape that was sent (`echo_req` included) and the known remedy.
+    fn contract_rejection(
+        what: &str,
+        contract_type: &str,
+        barrier: Option<&str>,
+        stake: f64,
+        response: &serde_json::Value,
+    ) -> String {
+        let err = response
+            .get("error")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let code = err["code"].as_str().unwrap_or("");
+        let message = err["message"].as_str().unwrap_or("request failed");
+        let echo = response
+            .get("echo_req")
+            .map(serde_json::Value::to_string)
+            .unwrap_or_else(|| "-".to_string());
+        let barrier = barrier
+            .map(|barrier| format!(", barrier {barrier}"))
+            .unwrap_or_else(|| ", no barrier".to_string());
+        let mut text = format!(
+            "Deriv {what} error: {err} [sent: {contract_type} {DERIV_DURATION}{DERIV_DURATION_UNIT}{barrier}, stake {stake:.2} {DERIV_CURRENCY}, echo_req {echo}]"
+        );
+        if let Some(hint) = contract_error_hint(code, message, err["subcode"].as_str()) {
+            text.push_str(" Hint: ");
+            text.push_str(hint);
+        }
+        text
+    }
+
+    /// `ORDER_SIZE` has historically been set below Deriv's minimum stake,
+    /// which Deriv answers with `InvalidMinStake`:
+    /// `Please enter a stake amount that's at least 0.50.` (measured for
+    /// `frxXAUUSD` on a USD demo account, see `ci/deriv/DERIV.md`). Clamp up
+    /// (and say so) instead of losing the setup to a validation error.
+    fn clamp_stake(&self, stake: f64) -> f64 {
+        if !stake.is_finite() || stake < self.min_stake {
+            warn!(
+                "Order size {stake:.2} is below Deriv's minimum stake of {:.2} {DERIV_CURRENCY} - using {:.2} instead (raise ORDER_SIZE to silence this)",
+                self.min_stake, self.min_stake,
+            );
+            return self.min_stake;
+        }
+        stake
     }
 
     fn trade_event(
@@ -696,6 +1105,7 @@ impl DerivExecution {
         otp_url: &str,
         side: &str,
         stake: f64,
+        entry: f64,
         sl: f64,
         tp: f64,
     ) -> Result<TradeEvent> {
@@ -703,8 +1113,9 @@ impl DerivExecution {
         let mut ws = Self::connect_ws(otp_url).await.map_err(|e| {
             anyhow::anyhow!("Deriv OTP WebSocket ({}) failed: {e}", redact_ws_url(otp_url))
         })?;
-        let (contract_id, buy_price) =
-            Self::proposal_buy_flow(&mut ws, side, stake, sl, tp, true).await?;
+        let (contract_id, buy_price) = self
+            .proposal_buy_flow(&mut ws, side, stake, entry, tp, true)
+            .await?;
         let _ = ws.close(None).await;
         Ok(Self::trade_event(contract_id, buy_price, side, stake, sl, tp))
     }
@@ -713,6 +1124,7 @@ impl DerivExecution {
         &self,
         side: &str,
         stake: f64,
+        entry: f64,
         sl: f64,
         tp: f64,
     ) -> Result<TradeEvent> {
@@ -720,7 +1132,7 @@ impl DerivExecution {
             match self.fetch_otp_ws().await {
                 Ok(target) => {
                     return self
-                        .place_order_otp(&target.url, side, stake, sl, tp)
+                        .place_order_otp(&target.url, side, stake, entry, sl, tp)
                         .await;
                 }
                 Err(e) => {
@@ -736,8 +1148,9 @@ impl DerivExecution {
         }
 
         let mut session = self.open_legacy_session().await?;
-        let (contract_id, buy_price) =
-            Self::proposal_buy_flow(&mut session.ws, side, stake, sl, tp, false).await?;
+        let (contract_id, buy_price) = self
+            .proposal_buy_flow(&mut session.ws, side, stake, entry, tp, false)
+            .await?;
         let _ = session.ws.close(None).await;
         Ok(Self::trade_event(
             contract_id,
@@ -1248,6 +1661,7 @@ mod tests {
             deriv_demo_api: Some("a1-test-token".into()),
             deriv_app_id: app_id.map(String::from),
             deriv_api_url: api_url.into(),
+            deriv_min_stake: crate::config::DEFAULT_DERIV_MIN_STAKE,
             volume_threshold: 10_500.0,
             sl_min_pips: 200.0,
             sl_max_pips: 300.0,
@@ -1331,6 +1745,7 @@ mod tests {
             deriv_demo_api: Some(token.into()),
             deriv_app_id: app_id.map(String::from),
             deriv_api_url: "https://api.derivws.com".into(),
+            deriv_min_stake: crate::config::DEFAULT_DERIV_MIN_STAKE,
             volume_threshold: 10_500.0,
             sl_min_pips: 200.0,
             sl_max_pips: 300.0,
@@ -1556,6 +1971,193 @@ mod tests {
                 .contains("missing, duplicated or incorrect header sec-websocket-key"),
             "unexpected tungstenite error: {err}"
         );
+    }
+
+    fn spec(contract_type: &str, expiry: &str, barriers: u32, min: &str, max: &str) -> ContractSpec {
+        ContractSpec {
+            contract_type: contract_type.into(),
+            expiry_type: expiry.into(),
+            barriers,
+            min_duration: DurationSpec::parse(min),
+            max_duration: DurationSpec::parse(max),
+        }
+    }
+
+    #[test]
+    fn parses_contracts_for_specs() {
+        let body = json!({
+            "msg_type": "contracts_for",
+            "contracts_for": {
+                "available": [
+                    {"contract_type": "CALL", "expiry_type": "intraday", "barriers": 0,
+                     "min_contract_duration": "1m", "max_contract_duration": "1d"},
+                    {"contract_type": "put", "expiry_type": "intraday", "barriers": 0,
+                     "min_contract_duration": "15s", "max_contract_duration": "1d"},
+                    {"contract_type": "CALL", "expiry_type": "daily", "barriers": 1,
+                     "min_contract_duration": "1d", "max_contract_duration": "1d"},
+                    {"contract_type": "", "barriers": 0}
+                ]
+            }
+        });
+        let specs = parse_contract_specs(&body);
+        assert_eq!(specs.len(), 3, "empty contract types are skipped");
+        assert_eq!(specs[0].contract_type, "CALL");
+        assert_eq!(specs[0].barriers, 0);
+        assert_eq!(specs[0].min_duration, Some(DurationSpec::Secs(60)));
+        assert_eq!(specs[0].max_duration, Some(DurationSpec::Secs(86_400)));
+        assert_eq!(specs[1].contract_type, "PUT", "contract types are uppercased");
+        assert_eq!(specs[2].barriers, 1);
+        assert_eq!(specs[2].expiry_type, "daily");
+
+        // A response without `available` yields nothing instead of panicking.
+        assert!(parse_contract_specs(&json!({"msg_type": "contracts_for"})).is_empty());
+    }
+
+    #[test]
+    fn duration_specs_never_mix_ticks_with_wall_clock_windows() {
+        assert_eq!(DurationSpec::parse("15s"), Some(DurationSpec::Secs(15)));
+        assert_eq!(DurationSpec::parse("5m"), Some(DurationSpec::Secs(300)));
+        assert_eq!(DurationSpec::parse("2h"), Some(DurationSpec::Secs(7_200)));
+        assert_eq!(DurationSpec::parse("1d"), Some(DurationSpec::Secs(86_400)));
+        assert_eq!(DurationSpec::parse("5t"), Some(DurationSpec::Ticks(5)));
+        assert_eq!(DurationSpec::parse(""), None);
+        assert_eq!(DurationSpec::parse("m"), None);
+
+        // A 5 minute order is not covered by a tick-based window.
+        let tick_contract = spec("CALL", "tick", 0, "1t", "10t");
+        assert!(!tick_contract.covers(duration_secs(DERIV_DURATION, DERIV_DURATION_UNIT)));
+        assert_eq!(duration_secs(DERIV_DURATION, DERIV_DURATION_UNIT), 300);
+        // Windows without a lower / upper bound still match.
+        let open_ended = ContractSpec {
+            min_duration: None,
+            max_duration: None,
+            ..spec("CALL", "intraday", 0, "1m", "1d")
+        };
+        assert!(open_ended.covers(300));
+    }
+
+    #[test]
+    fn only_a_barrier_complaint_triggers_the_barrier_retry() {
+        // Exactly what `frxXAUUSD` answered when the production build sent
+        // `barrier: "+2.500"` with an intraday CALL.
+        let production = json!({
+            "error": {
+                "code": "ContractBuyValidationError",
+                "message": "Invalid barrier.",
+                "subcode": "InvalidBarrier"
+            }
+        });
+        let rejection = rejection_of(&production).expect("rejection");
+        assert!(rejection.is_about_barrier());
+        assert_eq!(rejection.code, "ContractBuyValidationError");
+
+        // A missing barrier on a Higher/Lower style contract reads the same way.
+        let missing = json!({"error": {"code": "ContractBuyValidationError", "message": "barrier is required"}});
+        assert!(rejection_of(&missing).unwrap().is_about_barrier());
+
+        // Everything else must be reported, not retried into another shape.
+        let stake = json!({
+            "error": {
+                "code": "ContractBuyValidationError",
+                "message": "Please enter a stake amount that's at least 0.50.",
+                "subcode": "InvalidMinStake"
+            }
+        });
+        assert!(!rejection_of(&stake).unwrap().is_about_barrier());
+        let duration = json!({
+            "error": {"code": "OfferingsValidationError", "message": "Trading is not offered for this duration."}
+        });
+        assert!(!rejection_of(&duration).unwrap().is_about_barrier());
+
+        // A response without an error has no rejection at all.
+        assert!(rejection_of(&json!({"msg_type": "proposal", "proposal": {"id": "x"}})).is_none());
+    }
+
+    #[test]
+    fn relative_barriers_are_signed_and_pip_sized() {
+        assert_eq!(relative_barrier("buy", 2.5).as_deref(), Some("+2.50"));
+        assert_eq!(relative_barrier("sell", 2.5).as_deref(), Some("-2.50"));
+        // Below one pip the barrier is rounded up instead of becoming "+0.00",
+        // which Deriv reads as at-the-money and rejects for these contracts.
+        assert_eq!(relative_barrier("buy", 0.0001).as_deref(), Some("+0.01"));
+        assert_eq!(relative_barrier("buy", f64::NAN), None);
+    }
+
+    #[test]
+    fn explains_the_errors_that_stopped_trading() {
+        let barrier = contract_error_hint(
+            "ContractBuyValidationError",
+            "Invalid barrier.",
+            Some("InvalidBarrier"),
+        )
+        .expect("barrier hint");
+        assert!(barrier.contains("at-the-money"));
+        assert!(barrier.to_lowercase().contains("barrier"));
+
+        let stake = contract_error_hint(
+            "ContractBuyValidationError",
+            "Please enter a stake amount that's at least 0.35.",
+            None,
+        )
+        .expect("stake hint");
+        assert!(stake.contains("ORDER_SIZE"));
+
+        assert!(contract_error_hint(
+            "OfferingsValidationError",
+            "Trading is not offered for this duration.",
+            None
+        )
+        .is_some());
+        assert!(contract_error_hint("SomethingElse", "boom", None).is_none());
+    }
+
+    #[test]
+    fn a_rejected_order_names_the_shape_that_was_sent() {
+        let response = json!({
+            "msg_type": "proposal",
+            "error": {
+                "code": "ContractBuyValidationError",
+                "message": "Invalid barrier.",
+                "subcode": "InvalidBarrier"
+            },
+            "echo_req": {"contract_type": "CALL", "amount": 0.50, "duration": 5, "duration_unit": "m"}
+        });
+        let text = DerivExecution::contract_rejection("proposal", "CALL", None, 0.50, &response);
+        assert!(text.starts_with("Deriv proposal error:"));
+        assert!(text.contains("CALL 5m"), "missing contract shape: {text}");
+        assert!(text.contains("no barrier"), "missing barrier state: {text}");
+        assert!(text.contains("echo_req"), "missing echo_req: {text}");
+        assert!(text.contains("Hint:"), "missing hint: {text}");
+
+        // A retried shape reports the barrier that was sent.
+        let text = DerivExecution::contract_rejection("buy", "CALL", Some("+6.00"), 0.50, &response);
+        assert!(text.contains("barrier +6.00"), "missing barrier: {text}");
+        assert!(text.starts_with("Deriv buy error:"));
+    }
+
+    #[test]
+    fn clamps_stakes_below_the_deriv_minimum() {
+        let exec = test_executor("https://api.derivws.com", None);
+        assert_eq!(exec.clamp_stake(0.01), 0.50);
+        assert_eq!(exec.clamp_stake(0.49), 0.50);
+        assert_eq!(exec.clamp_stake(0.50), 0.50);
+        assert_eq!(exec.clamp_stake(5.0), 5.0);
+        // NaN / negative sizes fall back to the minimum instead of going out.
+        assert_eq!(exec.clamp_stake(f64::NAN), 0.50);
+        assert_eq!(exec.clamp_stake(-1.0), 0.50);
+    }
+
+    #[test]
+    fn reads_money_fields_from_numbers_and_strings() {
+        // The current API answers with strings, the legacy API with numbers.
+        let current = json!({"ask_price": "0.35", "payout": "0.66", "buy_price": "0.35"});
+        assert_eq!(parse_f64(&current["ask_price"]), Some(0.35));
+        assert_eq!(parse_f64(&current["payout"]), Some(0.66));
+        assert_eq!(parse_f64(&current["buy_price"]), Some(0.35));
+        let legacy = json!({"ask_price": 0.35, "payout": 0.66});
+        assert_eq!(parse_f64(&legacy["ask_price"]), Some(0.35));
+        assert_eq!(parse_f64(&json!(null)), None);
+        assert_eq!(parse_f64(&json!("not a number")), None);
     }
 
     #[test]

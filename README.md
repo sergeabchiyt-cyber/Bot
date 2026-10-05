@@ -11,6 +11,7 @@ For detailed architecture, configuration parameters, WebSocket wire schema, and 
 - **Live Deriv Demo Account Monitor**: Streams real-time Deriv Demo account `balance`, `currency`, `account_id`, and live open contracts (`portfolio` + `proposal_open_contract` with unrealized PnL, spot price, payout, and expiry).
 - **Volume Profile Strategy**: Tracks Previous Week (`PW PoC/VaH/VaL`), Previous Session (`PS PoC`), and Current Week (`CW PoC/VaH/VaL`) levels.
 - **Break & Retest Engine**: Automated state machine with volume threshold confirmation (`> 10,500` on XAUUSD), retest zones (`±$0.50`), invalidation bounds (`$2.00`), and projected SL/TP/RR per level.
+- **Valid Deriv contract shapes**: Intraday `frxXAUUSD` trades as an at-the-money Rise/Fall contract with **no `barrier` field** (Deriv rejects any barrier with `InvalidBarrier`), with a signed-barrier re-proposal only if Deriv asks for one. Stakes below Deriv's minimum (`0.50` USD) are clamped up instead of failing. Evidence and how to reproduce: `ci/deriv_probe.py` → `ci/deriv/DERIV.md` (see [`node3-execution/README.md`](node3-execution/README.md#deriv-connection-notes)).
 - **Risk Management**: Dynamic ATR-based Stop Loss (`200–300` pips) and Take Profit (`600–800` pips) targeting a `2:1` to `3:1` Risk-to-Reward ratio.
 - **Multi-Venue Execution**: Supports Deriv Demo API, Chelsea Live MCP, or Node 1 Signal Mode.
 - **HTTP Endpoints**: CORS-enabled `GET /health`, `GET /diagnostics`, `GET /scanning`, `GET /open-trades`, and `GET /deriv` on port `10000`.

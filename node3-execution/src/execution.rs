@@ -112,7 +112,10 @@ impl ExecutionManager {
         let mut trade = match venue {
             ExecutionVenue::DerivDemo => {
                 let deriv = self.deriv.as_ref().expect("Deriv demo executor missing");
-                let mut t = deriv.place_order(side, size, sl, tp).await?;
+                // `entry` is the reference the relative barrier is measured
+                // from if Deriv ever rejects the barrier-less shape and asks
+                // for a Higher/Lower style contract.
+                let mut t = deriv.place_order(side, size, entry, sl, tp).await?;
                 if t.entry <= 0.0 {
                     t.entry = entry;
                 }

@@ -1,5 +1,11 @@
 use std::env;
 
+/// Default for `DERIV_MIN_STAKE`: the smallest stake Deriv prices for
+/// `frxXAUUSD` on a USD options account. Deriv answers a smaller stake with
+/// `InvalidMinStake` (`Please enter a stake amount that's at least 0.50.`), so
+/// `ORDER_SIZE` below it is clamped up in the Deriv flow.
+pub const DEFAULT_DERIV_MIN_STAKE: f64 = 0.50;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExecutionVenue {
     DerivDemo,
@@ -16,6 +22,10 @@ pub struct Config {
     pub deriv_demo_api: Option<String>,
     pub deriv_app_id: Option<String>,
     pub deriv_api_url: String,
+    /// Minimum stake accepted by the Deriv venue (USD). `ORDER_SIZE` used to
+    /// default to 0.01, which Deriv rejects with `InvalidMinStake:
+    /// Please enter a stake amount that's at least 0.50.`
+    pub deriv_min_stake: f64,
 
     // Strategy Parameters
     pub volume_threshold: f64,
@@ -66,6 +76,10 @@ impl Config {
             // HTTP 520 from cloud/VPS networks, so it is now only a fallback
             // (or an explicit override via DERIV_API_URL=wss://...).
             deriv_api_url: env_str("DERIV_API_URL", "https://api.derivws.com"),
+            // Deriv refuses stakes below the contract minimum ("Please enter
+            // a stake amount that's at least 0.50."), so ORDER_SIZE below it
+            // is clamped up rather than rejected.
+            deriv_min_stake: env_f64("DERIV_MIN_STAKE", DEFAULT_DERIV_MIN_STAKE),
 
             volume_threshold: env_f64("VOLUME_THRESHOLD", 10_500.0),
             sl_min_pips: env_f64("SL_MIN_PIPS", 200.0),
@@ -140,6 +154,7 @@ mod tests {
             deriv_demo_api: Some("test-token".into()),
             deriv_app_id: None,
             deriv_api_url: "https://api.derivws.com".into(),
+            deriv_min_stake: DEFAULT_DERIV_MIN_STAKE,
             volume_threshold: 10_500.0,
             sl_min_pips: 200.0,
             sl_max_pips: 300.0,
