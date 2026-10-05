@@ -21,7 +21,7 @@ use crate::config::Config;
 use crate::status::FeedStatus;
 use crate::tick_volume::TickVolumeStore;
 use crate::types::{TickVolumeBar, VpLevels, VpCandle, WsFrame};
-use crate::volume_profile::VolumeProfileEngine;
+use crate::volume_profile::{CustomRangeError, VolumeProfileEngine};
 
 /// Fourteen ATR true ranges need fifteen OHLC bars (the first close is the
 /// reference close for the first range). Replay just this recent candle tail
@@ -118,15 +118,19 @@ async fn levels_snapshot(State(state): State<AppState>) -> Json<Vec<VpLevels>> {
 /// `GET /vp?window=PW&rows=64`-> recompute that window with a different row
 ///                               count, to line the numbers up with a specific
 ///                               TradingView "Row Size" setting
+/// `GET /vp?start=<ms>&end=<ms>`
+///                            -> profile a hand-selected range from the
+///                               retained 1m history (`window=CUSTOM`), which
+///                               is how a Fixed Range Volume Profile drawn on
+///                               the chart is reproduced here exactly
+///
+/// 400 -> malformed `rows`/`start`/`end` (or an inverted range);
+/// 404 -> no profile computed for that window yet;
+/// 409 -> the range is valid but too little of it is still retained.
 async fn vp_audit(
     State(state): State<AppState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    let window = params
-        .get("window")
-        .map(|w| w.trim().to_ascii_uppercase())
-        .filter(|w| !w.is_empty())
-        .unwrap_or_else(|| "PW".to_string());
     let rows_override: Option<usize> = match params.get("rows") {
         Some(raw) => match raw.trim().parse::<usize>() {
             Ok(rows) => Some(rows.clamp(2, 5_000)),
@@ -143,6 +147,53 @@ async fn vp_audit(
         None => None,
     };
 
+    // Hand-selected range: the chart already knows which range it drew, so
+    // profile exactly that instead of one of the engine's own windows.
+    if params.contains_key("start") || params.contains_key("end") {
+        let (start, end) = match (parse_epoch_ms(&params, "start"), parse_epoch_ms(&params, "end"))
+        {
+            (Some(start), Some(end)) => (start, end),
+            _ => {
+                return (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": "start and end must both be epoch milliseconds"
+                    })),
+                )
+                    .into_response();
+            }
+        };
+        let vp = state.vp.read().await;
+        return match vp.audit_custom_range(start, end, rows_override) {
+            Ok(audit) => Json(audit).into_response(),
+            Err(err) => {
+                let status = match err {
+                    CustomRangeError::Invalid => axum::http::StatusCode::BAD_REQUEST,
+                    CustomRangeError::NotRetained => axum::http::StatusCode::CONFLICT,
+                };
+                let retained = vp
+                    .retained_bounds()
+                    .map(|(first, last)| serde_json::json!({ "first": first, "last": last }));
+                (
+                    status,
+                    Json(serde_json::json!({
+                        "error": err.message(),
+                        "start": start,
+                        "end": end,
+                        "retained": retained,
+                    })),
+                )
+                    .into_response()
+            }
+        };
+    }
+
+    let window = params
+        .get("window")
+        .map(|w| w.trim().to_ascii_uppercase())
+        .filter(|w| !w.is_empty())
+        .unwrap_or_else(|| "PW".to_string());
+
     let vp = state.vp.read().await;
     match vp.audit(&window, rows_override) {
         Some(audit) => Json(audit).into_response(),
@@ -155,6 +206,12 @@ async fn vp_audit(
         )
             .into_response(),
     }
+}
+
+/// Epoch milliseconds from a query parameter, or `None` when it is missing or
+/// not a number. Empty values (`?start=`) are rejected like a typo.
+fn parse_epoch_ms(params: &std::collections::HashMap<String, String>, key: &str) -> Option<i64> {
+    params.get(key)?.trim().parse::<i64>().ok()
 }
 
 async fn candles_snapshot(State(state): State<AppState>) -> Json<Vec<VpCandle>> {
@@ -238,6 +295,19 @@ async fn status_snapshot(State(state): State<AppState>) -> Response {
             model.va_pct,
         )
     };
+    // Where the chart history actually ends. `edge_lag_minutes` is the gap
+    // between the newest candle's bucket and now: a healthy live feed sits
+    // inside the in-progress bucket (< 15), while a large value means the
+    // history seed lagged the live stream at boot and the chart is showing a
+    // hole. Reported here because that is exactly the kind of thing a chart
+    // cannot tell you about itself.
+    let (bars, first_bar, last_bar, edge_lag_minutes) = {
+        let candles = state.cached_candles.read().await;
+        let first = candles.first().map(|c| c.time);
+        let last = candles.last().map(|c| c.time);
+        let lag = last.map(|t| (chrono::Utc::now().timestamp_millis() - t).max(0) / 60_000);
+        (candles.len(), first, last, lag)
+    };
     let body = serde_json::json!({
         "status": state.status.snapshot(),
         "venue": format!("{:?}", state.config.execution_venue()),
@@ -245,6 +315,10 @@ async fn status_snapshot(State(state): State<AppState>) -> Response {
         "candles": {
             "interval": "15m",
             "seed_bars": crate::sifting_rest::SIFTING_HISTORY_CANDLE_LIMIT,
+            "bars": bars,
+            "first_bar": first_bar,
+            "last_bar": last_bar,
+            "edge_lag_minutes": edge_lag_minutes,
         },
         "volume_profile": {
             "row_mode": row_mode,
@@ -793,6 +867,34 @@ mod tests {
         match f {
             WsFrame::Learn { data } => assert_eq!(data["target"], 0.0),
             other => panic!("wrong variant: {other:?}"),
+        }
+    }
+
+    /// `/vp?start=&end=` is the Fixed Range case: the caller picks the range,
+    /// so the failures it can hit are client errors, not 500s.
+    #[tokio::test]
+    async fn vp_custom_range_validates_its_parameters() {
+        // No 1m history is seeded in this router: a well-formed range is
+        // valid but not retained.
+        let res = send(
+            "GET",
+            "/vp?start=1700000000000&end=1700003600000",
+            Some(ALLOWED),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::CONFLICT);
+        assert_eq!(acao(&res).as_deref(), Some(ALLOWED));
+
+        // Half a pair, a non-numeric value and an inverted range are 400s.
+        for uri in [
+            "/vp?start=1700000000000",
+            "/vp?end=1700000000000",
+            "/vp?start=abc&end=def",
+            "/vp?start=1700003600000&end=1700000000000",
+        ] {
+            let res = send("GET", uri, Some(ALLOWED)).await;
+            assert_eq!(res.status(), StatusCode::BAD_REQUEST, "{uri}");
+            assert_eq!(acao(&res).as_deref(), Some(ALLOWED), "{uri}");
         }
     }
 }

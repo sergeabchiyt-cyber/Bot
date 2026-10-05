@@ -17,6 +17,7 @@ mod sifting_ws;
 mod tick_volume;
 mod ws_server;
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{info, warn};
@@ -38,7 +39,11 @@ use ws_server::AppState;
 fn synthetic_history(now_ms: i64) -> Vec<VpCandle> {
     const FIFTEEN_MIN: i64 = 15 * 60 * 1000;
     let bars = sifting_rest::SIFTING_HISTORY_CANDLE_LIMIT as i64;
-    let start = now_ms - bars * FIFTEEN_MIN;
+    // The chart draws epoch-aligned 15m buckets, so the stand-in history is
+    // aligned the same way — `ci/verify_candles.py` asserts the grid, and an
+    // unaligned seed would let a real alignment regression slip through it.
+    let end = now_ms - now_ms.rem_euclid(FIFTEEN_MIN);
+    let start = end - bars * FIFTEEN_MIN;
     let mut out = Vec::with_capacity(bars as usize);
     for i in 0..bars {
         let t = start + i * FIFTEEN_MIN;
@@ -168,7 +173,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .await
         {
-            Ok(candles_15m) => {
+            Ok(mut candles_15m) => {
                 debug_assert_eq!(
                     candles_15m.len(),
                     sifting_rest::SIFTING_HISTORY_CANDLE_LIMIT
@@ -177,6 +182,52 @@ async fn main() -> anyhow::Result<()> {
                     "Seeded exactly {} historical 15M chart/swing candles from SiftingIO",
                     candles_15m.len()
                 );
+
+                // SiftingIO's REST history can lag its own live stream, and the
+                // live stream only ever appends from "now" — so a restart would
+                // otherwise leave a hole between the seed's edge and the first
+                // live close that nothing ever fills. Ask for the tail
+                // explicitly; if the feed does not have it, say so out loud
+                // instead of shipping a silently truncated chart.
+                if let Some(edge) = candles_15m.last().map(|c| c.time) {
+                    let lag_ms = chrono::Utc::now().timestamp_millis() - edge;
+                    if lag_ms > 30 * 60_000 {
+                        match sifting_rest::fetch_sifting_klines_15m_since(
+                            &config.sifting_hist_url,
+                            &config.sifting_api_key,
+                            &config.sifting_symbol,
+                            edge,
+                        )
+                        .await
+                        {
+                            Ok(tail) if !tail.is_empty() => {
+                                let newest = tail.last().map(|c| c.time).unwrap_or(edge);
+                                let mut by_time: BTreeMap<i64, VpCandle> = candles_15m
+                                    .drain(..)
+                                    .map(|candle| (candle.time, candle))
+                                    .collect();
+                                for candle in tail {
+                                    by_time.insert(candle.time, candle);
+                                }
+                                candles_15m = by_time.into_values().collect();
+                                info!(
+                                    "SiftingIO history tail: filled {} gap bar(s), chart history now ends at {} ({} bars)",
+                                    candles_15m.len() - sifting_rest::SIFTING_HISTORY_CANDLE_LIMIT,
+                                    newest,
+                                    candles_15m.len()
+                                );
+                            }
+                            Ok(_) => warn!(
+                                "SiftingIO REST 15m history ends {} minutes behind the live stream; /status reports the gap until new buckets close",
+                                lag_ms / 60_000
+                            ),
+                            Err(e) => {
+                                warn!("SiftingIO 15m history tail fetch failed: {e}")
+                            }
+                        }
+                    }
+                }
+
                 *cached_candles.write().await = candles_15m.clone();
 
                 let now_ms = chrono::Utc::now().timestamp_millis();

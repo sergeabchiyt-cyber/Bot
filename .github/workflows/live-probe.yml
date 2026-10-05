@@ -1,0 +1,71 @@
+name: live-probe
+
+# Records what the *deployed* engine is serving (REST payloads + a short
+# WebSocket sample) into ci/live/, and a digest into ci/LIVE.md. Runs on a
+# GitHub runner because the development sandbox cannot reach the Render host.
+#
+# Trigger: push a change to the probe scripts, or run it by hand from the
+# Actions tab (workflow_dispatch) after a redeploy.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "ci/live-probe.sh"
+      - "ci/live_report.py"
+      - "ci/ws_probe.py"
+      - ".github/workflows/live-probe.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: live-probe-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe the deployed engine
+        run: bash ci/live-probe.sh
+
+      - name: Publish the snapshot to the branch
+        run: |
+          set -u
+          git config user.email ci@example.invalid
+          git config user.name ci
+          cp -r ci/live /tmp/live-snapshot
+          cp ci/LIVE.md /tmp/LIVE.md
+          for attempt in 1 2 3 4 5; do
+            # The build workflow publishes its proof log at the same time, so a
+            # push can lose the race. Discard the previous attempt completely
+            # (the snapshot itself lives in /tmp) and rebuild the commit on top
+            # of whatever the branch is now.
+            git fetch origin "${{ github.ref_name }}"
+            git checkout -B "${{ github.ref_name }}" "origin/${{ github.ref_name }}"
+            git reset --hard "origin/${{ github.ref_name }}"
+            git clean -fdq ci || true
+            rm -rf ci/live
+            cp -r /tmp/live-snapshot ci/live
+            cp /tmp/LIVE.md ci/LIVE.md
+            git add -f ci/live ci/LIVE.md
+            if git diff --cached --quiet; then
+              echo "no change since the last probe"
+              exit 0
+            fi
+            git commit -m "ci: live engine probe [skip ci]"
+            if git push origin "${{ github.ref_name }}"; then
+              exit 0
+            fi
+            echo "push lost a race (attempt $attempt); retrying"
+            sleep 5
+          done
+          echo "could not publish the probe snapshot" >&2
+          exit 1
+
+      - name: Step summary
+        if: always()
+        run: cat ci/LIVE.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true

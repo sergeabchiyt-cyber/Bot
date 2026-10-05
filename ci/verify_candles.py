@@ -9,6 +9,7 @@ usage: verify_candles.py <path-to-json>
 
 import json
 import sys
+import time
 
 KEYS = {"time", "open", "high", "low", "close", "volume", "source"}
 
@@ -38,6 +39,26 @@ if wobbly:
     print(f"note: {wobbly} duplicate timestamp(s) in the history")
 if loose:
     print(f"note: {len(loose)} candle(s) with open/close outside the high-low range (upstream artefact)")
+
+# The chart contract is 15M: every bar must sit on the same 15-minute grid the
+# engine buckets into, and consecutive bars must be a whole number of buckets
+# apart. A regression to 1m/5m bars (or a mislabelled interval) fails here.
+FIFTEEN_MIN_MS = 15 * 60_000
+off_grid = [t for t in times if t % FIFTEEN_MIN_MS != 0]
+assert not off_grid, f"{len(off_grid)} candle(s) off the 15m grid, first: {off_grid[0]}"
+deltas = [times[i] - times[i - 1] for i in range(1, len(times))]
+ragged = [d for d in deltas if d <= 0 or d % FIFTEEN_MIN_MS != 0]
+assert not ragged, f"{len(ragged)} gap(s) that are not whole 15m buckets, first: {ragged[0]}"
+regular = sum(1 for d in deltas if d == FIFTEEN_MIN_MS)
+print(f"grid: 15m ({regular}/{len(deltas)} gaps are exactly one bucket)")
+
+# A stale history seed leaves a hole between its last bar and the live stream;
+# report it instead of letting the chart discover it.
+age_min = (time.time() * 1000 - times[-1]) / 60_000
+print(f"history edge: {age_min:.0f} minutes behind now")
+if age_min > 120:
+    print(f"note: the newest candle is {age_min / 60:.1f}h old — /status edge_lag_minutes "
+          f"reports this, and the boot tail fetch should have closed the gap")
 
 print(f"candles: {len(candles)} bars, sources={sorted(sources)}")
 print(f"first: time={candles[0]['time']} close={candles[0]['close']}")

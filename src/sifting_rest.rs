@@ -9,6 +9,9 @@ use crate::types::VpCandle;
 /// The chart/swing seed remains exactly the largest SiftingIO 15m page.
 pub const SIFTING_HISTORY_CANDLE_LIMIT: usize = 2_000;
 const PROFILE_HISTORY_PAGE_LIMIT: usize = 2_000;
+/// One ascending page is enough to close a restart hole: 500 x 15m bars is
+/// over five days of buckets, and a longer outage is reported instead.
+const SIFTING_TAIL_CANDLE_LIMIT: usize = 500;
 const MAX_PROFILE_HISTORY_PAGES: usize = 32;
 const HISTORY_LOOKBACK_DAYS: i64 = 60;
 
@@ -191,6 +194,47 @@ pub async fn fetch_sifting_klines_15m(
     require_chart_seed(candles)
 }
 
+/// Fetch the 15m bars newer than `after_ms`, ascending.
+///
+/// SiftingIO's REST history can lag its own live stream — on the 2026-10 probe
+/// the newest seeded 15m bar was fifteen *hours* behind the live bucket — and
+/// the live stream only ever appends from "now". Without this tail the chart
+/// would boot with a hole between the seed's edge and the first live close,
+/// and nothing would ever fill it.
+pub async fn fetch_sifting_klines_15m_since(
+    base_url: &str,
+    api_key: &str,
+    symbol: &str,
+    after_ms: i64,
+) -> Result<Vec<VpCandle>> {
+    let now = Utc::now();
+    let start = DateTime::<Utc>::from_timestamp_millis(after_ms + 1)
+        .context("invalid 15m history tail timestamp")?;
+    if start >= now {
+        return Ok(Vec::new());
+    }
+    let url = history_url(
+        base_url,
+        symbol,
+        start,
+        now,
+        "15m",
+        "asc",
+        SIFTING_TAIL_CANDLE_LIMIT,
+        None,
+    )?;
+    let client = reqwest::Client::new();
+    let (candles, _) = get_page(&client, url, api_key, symbol, "15m").await?;
+    Ok(newer_than(candles, after_ms))
+}
+
+/// The strictly-newer bars. SiftingIO's `start` is inclusive, so the page can
+/// repeat the boundary bar the caller already has.
+fn newer_than(mut candles: Vec<VpCandle>, after_ms: i64) -> Vec<VpCandle> {
+    candles.retain(|candle| candle.time > after_ms);
+    candles
+}
+
 fn require_chart_seed(candles: Vec<VpCandle>) -> Result<Vec<VpCandle>> {
     if candles.len() != SIFTING_HISTORY_CANDLE_LIMIT {
         anyhow::bail!(
@@ -357,6 +401,16 @@ mod tests {
         assert!(url.as_str().contains("order=asc"));
         assert!(url.as_str().contains("limit=2000"));
         assert!(url.as_str().contains("cursor=cursor%2Fwith%2Breserved%3Dchars"));
+    }
+
+    #[test]
+    fn history_tail_drops_the_boundary_bar_and_keeps_the_newer_ones() {
+        let edge = 1_700_000_000_000;
+        let candles = vec![bar(edge), bar(edge + 15 * 60_000), bar(edge + 30 * 60_000)];
+        let tail = newer_than(candles, edge);
+        assert_eq!(tail.len(), 2);
+        assert_eq!(tail[0].time, edge + 15 * 60_000);
+        assert_eq!(tail[1].time, edge + 30 * 60_000);
     }
 
     fn bar(time: i64) -> VpCandle {

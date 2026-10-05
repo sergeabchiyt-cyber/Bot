@@ -1,0 +1,399 @@
+{"kind": "probe", "topics": ["levels", "candle", "tick_volume", "bubbles", "trades", "calendar"], "seconds": 45.0}
+{"type": "heartbeat"}
+{"type": "levels", "data": {"window": "PW", "poc": 4155.780000000001, "vah": 4182.6900000000005, "val": 4134.39, "start": 1790546400000, "end": 1790978400000, "timestamp": 1791213060213, "direction": "neutral", "swing_high": null, "swing_low": null, "sunday_open": 4287.25, "meta": {"row_mode": "rows", "row_height": 1.3800000000000001, "rows": 128, "range_high": 4287.25, "range_low": 4110.93, "input_interval": "5m", "input_bars": 1428, "total_volume": 17577744099.00134, "va_pct": 0.7}}}
+{"type": "levels", "data": {"window": "PS", "poc": 4137.549999999999, "vah": 4139.009999999999, "val": 4137.53, "start": 1791064800000, "end": 1791151200000, "timestamp": 1791213060213, "direction": "neutral", "swing_high": null, "swing_low": null, "meta": {"row_mode": "rows", "row_height": 0.04, "rows": 138, "range_high": 4143.02, "range_low": 4137.53, "input_interval": "1m", "input_bars": 60, "total_volume": 699645.9999994023, "va_pct": 0.7}}}
+{"type": "levels", "data": {"window": "SWING_BULL", "poc": 4141.99, "vah": 4144.929999999999, "val": 4138.929999999999, "start": 1791151200000, "end": 1791154800000, "timestamp": 1791212482046, "direction": "bullish", "swing_high": 4148.28, "swing_low": 4133.53, "meta": {"row_mode": "rows", "row_height": 0.12, "rows": 123, "range_high": 4148.28, "range_low": 4133.53, "input_interval": "15m", "input_bars": 4, "total_volume": 54567.99999994572, "va_pct": 0.7}}}
+{"type": "candle", "data": {"time": 1791144900000, "open": 4137.53, "high": 4138.24, "low": 4137.53, "close": 4137.53, "volume": 4766.0, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791145800000, "open": 4137.53, "high": 4138.08, "low": 4137.53, "close": 4137.53, "volume": 4706.0, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791146700000, "open": 4137.53, "high": 4138.07, "low": 4137.53, "close": 4137.53, "volume": 4694.0, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791147600000, "open": 4137.53, "high": 4138.07, "low": 4137.53, "close": 4137.53, "volume": 4947.0, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791148500000, "open": 4137.53, "high": 4138.07, "low": 4137.53, "close": 4137.53, "volume": 4819.0, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791149400000, "open": 4137.53, "high": 4143.02, "low": 4137.53, "close": 4143.02, "volume": 4619.0, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791150300000, "open": 4143.02, "high": 4143.02, "low": 4140.77, "close": 4142.73, "volume": 4768.0, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791151200000, "open": 4142.73, "high": 4146.11, "low": 4133.53, "close": 4141.5, "volume": 17929.0, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791152100000, "open": 4141.31, "high": 4142.13, "low": 4138.97, "close": 4141.26, "volume": 13616.0, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791153000000, "open": 4141.27, "high": 4143.52, "low": 4140.87, "close": 4142.58, "volume": 11941.0, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791153900000, "open": 4142.84, "high": 4148.28, "low": 4142.7, "close": 4147.91, "volume": 11082.0, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791154800000, "open": 4147.8, "high": 4147.8, "low": 4142.66, "close": 4145.09, "volume": 14164.0, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791155700000, "open": 4144.99, "high": 4146.54, "low": 4143.65, "close": 4145.53, "volume": 13846.0, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791156600000, "open": 4145.52, "high": 4145.89, "low": 4143.81, "close": 4144.38, "volume": 12869.0, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791157500000, "open": 4144.35, "high": 4144.35, "low": 4140.41, "close": 4142.43, "volume": 17531.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2438, "up_ticks": 788, "down_ticks": 863, "flat_ticks": 787, "close": 4140.01, "last_tick": 1791213076853, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "calendar", "data": {"count": 0, "events": [], "source": "pending"}}
+{"type": "status", "data": {"feeds": {"alltick": {"last_msg": 0, "msgs": 0, "state": "off (no token)"}, "binance": {"last_msg": 0, "msgs": 0, "state": "connected"}, "bitget": {"last_msg": 1791213074506, "msgs": 168, "state": "connected"}, "bybit": {"last_msg": 1791213072641, "msgs": 482, "state": "connected"}, "calendar": {"last_msg": 0, "msgs": 0, "state": "error"}, "econ_monitor": {"last_msg": 0, "msgs": 0, "state": "idle (no active event windows)"}, "gate": {"last_msg": 1791213075461, "msgs": 291, "state": "connected"}, "itick": {"last_msg": 0, "msgs": 0, "state": "off (no token)"}, "kraken": {"last_msg": 1791212893462, "msgs": 9, "state": "connected"}, "mcp_browser": {"last_msg": 0, "msgs": 0, "state": "error"}, "okx": {"last_msg": 1791213076766, "msgs": 543, "state": "connected"}, "sifting": {"last_msg": 1791213076953, "msgs": 2459, "state": "connected"}}, "ts": 1791213077115}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.02, "volume": 2439.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2439, "up_ticks": 789, "down_ticks": 863, "flat_ticks": 787, "close": 4140.02, "last_tick": 1791213077003, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.02, "volume": 2440.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2440, "up_ticks": 789, "down_ticks": 863, "flat_ticks": 788, "close": 4140.02, "last_tick": 1791213077153, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.03, "volume": 2441.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2441, "up_ticks": 790, "down_ticks": 863, "flat_ticks": 788, "close": 4140.03, "last_tick": 1791213077303, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.93, "volume": 2442.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2442, "up_ticks": 790, "down_ticks": 864, "flat_ticks": 788, "close": 4139.93, "last_tick": 1791213077453, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.91, "volume": 2443.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2443, "up_ticks": 790, "down_ticks": 865, "flat_ticks": 788, "close": 4139.91, "last_tick": 1791213077603, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.89, "volume": 2444.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2444, "up_ticks": 790, "down_ticks": 866, "flat_ticks": 788, "close": 4139.89, "last_tick": 1791213077753, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.89, "volume": 2445.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2445, "up_ticks": 790, "down_ticks": 866, "flat_ticks": 789, "close": 4139.89, "last_tick": 1791213077903, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.93, "volume": 2446.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2446, "up_ticks": 791, "down_ticks": 866, "flat_ticks": 789, "close": 4139.93, "last_tick": 1791213078053, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.88, "volume": 2447.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2447, "up_ticks": 791, "down_ticks": 867, "flat_ticks": 789, "close": 4139.88, "last_tick": 1791213078203, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.9, "volume": 2448.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2448, "up_ticks": 792, "down_ticks": 867, "flat_ticks": 789, "close": 4139.9, "last_tick": 1791213079253, "ticks_per_sec": 6.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.91, "volume": 2449.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2449, "up_ticks": 793, "down_ticks": 867, "flat_ticks": 789, "close": 4139.91, "last_tick": 1791213079703, "ticks_per_sec": 5.9, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.92, "volume": 2450.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2450, "up_ticks": 794, "down_ticks": 867, "flat_ticks": 789, "close": 4139.92, "last_tick": 1791213080003, "ticks_per_sec": 5.8, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.71, "volume": 2451.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2451, "up_ticks": 794, "down_ticks": 868, "flat_ticks": 789, "close": 4139.71, "last_tick": 1791213080303, "ticks_per_sec": 5.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.81, "volume": 2452.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2452, "up_ticks": 795, "down_ticks": 868, "flat_ticks": 789, "close": 4139.81, "last_tick": 1791213080603, "ticks_per_sec": 5.6, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.86, "volume": 2453.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2453, "up_ticks": 796, "down_ticks": 868, "flat_ticks": 789, "close": 4139.86, "last_tick": 1791213081053, "ticks_per_sec": 5.4, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.89, "volume": 2454.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2454, "up_ticks": 797, "down_ticks": 868, "flat_ticks": 789, "close": 4139.89, "last_tick": 1791213081503, "ticks_per_sec": 5.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.82, "volume": 2455.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2455, "up_ticks": 797, "down_ticks": 869, "flat_ticks": 789, "close": 4139.82, "last_tick": 1791213081953, "ticks_per_sec": 5.0, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.89, "volume": 2456.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2456, "up_ticks": 798, "down_ticks": 869, "flat_ticks": 789, "close": 4139.89, "last_tick": 1791213082253, "ticks_per_sec": 4.9, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.79, "volume": 2457.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2457, "up_ticks": 798, "down_ticks": 870, "flat_ticks": 789, "close": 4139.79, "last_tick": 1791213082703, "ticks_per_sec": 4.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.79, "volume": 2458.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2458, "up_ticks": 798, "down_ticks": 870, "flat_ticks": 790, "close": 4139.79, "last_tick": 1791213082853, "ticks_per_sec": 4.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.67, "volume": 2459.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2459, "up_ticks": 798, "down_ticks": 871, "flat_ticks": 790, "close": 4139.67, "last_tick": 1791213083003, "ticks_per_sec": 4.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.66, "volume": 2460.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2460, "up_ticks": 798, "down_ticks": 872, "flat_ticks": 790, "close": 4139.66, "last_tick": 1791213083303, "ticks_per_sec": 4.6, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.69, "volume": 2461.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2461, "up_ticks": 799, "down_ticks": 872, "flat_ticks": 790, "close": 4139.69, "last_tick": 1791213083753, "ticks_per_sec": 4.4, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.67, "volume": 2462.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2462, "up_ticks": 799, "down_ticks": 873, "flat_ticks": 790, "close": 4139.67, "last_tick": 1791213084053, "ticks_per_sec": 4.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.61, "volume": 2463.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2463, "up_ticks": 799, "down_ticks": 874, "flat_ticks": 790, "close": 4139.61, "last_tick": 1791213084353, "ticks_per_sec": 4.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.37, "volume": 2464.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2464, "up_ticks": 800, "down_ticks": 874, "flat_ticks": 790, "close": 4140.37, "last_tick": 1791213084503, "ticks_per_sec": 4.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.98, "volume": 2465.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2465, "up_ticks": 800, "down_ticks": 875, "flat_ticks": 790, "close": 4139.98, "last_tick": 1791213084653, "ticks_per_sec": 4.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.86, "volume": 2466.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2466, "up_ticks": 800, "down_ticks": 876, "flat_ticks": 790, "close": 4139.86, "last_tick": 1791213084953, "ticks_per_sec": 4.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.79, "volume": 2467.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2467, "up_ticks": 800, "down_ticks": 877, "flat_ticks": 790, "close": 4139.79, "last_tick": 1791213085553, "ticks_per_sec": 3.8, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.57, "volume": 2468.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2468, "up_ticks": 800, "down_ticks": 878, "flat_ticks": 790, "close": 4139.57, "last_tick": 1791213085703, "ticks_per_sec": 3.8, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.5, "volume": 2469.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2469, "up_ticks": 800, "down_ticks": 879, "flat_ticks": 790, "close": 4139.5, "last_tick": 1791213086003, "ticks_per_sec": 3.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.51, "volume": 2470.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2470, "up_ticks": 801, "down_ticks": 879, "flat_ticks": 790, "close": 4139.51, "last_tick": 1791213086303, "ticks_per_sec": 3.6, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.53, "volume": 2471.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2471, "up_ticks": 802, "down_ticks": 879, "flat_ticks": 790, "close": 4139.53, "last_tick": 1791213086603, "ticks_per_sec": 3.5, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.33, "volume": 2472.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2472, "up_ticks": 803, "down_ticks": 879, "flat_ticks": 790, "close": 4140.33, "last_tick": 1791213087053, "ticks_per_sec": 3.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.95, "volume": 2473.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2473, "up_ticks": 803, "down_ticks": 880, "flat_ticks": 790, "close": 4139.95, "last_tick": 1791213087353, "ticks_per_sec": 3.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.63, "volume": 2474.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2474, "up_ticks": 803, "down_ticks": 881, "flat_ticks": 790, "close": 4139.63, "last_tick": 1791213087653, "ticks_per_sec": 3.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.58, "volume": 2475.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2475, "up_ticks": 803, "down_ticks": 882, "flat_ticks": 790, "close": 4139.58, "last_tick": 1791213088553, "ticks_per_sec": 2.8, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.58, "volume": 2476.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2476, "up_ticks": 803, "down_ticks": 882, "flat_ticks": 791, "close": 4139.58, "last_tick": 1791213088703, "ticks_per_sec": 2.9, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.1, "volume": 2477.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2477, "up_ticks": 804, "down_ticks": 882, "flat_ticks": 791, "close": 4140.1, "last_tick": 1791213088853, "ticks_per_sec": 3.0, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.8, "volume": 2478.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2478, "up_ticks": 804, "down_ticks": 883, "flat_ticks": 791, "close": 4139.8, "last_tick": 1791213089003, "ticks_per_sec": 3.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.64, "volume": 2479.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2479, "up_ticks": 804, "down_ticks": 884, "flat_ticks": 791, "close": 4139.64, "last_tick": 1791213089303, "ticks_per_sec": 3.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.96, "volume": 2480.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2480, "up_ticks": 805, "down_ticks": 884, "flat_ticks": 791, "close": 4139.96, "last_tick": 1791213089903, "ticks_per_sec": 3.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.72, "volume": 2481.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2481, "up_ticks": 805, "down_ticks": 885, "flat_ticks": 791, "close": 4139.72, "last_tick": 1791213090053, "ticks_per_sec": 3.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.59, "volume": 2482.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2482, "up_ticks": 805, "down_ticks": 886, "flat_ticks": 791, "close": 4139.59, "last_tick": 1791213090203, "ticks_per_sec": 3.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.57, "volume": 2483.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2483, "up_ticks": 805, "down_ticks": 887, "flat_ticks": 791, "close": 4139.57, "last_tick": 1791213090503, "ticks_per_sec": 3.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.56, "volume": 2484.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2484, "up_ticks": 805, "down_ticks": 888, "flat_ticks": 791, "close": 4139.56, "last_tick": 1791213090803, "ticks_per_sec": 3.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.56, "volume": 2485.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2485, "up_ticks": 805, "down_ticks": 888, "flat_ticks": 792, "close": 4139.56, "last_tick": 1791213090953, "ticks_per_sec": 3.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.59, "volume": 2486.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2486, "up_ticks": 806, "down_ticks": 888, "flat_ticks": 792, "close": 4139.59, "last_tick": 1791213091253, "ticks_per_sec": 3.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.59, "volume": 2487.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2487, "up_ticks": 806, "down_ticks": 888, "flat_ticks": 793, "close": 4139.59, "last_tick": 1791213091703, "ticks_per_sec": 3.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.1, "volume": 2488.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2488, "up_ticks": 807, "down_ticks": 888, "flat_ticks": 793, "close": 4140.1, "last_tick": 1791213091853, "ticks_per_sec": 3.4, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.86, "volume": 2489.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2489, "up_ticks": 807, "down_ticks": 889, "flat_ticks": 793, "close": 4139.86, "last_tick": 1791213092153, "ticks_per_sec": 3.4, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.74, "volume": 2490.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2490, "up_ticks": 807, "down_ticks": 890, "flat_ticks": 793, "close": 4139.74, "last_tick": 1791213092303, "ticks_per_sec": 3.4, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.74, "volume": 2491.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2491, "up_ticks": 807, "down_ticks": 890, "flat_ticks": 794, "close": 4139.74, "last_tick": 1791213092603, "ticks_per_sec": 3.5, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.62, "volume": 2492.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2492, "up_ticks": 807, "down_ticks": 891, "flat_ticks": 794, "close": 4139.62, "last_tick": 1791213093203, "ticks_per_sec": 3.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.62, "volume": 2493.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2493, "up_ticks": 807, "down_ticks": 891, "flat_ticks": 795, "close": 4139.62, "last_tick": 1791213093353, "ticks_per_sec": 3.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.62, "volume": 2494.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2494, "up_ticks": 807, "down_ticks": 891, "flat_ticks": 796, "close": 4139.62, "last_tick": 1791213093503, "ticks_per_sec": 3.4, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.63, "volume": 2495.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2495, "up_ticks": 808, "down_ticks": 891, "flat_ticks": 796, "close": 4139.63, "last_tick": 1791213093653, "ticks_per_sec": 3.5, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.63, "volume": 2496.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2496, "up_ticks": 808, "down_ticks": 891, "flat_ticks": 797, "close": 4139.63, "last_tick": 1791213093803, "ticks_per_sec": 3.5, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.63, "volume": 2497.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2497, "up_ticks": 808, "down_ticks": 891, "flat_ticks": 798, "close": 4139.63, "last_tick": 1791213093953, "ticks_per_sec": 3.6, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.61, "volume": 2498.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2498, "up_ticks": 808, "down_ticks": 892, "flat_ticks": 798, "close": 4139.61, "last_tick": 1791213094103, "ticks_per_sec": 3.6, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.61, "volume": 2499.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2499, "up_ticks": 808, "down_ticks": 892, "flat_ticks": 799, "close": 4139.61, "last_tick": 1791213094253, "ticks_per_sec": 3.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.61, "volume": 2500.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2500, "up_ticks": 808, "down_ticks": 892, "flat_ticks": 800, "close": 4139.61, "last_tick": 1791213094403, "ticks_per_sec": 3.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.61, "volume": 2501.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2501, "up_ticks": 808, "down_ticks": 892, "flat_ticks": 801, "close": 4139.61, "last_tick": 1791213094553, "ticks_per_sec": 3.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.49, "volume": 2502.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2502, "up_ticks": 808, "down_ticks": 893, "flat_ticks": 801, "close": 4139.49, "last_tick": 1791213094703, "ticks_per_sec": 3.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.49, "volume": 2503.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2503, "up_ticks": 808, "down_ticks": 893, "flat_ticks": 802, "close": 4139.49, "last_tick": 1791213094853, "ticks_per_sec": 3.8, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.49, "volume": 2504.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2504, "up_ticks": 808, "down_ticks": 893, "flat_ticks": 803, "close": 4139.49, "last_tick": 1791213095003, "ticks_per_sec": 3.8, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.55, "volume": 2505.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2505, "up_ticks": 809, "down_ticks": 893, "flat_ticks": 803, "close": 4139.55, "last_tick": 1791213095153, "ticks_per_sec": 3.9, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.55, "volume": 2506.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2506, "up_ticks": 809, "down_ticks": 893, "flat_ticks": 804, "close": 4139.55, "last_tick": 1791213095303, "ticks_per_sec": 4.0, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.55, "volume": 2507.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2507, "up_ticks": 809, "down_ticks": 893, "flat_ticks": 805, "close": 4139.55, "last_tick": 1791213095453, "ticks_per_sec": 4.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.59, "volume": 2508.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2508, "up_ticks": 810, "down_ticks": 893, "flat_ticks": 805, "close": 4139.59, "last_tick": 1791213095603, "ticks_per_sec": 4.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.59, "volume": 2509.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2509, "up_ticks": 810, "down_ticks": 893, "flat_ticks": 806, "close": 4139.59, "last_tick": 1791213095753, "ticks_per_sec": 4.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.59, "volume": 2510.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2510, "up_ticks": 810, "down_ticks": 893, "flat_ticks": 807, "close": 4139.59, "last_tick": 1791213095903, "ticks_per_sec": 4.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.59, "volume": 2511.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2511, "up_ticks": 810, "down_ticks": 893, "flat_ticks": 808, "close": 4139.59, "last_tick": 1791213096053, "ticks_per_sec": 4.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.59, "volume": 2512.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2512, "up_ticks": 810, "down_ticks": 893, "flat_ticks": 809, "close": 4139.59, "last_tick": 1791213096203, "ticks_per_sec": 4.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.59, "volume": 2513.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2513, "up_ticks": 810, "down_ticks": 893, "flat_ticks": 810, "close": 4139.59, "last_tick": 1791213096353, "ticks_per_sec": 4.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.59, "volume": 2514.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2514, "up_ticks": 810, "down_ticks": 893, "flat_ticks": 811, "close": 4139.59, "last_tick": 1791213096503, "ticks_per_sec": 4.4, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.64, "volume": 2515.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2515, "up_ticks": 811, "down_ticks": 893, "flat_ticks": 811, "close": 4139.64, "last_tick": 1791213096653, "ticks_per_sec": 4.4, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.64, "volume": 2516.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2516, "up_ticks": 811, "down_ticks": 893, "flat_ticks": 812, "close": 4139.64, "last_tick": 1791213096803, "ticks_per_sec": 4.5, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.64, "volume": 2517.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2517, "up_ticks": 811, "down_ticks": 893, "flat_ticks": 813, "close": 4139.64, "last_tick": 1791213096953, "ticks_per_sec": 4.6, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.64, "volume": 2518.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2518, "up_ticks": 811, "down_ticks": 893, "flat_ticks": 814, "close": 4139.64, "last_tick": 1791213097103, "ticks_per_sec": 4.6, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.83, "volume": 2519.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2519, "up_ticks": 812, "down_ticks": 893, "flat_ticks": 814, "close": 4139.83, "last_tick": 1791213097253, "ticks_per_sec": 4.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.83, "volume": 2520.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2520, "up_ticks": 812, "down_ticks": 893, "flat_ticks": 815, "close": 4139.83, "last_tick": 1791213097403, "ticks_per_sec": 4.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.83, "volume": 2521.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2521, "up_ticks": 812, "down_ticks": 893, "flat_ticks": 816, "close": 4139.83, "last_tick": 1791213097553, "ticks_per_sec": 4.8, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.8, "volume": 2522.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2522, "up_ticks": 812, "down_ticks": 894, "flat_ticks": 816, "close": 4139.8, "last_tick": 1791213097703, "ticks_per_sec": 4.8, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.72, "volume": 2523.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2523, "up_ticks": 812, "down_ticks": 895, "flat_ticks": 816, "close": 4139.72, "last_tick": 1791213097853, "ticks_per_sec": 4.9, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.72, "volume": 2524.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2524, "up_ticks": 812, "down_ticks": 895, "flat_ticks": 817, "close": 4139.72, "last_tick": 1791213098003, "ticks_per_sec": 5.0, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.72, "volume": 2525.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2525, "up_ticks": 812, "down_ticks": 895, "flat_ticks": 818, "close": 4139.72, "last_tick": 1791213098153, "ticks_per_sec": 5.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.78, "volume": 2526.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2526, "up_ticks": 813, "down_ticks": 895, "flat_ticks": 818, "close": 4139.78, "last_tick": 1791213098303, "ticks_per_sec": 5.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.78, "volume": 2527.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2527, "up_ticks": 813, "down_ticks": 895, "flat_ticks": 819, "close": 4139.78, "last_tick": 1791213098453, "ticks_per_sec": 5.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.78, "volume": 2528.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2528, "up_ticks": 813, "down_ticks": 895, "flat_ticks": 820, "close": 4139.78, "last_tick": 1791213098603, "ticks_per_sec": 5.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.78, "volume": 2529.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2529, "up_ticks": 813, "down_ticks": 895, "flat_ticks": 821, "close": 4139.78, "last_tick": 1791213098753, "ticks_per_sec": 5.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.77, "volume": 2530.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2530, "up_ticks": 813, "down_ticks": 896, "flat_ticks": 821, "close": 4139.77, "last_tick": 1791213098903, "ticks_per_sec": 5.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.77, "volume": 2531.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2531, "up_ticks": 813, "down_ticks": 896, "flat_ticks": 822, "close": 4139.77, "last_tick": 1791213099053, "ticks_per_sec": 5.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.77, "volume": 2532.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2532, "up_ticks": 813, "down_ticks": 896, "flat_ticks": 823, "close": 4139.77, "last_tick": 1791213099203, "ticks_per_sec": 5.4, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.78, "volume": 2533.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2533, "up_ticks": 814, "down_ticks": 896, "flat_ticks": 823, "close": 4139.78, "last_tick": 1791213099353, "ticks_per_sec": 5.4, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.78, "volume": 2534.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2534, "up_ticks": 814, "down_ticks": 896, "flat_ticks": 824, "close": 4139.78, "last_tick": 1791213099503, "ticks_per_sec": 5.5, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.88, "volume": 2535.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2535, "up_ticks": 815, "down_ticks": 896, "flat_ticks": 824, "close": 4139.88, "last_tick": 1791213099653, "ticks_per_sec": 5.6, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.88, "volume": 2536.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2536, "up_ticks": 815, "down_ticks": 896, "flat_ticks": 825, "close": 4139.88, "last_tick": 1791213099803, "ticks_per_sec": 5.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.95, "volume": 2537.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2537, "up_ticks": 816, "down_ticks": 896, "flat_ticks": 825, "close": 4139.95, "last_tick": 1791213099953, "ticks_per_sec": 5.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.95, "volume": 2538.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2538, "up_ticks": 816, "down_ticks": 896, "flat_ticks": 826, "close": 4139.95, "last_tick": 1791213100103, "ticks_per_sec": 5.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.96, "volume": 2539.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2539, "up_ticks": 817, "down_ticks": 896, "flat_ticks": 826, "close": 4139.96, "last_tick": 1791213100253, "ticks_per_sec": 5.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.88, "volume": 2540.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2540, "up_ticks": 817, "down_ticks": 897, "flat_ticks": 826, "close": 4139.88, "last_tick": 1791213100403, "ticks_per_sec": 5.8, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.88, "volume": 2541.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2541, "up_ticks": 817, "down_ticks": 897, "flat_ticks": 827, "close": 4139.88, "last_tick": 1791213100553, "ticks_per_sec": 5.8, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.88, "volume": 2542.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2542, "up_ticks": 817, "down_ticks": 897, "flat_ticks": 828, "close": 4139.88, "last_tick": 1791213100703, "ticks_per_sec": 5.9, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.88, "volume": 2543.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2543, "up_ticks": 817, "down_ticks": 897, "flat_ticks": 829, "close": 4139.88, "last_tick": 1791213100853, "ticks_per_sec": 5.9, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.91, "volume": 2544.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2544, "up_ticks": 818, "down_ticks": 897, "flat_ticks": 829, "close": 4139.91, "last_tick": 1791213101003, "ticks_per_sec": 5.9, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.91, "volume": 2545.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2545, "up_ticks": 818, "down_ticks": 897, "flat_ticks": 830, "close": 4139.91, "last_tick": 1791213101153, "ticks_per_sec": 6.0, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.93, "volume": 2546.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2546, "up_ticks": 819, "down_ticks": 897, "flat_ticks": 830, "close": 4139.93, "last_tick": 1791213101303, "ticks_per_sec": 6.0, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.97, "volume": 2547.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2547, "up_ticks": 820, "down_ticks": 897, "flat_ticks": 830, "close": 4139.97, "last_tick": 1791213101453, "ticks_per_sec": 6.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.97, "volume": 2548.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2548, "up_ticks": 820, "down_ticks": 897, "flat_ticks": 831, "close": 4139.97, "last_tick": 1791213101603, "ticks_per_sec": 6.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.96, "volume": 2549.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2549, "up_ticks": 820, "down_ticks": 898, "flat_ticks": 831, "close": 4139.96, "last_tick": 1791213101753, "ticks_per_sec": 6.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.96, "volume": 2550.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2550, "up_ticks": 820, "down_ticks": 898, "flat_ticks": 832, "close": 4139.96, "last_tick": 1791213101903, "ticks_per_sec": 6.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.96, "volume": 2551.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2551, "up_ticks": 820, "down_ticks": 898, "flat_ticks": 833, "close": 4139.96, "last_tick": 1791213102053, "ticks_per_sec": 6.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.96, "volume": 2552.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2552, "up_ticks": 820, "down_ticks": 898, "flat_ticks": 834, "close": 4139.96, "last_tick": 1791213102203, "ticks_per_sec": 6.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.96, "volume": 2553.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2553, "up_ticks": 820, "down_ticks": 898, "flat_ticks": 835, "close": 4139.96, "last_tick": 1791213102353, "ticks_per_sec": 6.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.96, "volume": 2554.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2554, "up_ticks": 820, "down_ticks": 898, "flat_ticks": 836, "close": 4139.96, "last_tick": 1791213102503, "ticks_per_sec": 6.4, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.96, "volume": 2555.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2555, "up_ticks": 820, "down_ticks": 898, "flat_ticks": 837, "close": 4139.96, "last_tick": 1791213102653, "ticks_per_sec": 6.4, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.96, "volume": 2556.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2556, "up_ticks": 820, "down_ticks": 898, "flat_ticks": 838, "close": 4139.96, "last_tick": 1791213102803, "ticks_per_sec": 6.5, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.96, "volume": 2557.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2557, "up_ticks": 820, "down_ticks": 898, "flat_ticks": 839, "close": 4139.96, "last_tick": 1791213102953, "ticks_per_sec": 6.6, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.95, "volume": 2558.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2558, "up_ticks": 820, "down_ticks": 899, "flat_ticks": 839, "close": 4139.95, "last_tick": 1791213103103, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.99, "volume": 2559.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2559, "up_ticks": 821, "down_ticks": 899, "flat_ticks": 839, "close": 4139.99, "last_tick": 1791213103253, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.99, "volume": 2560.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2560, "up_ticks": 821, "down_ticks": 899, "flat_ticks": 840, "close": 4139.99, "last_tick": 1791213103403, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.09, "volume": 2561.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2561, "up_ticks": 822, "down_ticks": 899, "flat_ticks": 840, "close": 4140.09, "last_tick": 1791213103553, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.09, "volume": 2562.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2562, "up_ticks": 822, "down_ticks": 899, "flat_ticks": 841, "close": 4140.09, "last_tick": 1791213103703, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.07, "volume": 2563.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2563, "up_ticks": 822, "down_ticks": 900, "flat_ticks": 841, "close": 4140.07, "last_tick": 1791213103853, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.07, "volume": 2564.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2564, "up_ticks": 822, "down_ticks": 900, "flat_ticks": 842, "close": 4140.07, "last_tick": 1791213104003, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.89, "volume": 2565.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2565, "up_ticks": 822, "down_ticks": 901, "flat_ticks": 842, "close": 4139.89, "last_tick": 1791213104153, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.81, "volume": 2566.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2566, "up_ticks": 822, "down_ticks": 902, "flat_ticks": 842, "close": 4139.81, "last_tick": 1791213104303, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.81, "volume": 2567.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2567, "up_ticks": 822, "down_ticks": 902, "flat_ticks": 843, "close": 4139.81, "last_tick": 1791213104453, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.75, "volume": 2568.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2568, "up_ticks": 822, "down_ticks": 903, "flat_ticks": 843, "close": 4139.75, "last_tick": 1791213104603, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.75, "volume": 2569.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2569, "up_ticks": 822, "down_ticks": 903, "flat_ticks": 844, "close": 4139.75, "last_tick": 1791213104753, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.74, "volume": 2570.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2570, "up_ticks": 822, "down_ticks": 904, "flat_ticks": 844, "close": 4139.74, "last_tick": 1791213104903, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.74, "volume": 2571.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2571, "up_ticks": 822, "down_ticks": 904, "flat_ticks": 845, "close": 4139.74, "last_tick": 1791213105053, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.74, "volume": 2572.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2572, "up_ticks": 822, "down_ticks": 904, "flat_ticks": 846, "close": 4139.74, "last_tick": 1791213105203, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.74, "volume": 2573.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2573, "up_ticks": 822, "down_ticks": 904, "flat_ticks": 847, "close": 4139.74, "last_tick": 1791213105353, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.73, "volume": 2574.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2574, "up_ticks": 822, "down_ticks": 905, "flat_ticks": 847, "close": 4139.73, "last_tick": 1791213105503, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.73, "volume": 2575.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2575, "up_ticks": 822, "down_ticks": 905, "flat_ticks": 848, "close": 4139.73, "last_tick": 1791213105653, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.73, "volume": 2576.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2576, "up_ticks": 822, "down_ticks": 905, "flat_ticks": 849, "close": 4139.73, "last_tick": 1791213105803, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.78, "volume": 2577.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2577, "up_ticks": 823, "down_ticks": 905, "flat_ticks": 849, "close": 4139.78, "last_tick": 1791213105953, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.76, "volume": 2578.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2578, "up_ticks": 823, "down_ticks": 906, "flat_ticks": 849, "close": 4139.76, "last_tick": 1791213106103, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.76, "volume": 2579.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2579, "up_ticks": 823, "down_ticks": 906, "flat_ticks": 850, "close": 4139.76, "last_tick": 1791213106253, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.76, "volume": 2580.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2580, "up_ticks": 823, "down_ticks": 906, "flat_ticks": 851, "close": 4139.76, "last_tick": 1791213106403, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.75, "volume": 2581.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2581, "up_ticks": 823, "down_ticks": 907, "flat_ticks": 851, "close": 4139.75, "last_tick": 1791213106553, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.73, "volume": 2582.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2582, "up_ticks": 823, "down_ticks": 908, "flat_ticks": 851, "close": 4139.73, "last_tick": 1791213106703, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "heartbeat"}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.73, "volume": 2583.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2583, "up_ticks": 823, "down_ticks": 908, "flat_ticks": 852, "close": 4139.73, "last_tick": 1791213106853, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.62, "volume": 2584.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2584, "up_ticks": 823, "down_ticks": 909, "flat_ticks": 852, "close": 4139.62, "last_tick": 1791213107003, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.83, "volume": 2585.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2585, "up_ticks": 824, "down_ticks": 909, "flat_ticks": 852, "close": 4139.83, "last_tick": 1791213107153, "ticks_per_sec": 6.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.8, "volume": 2586.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2586, "up_ticks": 824, "down_ticks": 910, "flat_ticks": 852, "close": 4139.8, "last_tick": 1791213107453, "ticks_per_sec": 6.6, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.8, "volume": 2587.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2587, "up_ticks": 824, "down_ticks": 910, "flat_ticks": 853, "close": 4139.8, "last_tick": 1791213108053, "ticks_per_sec": 6.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.88, "volume": 2588.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2588, "up_ticks": 825, "down_ticks": 910, "flat_ticks": 853, "close": 4139.88, "last_tick": 1791213108203, "ticks_per_sec": 6.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.47, "volume": 2589.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2589, "up_ticks": 825, "down_ticks": 911, "flat_ticks": 853, "close": 4139.47, "last_tick": 1791213108803, "ticks_per_sec": 6.0, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.77, "volume": 2590.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2590, "up_ticks": 826, "down_ticks": 911, "flat_ticks": 853, "close": 4139.77, "last_tick": 1791213109553, "ticks_per_sec": 5.6, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.57, "volume": 2591.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2591, "up_ticks": 826, "down_ticks": 912, "flat_ticks": 853, "close": 4139.57, "last_tick": 1791213110003, "ticks_per_sec": 5.4, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.57, "volume": 2592.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2592, "up_ticks": 826, "down_ticks": 912, "flat_ticks": 854, "close": 4139.57, "last_tick": 1791213110303, "ticks_per_sec": 5.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.81, "volume": 2593.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2593, "up_ticks": 827, "down_ticks": 912, "flat_ticks": 854, "close": 4139.81, "last_tick": 1791213110453, "ticks_per_sec": 5.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.96, "volume": 2594.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2594, "up_ticks": 828, "down_ticks": 912, "flat_ticks": 854, "close": 4139.96, "last_tick": 1791213110603, "ticks_per_sec": 5.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.96, "volume": 2595.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2595, "up_ticks": 828, "down_ticks": 912, "flat_ticks": 855, "close": 4139.96, "last_tick": 1791213110903, "ticks_per_sec": 5.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.04, "volume": 2596.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2596, "up_ticks": 829, "down_ticks": 912, "flat_ticks": 855, "close": 4140.04, "last_tick": 1791213111053, "ticks_per_sec": 5.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.08, "volume": 2597.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2597, "up_ticks": 830, "down_ticks": 912, "flat_ticks": 855, "close": 4140.08, "last_tick": 1791213111203, "ticks_per_sec": 5.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.09, "volume": 2598.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2598, "up_ticks": 831, "down_ticks": 912, "flat_ticks": 855, "close": 4140.09, "last_tick": 1791213111653, "ticks_per_sec": 5.0, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.09, "volume": 2599.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2599, "up_ticks": 831, "down_ticks": 912, "flat_ticks": 856, "close": 4140.09, "last_tick": 1791213111803, "ticks_per_sec": 5.0, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.05, "volume": 2600.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2600, "up_ticks": 831, "down_ticks": 913, "flat_ticks": 856, "close": 4140.05, "last_tick": 1791213112403, "ticks_per_sec": 4.7, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.97, "volume": 2601.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2601, "up_ticks": 831, "down_ticks": 914, "flat_ticks": 856, "close": 4139.97, "last_tick": 1791213112703, "ticks_per_sec": 4.6, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.02, "volume": 2602.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2602, "up_ticks": 832, "down_ticks": 914, "flat_ticks": 856, "close": 4140.02, "last_tick": 1791213113003, "ticks_per_sec": 4.5, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.96, "volume": 2603.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2603, "up_ticks": 832, "down_ticks": 915, "flat_ticks": 856, "close": 4139.96, "last_tick": 1791213113453, "ticks_per_sec": 4.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.93, "volume": 2604.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2604, "up_ticks": 832, "down_ticks": 916, "flat_ticks": 856, "close": 4139.93, "last_tick": 1791213113603, "ticks_per_sec": 4.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.95, "volume": 2605.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2605, "up_ticks": 833, "down_ticks": 916, "flat_ticks": 856, "close": 4139.95, "last_tick": 1791213114203, "ticks_per_sec": 4.0, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.0, "volume": 2606.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2606, "up_ticks": 834, "down_ticks": 916, "flat_ticks": 856, "close": 4140.0, "last_tick": 1791213114503, "ticks_per_sec": 3.9, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.03, "volume": 2607.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2607, "up_ticks": 835, "down_ticks": 916, "flat_ticks": 856, "close": 4140.03, "last_tick": 1791213115103, "ticks_per_sec": 3.6, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.04, "volume": 2608.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2608, "up_ticks": 836, "down_ticks": 916, "flat_ticks": 856, "close": 4140.04, "last_tick": 1791213115403, "ticks_per_sec": 3.5, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4139.96, "volume": 2609.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2609, "up_ticks": 836, "down_ticks": 917, "flat_ticks": 856, "close": 4139.96, "last_tick": 1791213115553, "ticks_per_sec": 3.5, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.1, "volume": 2610.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2610, "up_ticks": 837, "down_ticks": 917, "flat_ticks": 856, "close": 4140.1, "last_tick": 1791213115703, "ticks_per_sec": 3.5, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.32, "volume": 2611.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2611, "up_ticks": 838, "down_ticks": 917, "flat_ticks": 856, "close": 4140.32, "last_tick": 1791213116153, "ticks_per_sec": 3.3, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.41, "volume": 2612.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2612, "up_ticks": 839, "down_ticks": 917, "flat_ticks": 856, "close": 4140.41, "last_tick": 1791213116753, "ticks_per_sec": 3.0, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.56, "volume": 2613.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2613, "up_ticks": 840, "down_ticks": 917, "flat_ticks": 856, "close": 4140.56, "last_tick": 1791213117353, "ticks_per_sec": 2.8, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.56, "volume": 2614.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2614, "up_ticks": 840, "down_ticks": 917, "flat_ticks": 857, "close": 4140.56, "last_tick": 1791213117503, "ticks_per_sec": 2.8, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.56, "volume": 2615.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2615, "up_ticks": 840, "down_ticks": 917, "flat_ticks": 858, "close": 4140.56, "last_tick": 1791213117803, "ticks_per_sec": 2.9, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.56, "volume": 2616.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2616, "up_ticks": 840, "down_ticks": 917, "flat_ticks": 859, "close": 4140.56, "last_tick": 1791213117953, "ticks_per_sec": 3.0, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.59, "volume": 2617.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2617, "up_ticks": 841, "down_ticks": 917, "flat_ticks": 859, "close": 4140.59, "last_tick": 1791213118403, "ticks_per_sec": 2.9, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.45, "volume": 2618.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2618, "up_ticks": 841, "down_ticks": 918, "flat_ticks": 859, "close": 4140.45, "last_tick": 1791213118853, "ticks_per_sec": 2.9, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.37, "volume": 2619.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2619, "up_ticks": 841, "down_ticks": 919, "flat_ticks": 859, "close": 4140.37, "last_tick": 1791213119303, "ticks_per_sec": 3.0, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.37, "volume": 2620.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2620, "up_ticks": 841, "down_ticks": 919, "flat_ticks": 860, "close": 4140.37, "last_tick": 1791213119453, "ticks_per_sec": 3.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.24, "volume": 2621.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2621, "up_ticks": 841, "down_ticks": 920, "flat_ticks": 860, "close": 4140.24, "last_tick": 1791213119753, "ticks_per_sec": 3.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.24, "volume": 2622.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2622, "up_ticks": 841, "down_ticks": 920, "flat_ticks": 861, "close": 4140.24, "last_tick": 1791213119903, "ticks_per_sec": 3.2, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.2, "volume": 2623.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2623, "up_ticks": 841, "down_ticks": 921, "flat_ticks": 861, "close": 4140.2, "last_tick": 1791213120353, "ticks_per_sec": 3.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.2, "volume": 2624.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2624, "up_ticks": 841, "down_ticks": 921, "flat_ticks": 862, "close": 4140.2, "last_tick": 1791213120503, "ticks_per_sec": 3.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.33, "volume": 2625.0, "source": "sifting"}}
+{"type": "tick_volume", "data": {"time": 1791212400000, "ticks": 2625, "up_ticks": 842, "down_ticks": 921, "flat_ticks": 862, "close": 4140.33, "last_tick": 1791213120803, "ticks_per_sec": 3.1, "closed": false, "source": "sifting"}}
+{"type": "candle", "data": {"time": 1791212400000, "open": 4145.03, "high": 4145.71, "low": 4139.28, "close": 4140.36, "volume": 2626.0, "source": "sifting"}}

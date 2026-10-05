@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Boots the release binary and proves, against the live process:
 #   1. /levels exposes a bounded PS window ending on a 18:00 NY session close
-#   1b. /vp serves the TradingView-parity histogram behind those levels
+#   1b. /vp serves the TradingView-parity histogram behind those levels, and
+#       profiles a hand-selected range (?start=&end=) as `CUSTOM`
 #   2. /calendar is actually populated with real ForexFactory events
 #   3. CORS lets the Node2 static origin (and only that origin) read the REST API
 #   4. /ws upgrades, replays levels + 15 candles, and fans Node3 trades to dashboards
@@ -54,6 +55,45 @@ echo
 echo "--- /vp histogram audit (TradingView row model + input resolution) ---"
 curl -sf "$BASE/vp?window=PS" -o /tmp/vp.json || fail "/vp request failed"
 python3 ci/verify_vp.py /tmp/vp.json PS || fail "/vp verification failed"
+
+echo
+echo "--- /vp custom range (profile exactly the range the chart drew) ---"
+PW_BOUNDS=$(python3 - <<'PY'
+import json
+try:
+    levels = json.load(open("/tmp/levels.json"))
+except Exception:
+    levels = []
+pw = next((lv for lv in levels if lv.get("window") == "PW"), None)
+print(f"{pw['start']} {pw['end']}" if pw else "")
+PY
+)
+PW_START=$(echo "$PW_BOUNDS" | cut -d' ' -f1)
+PW_END=$(echo "$PW_BOUNDS" | cut -d' ' -f2)
+if [ -n "$PW_START" ] && [ -n "$PW_END" ]; then
+  curl -sf "$BASE/vp?start=$PW_START&end=$PW_END" -o /tmp/vp_custom.json \
+    || fail "/vp custom range request failed"
+  python3 ci/verify_vp.py /tmp/vp_custom.json CUSTOM \
+    || fail "/vp custom range verification failed"
+  python3 - "$PW_START" "$PW_END" <<'PY' || fail "/vp custom range did not echo its bounds"
+import json, sys
+audit = json.load(open("/tmp/vp_custom.json"))
+start, end = int(sys.argv[1]), int(sys.argv[2])
+assert (audit["start"], audit["end"]) == (start, end), audit
+print(f"custom range: rows={audit['rows']} row_height={audit['row_height']:.4f} "
+      f"input={audit['input_interval']} ({audit['input_bars']} bars) poc={audit['poc']}")
+print("CUSTOM RANGE CHECK PASSED")
+PY
+else
+  echo "no PW window in /levels; skipping the custom-range check"
+fi
+
+# A hand-typed range must fail as a client error, never as a 500.
+for BAD in "/vp?start=abc&end=def" "/vp?start=100&end=99" "/vp?start=1700000000000"; do
+  CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE$BAD")
+  [ "$CODE" = "400" ] || fail "$BAD returned $CODE, expected 400"
+done
+echo "malformed / inverted / half ranges -> 400"
 
 echo
 echo "--- /calendar (waiting for first fetch) ---"
