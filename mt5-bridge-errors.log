@@ -4,93 +4,93 @@
 [1m[92m      Adding[0m tokio-tungstenite v0.26.2 [1m[33m(available: v0.30.0)[0m
 [1m[92m Downloading[0m crates ...
 [1m[92m  Downloaded[0m cpufeatures v0.2.17
-[1m[92m  Downloaded[0m cfg-if v1.0.5
-[1m[92m  Downloaded[0m futures-sink v0.3.34
 [1m[92m  Downloaded[0m block-buffer v0.10.4
-[1m[92m  Downloaded[0m autocfg v1.5.1
 [1m[92m  Downloaded[0m subtle v2.6.1
-[1m[92m  Downloaded[0m sha1 v0.10.7
-[1m[92m  Downloaded[0m thread_local v1.1.10
-[1m[92m  Downloaded[0m webpki-roots v0.26.11
-[1m[92m  Downloaded[0m utf-8 v0.7.6
-[1m[92m  Downloaded[0m futures-task v0.3.34
-[1m[92m  Downloaded[0m tracing-log v0.2.0
-[1m[92m  Downloaded[0m iana-time-zone v0.1.65
-[1m[92m  Downloaded[0m anyhow v1.0.104
-[1m[92m  Downloaded[0m shlex v2.0.1
-[1m[92m  Downloaded[0m version_check v0.9.5
-[1m[92m  Downloaded[0m untrusted v0.9.0
-[1m[92m  Downloaded[0m futures-macro v0.3.34
+[1m[92m  Downloaded[0m autocfg v1.5.1
 [1m[92m  Downloaded[0m crypto-common v0.1.7
-[1m[92m  Downloaded[0m tokio-macros v2.7.2
-[1m[92m  Downloaded[0m itoa v1.0.18
-[1m[92m  Downloaded[0m matchers v0.2.0
+[1m[92m  Downloaded[0m httparse v1.10.1
+[1m[92m  Downloaded[0m bytes v1.12.1
+[1m[92m  Downloaded[0m rand_core v0.9.5
+[1m[92m  Downloaded[0m chrono v0.4.45
+[1m[92m  Downloaded[0m parking_lot v0.12.5
+[1m[92m  Downloaded[0m http v1.5.0
+[1m[92m  Downloaded[0m lazy_static v1.5.1
+[1m[92m  Downloaded[0m futures-task v0.3.34
+[1m[92m  Downloaded[0m futures-macro v0.3.34
 [1m[92m  Downloaded[0m futures-core v0.3.34
-[1m[92m  Downloaded[0m zmij v1.0.23
+[1m[92m  Downloaded[0m futures-sink v0.3.34
+[1m[92m  Downloaded[0m once_cell v1.21.4
+[1m[92m  Downloaded[0m nu-ansi-term v0.50.3
+[1m[92m  Downloaded[0m matchers v0.2.0
+[1m[92m  Downloaded[0m itoa v1.0.18
+[1m[92m  Downloaded[0m aho-corasick v1.1.5
+[1m[92m  Downloaded[0m ppv-lite86 v0.2.21
 [1m[92m  Downloaded[0m errno v0.3.14
+[1m[92m  Downloaded[0m anyhow v1.0.104
+[1m[92m  Downloaded[0m utf-8 v0.7.6
+[1m[92m  Downloaded[0m untrusted v0.9.0
+[1m[92m  Downloaded[0m sha1 v0.10.7
 [1m[92m  Downloaded[0m quote v1.0.47
 [1m[92m  Downloaded[0m zeroize v1.9.0
-[1m[92m  Downloaded[0m lazy_static v1.5.1
-[1m[92m  Downloaded[0m tokio-rustls v0.26.6
 [1m[92m  Downloaded[0m thiserror-impl v2.0.21
-[1m[92m  Downloaded[0m unicode-ident v1.0.26
-[1m[92m  Downloaded[0m rand_core v0.9.5
-[1m[92m  Downloaded[0m tokio-tungstenite v0.26.2
-[1m[92m  Downloaded[0m signal-hook-registry v1.4.8
-[1m[92m  Downloaded[0m rand_chacha v0.9.0
-[1m[92m  Downloaded[0m smallvec v1.16.2
-[1m[92m  Downloaded[0m ppv-lite86 v0.2.21
-[1m[92m  Downloaded[0m nu-ansi-term v0.50.3
-[1m[92m  Downloaded[0m lock_api v0.4.14
-[1m[92m  Downloaded[0m generic-array v0.14.7
-[1m[92m  Downloaded[0m tracing-core v0.1.36
+[1m[92m  Downloaded[0m zmij v1.0.23
+[1m[92m  Downloaded[0m tracing-attributes v0.1.31
 [1m[92m  Downloaded[0m tungstenite v0.26.2
-[1m[92m  Downloaded[0m serde_core v1.0.229
-[1m[92m  Downloaded[0m httparse v1.10.1
-[1m[92m  Downloaded[0m proc-macro2 v1.0.107
-[1m[92m  Downloaded[0m serde_derive v1.0.229
-[1m[92m  Downloaded[0m serde v1.0.229
-[1m[92m  Downloaded[0m rand v0.9.5
+[1m[92m  Downloaded[0m tracing-core v0.1.36
 [1m[92m  Downloaded[0m typenum v1.20.1
+[1m[92m  Downloaded[0m rand v0.9.5
 [1m[92m  Downloaded[0m memchr v2.8.3
+[1m[92m  Downloaded[0m mio v1.2.4
 [1m[92m  Downloaded[0m serde_json v1.0.151
 [1m[92m  Downloaded[0m futures-util v0.3.34
-[1m[92m  Downloaded[0m aho-corasick v1.1.5
-[1m[92m  Downloaded[0m tracing-subscriber v0.3.23
 [1m[92m  Downloaded[0m webpki-roots v1.0.9
-[1m[92m  Downloaded[0m chrono v0.4.45
-[1m[92m  Downloaded[0m http v1.5.0
-[1m[92m  Downloaded[0m mio v1.2.4
+[1m[92m  Downloaded[0m tracing-subscriber v0.3.23
+[1m[92m  Downloaded[0m serde v1.0.229
+[1m[92m  Downloaded[0m socket2 v0.6.5
+[1m[92m  Downloaded[0m sharded-slab v0.1.7
+[1m[92m  Downloaded[0m serde_derive v1.0.229
 [1m[92m  Downloaded[0m zerocopy v0.8.60
+[1m[92m  Downloaded[0m regex-syntax v0.8.11
 [1m[92m  Downloaded[0m syn v3.0.6
 [1m[92m  Downloaded[0m syn v2.0.119
 [1m[92m  Downloaded[0m rustls v0.23.45
-[1m[92m  Downloaded[0m regex-syntax v0.8.11
-[1m[92m  Downloaded[0m cc v1.6.0
-[1m[92m  Downloaded[0m rustls-webpki v0.103.15
-[1m[92m  Downloaded[0m log v0.4.34
-[1m[92m  Downloaded[0m num-traits v0.2.19
-[1m[92m  Downloaded[0m tracing v0.1.44
-[1m[92m  Downloaded[0m parking_lot v0.12.5
-[1m[92m  Downloaded[0m getrandom v0.3.4
-[1m[92m  Downloaded[0m digest v0.10.7
-[1m[92m  Downloaded[0m tracing-attributes v0.1.31
-[1m[92m  Downloaded[0m socket2 v0.6.5
-[1m[92m  Downloaded[0m sharded-slab v0.1.7
-[1m[92m  Downloaded[0m regex-automata v0.4.18
+[1m[92m  Downloaded[0m serde_core v1.0.229
 [1m[92m  Downloaded[0m rustls-pki-types v1.15.1
+[1m[92m  Downloaded[0m proc-macro2 v1.0.107
+[1m[92m  Downloaded[0m tracing v0.1.44
+[1m[92m  Downloaded[0m log v0.4.34
+[1m[92m  Downloaded[0m smallvec v1.16.2
+[1m[92m  Downloaded[0m slab v0.4.12
+[1m[92m  Downloaded[0m regex-automata v0.4.18
 [1m[92m  Downloaded[0m parking_lot_core v0.9.12
-[1m[92m  Downloaded[0m once_cell v1.21.4
+[1m[92m  Downloaded[0m num-traits v0.2.19
+[1m[92m  Downloaded[0m getrandom v0.3.4
 [1m[92m  Downloaded[0m getrandom v0.2.17
+[1m[92m  Downloaded[0m digest v0.10.7
+[1m[92m  Downloaded[0m cc v1.6.0
+[1m[92m  Downloaded[0m unicode-ident v1.0.26
+[1m[92m  Downloaded[0m tokio-tungstenite v0.26.2
+[1m[92m  Downloaded[0m tokio-rustls v0.26.6
+[1m[92m  Downloaded[0m thiserror v2.0.21
+[1m[92m  Downloaded[0m rustls-webpki v0.103.15
+[1m[92m  Downloaded[0m pin-project-lite v0.2.17
 [1m[92m  Downloaded[0m find-msvc-tools v0.1.14
 [1m[92m  Downloaded[0m data-encoding v2.11.1
-[1m[92m  Downloaded[0m bytes v1.12.1
-[1m[92m  Downloaded[0m thiserror v2.0.21
-[1m[92m  Downloaded[0m scopeguard v1.2.0
-[1m[92m  Downloaded[0m slab v0.4.12
-[1m[92m  Downloaded[0m pin-project-lite v0.2.17
-[1m[92m  Downloaded[0m libc v0.2.190
+[1m[92m  Downloaded[0m signal-hook-registry v1.4.8
+[1m[92m  Downloaded[0m shlex v2.0.1
 [1m[92m  Downloaded[0m tokio v1.53.2
+[1m[92m  Downloaded[0m libc v0.2.190
+[1m[92m  Downloaded[0m rand_chacha v0.9.0
+[1m[92m  Downloaded[0m lock_api v0.4.14
+[1m[92m  Downloaded[0m generic-array v0.14.7
+[1m[92m  Downloaded[0m webpki-roots v0.26.11
+[1m[92m  Downloaded[0m version_check v0.9.5
+[1m[92m  Downloaded[0m tracing-log v0.2.0
+[1m[92m  Downloaded[0m tokio-macros v2.7.2
+[1m[92m  Downloaded[0m thread_local v1.1.10
+[1m[92m  Downloaded[0m scopeguard v1.2.0
+[1m[92m  Downloaded[0m iana-time-zone v0.1.65
+[1m[92m  Downloaded[0m cfg-if v1.0.5
 [1m[92m  Downloaded[0m ring v0.17.14
 [1m[92m   Compiling[0m proc-macro2 v1.0.107
 [1m[92m   Compiling[0m unicode-ident v1.0.26
@@ -98,150 +98,98 @@
 [1m[92m   Compiling[0m libc v0.2.190
 [1m[92m    Checking[0m cfg-if v1.0.5
 [1m[92m   Compiling[0m version_check v0.9.5
-[1m[92m   Compiling[0m generic-array v0.14.7
-[1m[92m    Checking[0m zeroize v1.9.0
 [1m[92m    Checking[0m once_cell v1.21.4
+[1m[92m    Checking[0m zeroize v1.9.0
+[1m[92m   Compiling[0m generic-array v0.14.7
 [1m[92m    Checking[0m rustls-pki-types v1.15.1
 [1m[92m   Compiling[0m zerocopy v0.8.60
 [1m[92m   Compiling[0m getrandom v0.3.4
 [1m[92m    Checking[0m typenum v1.20.1
 [1m[92m   Compiling[0m syn v3.0.6
 [1m[92m    Checking[0m smallvec v1.16.2
-[1m[92m   Compiling[0m parking_lot_core v0.9.12
 [1m[92m    Checking[0m pin-project-lite v0.2.17
-[1m[92m    Checking[0m scopeguard v1.2.0
-[1m[92m   Compiling[0m serde_core v1.0.229
+[1m[92m   Compiling[0m parking_lot_core v0.9.12
 [1m[92m   Compiling[0m rustls v0.23.45
-[1m[92m    Checking[0m bytes v1.12.1
+[1m[92m    Checking[0m scopeguard v1.2.0
 [1m[92m    Checking[0m untrusted v0.9.0
-[1m[92m    Checking[0m rustls-webpki v0.103.15
-[1m[92m    Checking[0m block-buffer v0.10.4
+[1m[92m    Checking[0m bytes v1.12.1
+[1m[92m   Compiling[0m serde_core v1.0.229
 [1m[92m    Checking[0m crypto-common v0.1.7
+[1m[92m    Checking[0m block-buffer v0.10.4
+[1m[92m    Checking[0m rustls-webpki v0.103.15
 [1m[92m    Checking[0m lock_api v0.4.14
 [1m[92m    Checking[0m rand_core v0.9.5
 [1m[92m    Checking[0m errno v0.3.14
 [1m[92m   Compiling[0m httparse v1.10.1
-[1m[92m   Compiling[0m thiserror v2.0.21
-[1m[92m    Checking[0m subtle v2.6.1
-[1m[92m    Checking[0m itoa v1.0.18
 [1m[92m    Checking[0m log v0.4.34
+[1m[92m    Checking[0m subtle v2.6.1
 [1m[92m   Compiling[0m autocfg v1.5.1
+[1m[92m    Checking[0m itoa v1.0.18
+[1m[92m   Compiling[0m thiserror v2.0.21
 [1m[92m   Compiling[0m num-traits v0.2.19
-[1m[92m    Checking[0m parking_lot v0.12.5
 [1m[92m    Checking[0m signal-hook-registry v1.4.8
-[1m[92m    Checking[0m ppv-lite86 v0.2.21
+[1m[92m    Checking[0m parking_lot v0.12.5
 [1m[92m   Compiling[0m tokio-macros v2.7.2
-[1m[92m   Compiling[0m thiserror-impl v2.0.21
+[1m[92m    Checking[0m ppv-lite86 v0.2.21
 [1m[92m    Checking[0m rand_chacha v0.9.0
+[1m[92m   Compiling[0m thiserror-impl v2.0.21
 [1m[92m    Checking[0m digest v0.10.7
-[1m[92m    Checking[0m mio v1.2.4
 [1m[92m    Checking[0m socket2 v0.6.5
+[1m[92m    Checking[0m mio v1.2.4
 [1m[92m   Compiling[0m syn v2.0.119
 [1m[92m    Checking[0m tracing-core v0.1.36
-[1m[92m    Checking[0m regex-syntax v0.8.11
-[1m[92m   Compiling[0m zmij v1.0.23
 [1m[92m   Compiling[0m serde v1.0.229
+[1m[92m   Compiling[0m zmij v1.0.23
+[1m[92m    Checking[0m regex-syntax v0.8.11
 [1m[92m    Checking[0m cpufeatures v0.2.17
 [1m[92m    Checking[0m sha1 v0.10.7
 [1m[92m    Checking[0m tokio v1.53.2
 [1m[92m    Checking[0m rand v0.9.5
 [1m[92m    Checking[0m regex-automata v0.4.18
-[1m[92m   Compiling[0m serde_derive v1.0.229
 [1m[92m   Compiling[0m futures-macro v0.3.34
+[1m[92m   Compiling[0m serde_derive v1.0.229
 [1m[92m    Checking[0m http v1.5.0
 [1m[92m    Checking[0m webpki-roots v1.0.9
-[1m[92m    Checking[0m data-encoding v2.11.1
-[1m[92m    Checking[0m futures-task v0.3.34
-[1m[92m   Compiling[0m serde_json v1.0.151
-[1m[92m    Checking[0m lazy_static v1.5.1
+[1m[92m   Compiling[0m anyhow v1.0.104
 [1m[92m    Checking[0m futures-sink v0.3.34
+[1m[92m    Checking[0m lazy_static v1.5.1
+[1m[92m    Checking[0m data-encoding v2.11.1
 [1m[92m    Checking[0m utf-8 v0.7.6
 [1m[92m    Checking[0m futures-core v0.3.34
-[1m[92m   Compiling[0m anyhow v1.0.104
 [1m[92m    Checking[0m slab v0.4.12
+[1m[92m   Compiling[0m serde_json v1.0.151
+[1m[92m    Checking[0m futures-task v0.3.34
 [1m[92m    Checking[0m tokio-rustls v0.26.6
 [1m[92m    Checking[0m futures-util v0.3.34
 [1m[92m    Checking[0m tungstenite v0.26.2
-[1m[92m    Checking[0m sharded-slab v0.1.7
 [1m[92m   Compiling[0m tracing-attributes v0.1.31
+[1m[92m    Checking[0m sharded-slab v0.1.7
 [1m[92m    Checking[0m webpki-roots v0.26.11
 [1m[92m    Checking[0m matchers v0.2.0
 [1m[92m    Checking[0m tracing-log v0.2.0
 [1m[92m    Checking[0m thread_local v1.1.10
-[1m[92m    Checking[0m iana-time-zone v0.1.65
-[1m[92m    Checking[0m nu-ansi-term v0.50.3
-[1m[92m    Checking[0m memchr v2.8.3
-[1m[92m    Checking[0m chrono v0.4.45
 [1m[92m    Checking[0m tracing v0.1.44
+[1m[92m    Checking[0m iana-time-zone v0.1.65
+[1m[92m    Checking[0m memchr v2.8.3
+[1m[92m    Checking[0m nu-ansi-term v0.50.3
+[1m[92m    Checking[0m chrono v0.4.45
 [1m[92m    Checking[0m tracing-subscriber v0.3.23
 [1m[92m    Checking[0m tokio-tungstenite v0.26.2
 [1m[92m    Checking[0m mt5-bridge v0.1.0 (/home/runner/work/Bot/Bot/mt5-bridge)
-[1m[91merror[E0308][0m[1m: mismatched types[0m
-   [1m[94m--> [0msrc/ea_link.rs:525:64
+[1m[91merror[E0277][0m[1m: the trait bound `EaLink: LinkStatusProvider` is not satisfied[0m
+   [1m[94m--> [0msrc/main.rs:101:53
     [1m[94m|[0m
-[1m[94m525[0m [1m[94m|[0m                 let _ = self.events.send(LinkEvent::TradeEvent(message.fields));
-    [1m[94m|[0m                                          [1m[94m---------------------[0m [1m[91m^^^^^^^^^^^^^^[0m [1m[91mexpected `HashMap<String, String>`, found `BTreeMap<String, String>`[0m
-    [1m[94m|[0m                                          [1m[94m|[0m
-    [1m[94m|[0m                                          [1m[94marguments to this enum variant are incorrect[0m
+[1m[94m101[0m [1m[94m|[0m         let provider: Arc<dyn LinkStatusProvider> = ea_link.clone();
+    [1m[94m|[0m                                                     [1m[91m^^^^^^^^^^^^^^^[0m [1m[91mthe trait `LinkStatusProvider` is not implemented for `EaLink`[0m
     [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: expected struct `[1m[35mHashMap<std::string::String, std::string::String>[0m`
-               found struct `[1m[35mBTreeMap<std::string::String, std::string::String>[0m`
-[1m[92mnote[0m: tuple variant defined here
-   [1m[94m--> [0msrc/ea_link.rs:112:5
+[1m[96mhelp[0m: the trait `LinkStatusProvider` [1m[35mis[0m implemented for `[1m[35mFakeLink[0m`
+   [1m[94m--> [0msrc/fake.rs:825:1
     [1m[94m|[0m
-[1m[94m112[0m [1m[94m|[0m     TradeEvent(HashMap<String, String>),
-    [1m[94m|[0m     [1m[92m^^^^^^^^^^[0m
+[1m[94m825[0m [1m[94m|[0m impl LinkStatusProvider for FakeLink {
+    [1m[94m|[0m [1m[96m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+    [1m[94m= [0m[1mnote[0m: required for the cast from `Arc<EaLink>` to `Arc<dyn LinkStatusProvider>`
 
-[1m[91merror[E0308][0m[1m: mismatched types[0m
-   [1m[94m--> [0msrc/ea_link.rs:525:64
-    [1m[94m|[0m
-[1m[94m525[0m [1m[94m|[0m                 let _ = self.events.send(LinkEvent::TradeEvent(message.fields));
-    [1m[94m|[0m                                          [1m[94m---------------------[0m [1m[91m^^^^^^^^^^^^^^[0m [1m[91mexpected `HashMap<String, String>`, found `BTreeMap<String, String>`[0m
-    [1m[94m|[0m                                          [1m[94m|[0m
-    [1m[94m|[0m                                          [1m[94marguments to this enum variant are incorrect[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: expected struct `[1m[35mHashMap<std::string::String, std::string::String>[0m`
-               found struct `[1m[35mstd::collections::BTreeMap<std::string::String, std::string::String>[0m`
-[1m[92mnote[0m: tuple variant defined here
-   [1m[94m--> [0msrc/ea_link.rs:112:5
-    [1m[94m|[0m
-[1m[94m112[0m [1m[94m|[0m     TradeEvent(HashMap<String, String>),
-    [1m[94m|[0m     [1m[92m^^^^^^^^^^[0m
-
-[1m[33mwarning[0m[1m: unused variable: `account`[0m
-    [1m[94m--> [0msrc/bridge.rs:1470:13
-     [1m[94m|[0m
-[1m[94m1470[0m [1m[94m|[0m         let account = self.cached_account().await;
-     [1m[94m|[0m             [1m[33m^^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_account`[0m
-     [1m[94m|[0m
-     [1m[94m= [0m[1mnote[0m: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
-
-[1m[33mwarning[0m[1m: unused variable: `intent`[0m
-    [1m[94m--> [0msrc/bridge.rs:1574:5
-     [1m[94m|[0m
-[1m[94m1574[0m [1m[94m|[0m     intent: &OrderIntent,
-     [1m[94m|[0m     [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_intent`[0m
-
-[1m[33mwarning[0m[1m: value assigned to `expecting_items` is never read[0m
-   [1m[94m--> [0msrc/ea_link.rs:675:35
-    [1m[94m|[0m
-[1m[94m675[0m [1m[94m|[0m         let mut expecting_items = false;
-    [1m[94m|[0m                                   [1m[33m^^^^^[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mhelp[0m: maybe it is overwritten before being read?
-    [1m[94m= [0m[1mnote[0m: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
-
-[1m[33mwarning[0m[1m: value assigned to `expecting_items` is never read[0m
-   [1m[94m--> [0msrc/ea_link.rs:691:9
-    [1m[94m|[0m
-[1m[94m691[0m [1m[94m|[0m         expecting_items = false;
-    [1m[94m|[0m         [1m[33m^^^^^^^^^^^^^^^^^^^^^^^[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mhelp[0m: maybe it is overwritten before being read?
-
-[1mFor more information about this error, try `rustc --explain E0308`.[0m
-[1m[33mwarning[0m: `mt5-bridge` (lib) generated 2 warnings
-[1m[91merror[0m: could not compile `mt5-bridge` (lib) due to 1 previous error; 2 warnings emitted
+[1mFor more information about this error, try `rustc --explain E0277`.[0m
+[1m[91merror[0m: could not compile `mt5-bridge` (bin "mt5-bridge" test) due to 1 previous error
 [1m[33mwarning[0m: build failed, waiting for other jobs to finish...
-[1m[33mwarning[0m: `mt5-bridge` (lib test) generated 4 warnings (2 duplicates)
-[1m[91merror[0m: could not compile `mt5-bridge` (lib test) due to 1 previous error; 4 warnings emitted
+[1m[91merror[0m: could not compile `mt5-bridge` (bin "mt5-bridge") due to 1 previous error
