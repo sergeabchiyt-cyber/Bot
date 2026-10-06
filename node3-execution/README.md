@@ -93,7 +93,12 @@ TP_MIN_PIPS=600
 TP_MAX_PIPS=800
 RR_MIN=2.0
 RR_MAX=3.0
-ORDER_SIZE=0.01
+# Stake (USD) sent to Deriv, and the minimum Deriv will price. Deriv refuses
+# stakes below 0.50 for frxXAUUSD ("Please enter a stake amount that's at
+# least 0.50.", subcode InvalidMinStake), so ORDER_SIZE below it is clamped
+# up and a warning is logged.
+ORDER_SIZE=0.50
+DERIV_MIN_STAKE=0.50
 ```
 
 ## Running
@@ -128,10 +133,29 @@ docker build -t node3-execution . && docker run --env-file .env -p 10000:10000 n
   sec-websocket-key` — the connection never reaches Deriv.
 - **Demo only.** The Deriv venue refuses to trade on anything that is not a
   demo/virtual (`VRTC...`) account, on both the OTP and legacy flows.
-- **PAT + `DERIV_APP_ID`.** PAT REST calls are rejected by Deriv without a
-  `Deriv-App-ID` header, so PAT users must register a (free) app and set
-  `DERIV_APP_ID`. The `/deriv` endpoint and logs spell this out if it is
-  missing.
+- **Order shape (Rise/Fall, no barrier).** An intraday `CALL`/`PUT` on
+  `frxXAUUSD` is Deriv's at-the-money *Rise/Fall* contract, so the `proposal`
+  is sent **without** a `barrier` field. That is not a guess: `ci/deriv_probe.py`
+  (run by the `deriv-probe` workflow, report in `ci/deriv/DERIV.md`) probes
+  Deriv's live API, and Deriv prices the barrier-less shape while rejecting
+  every barrier — relative or absolute, `+/-0.01` to `+/-15.00`, including the
+  `"barrier": "+2.20"` example that `contracts_for` advertises on those
+  entries — with
+  `ContractBuyValidationError: Invalid barrier.` (`subcode InvalidBarrier`).
+  An earlier revision attached `+/- |tp - sl| / 2` to every proposal, so every
+  order failed with exactly that error.
+- **Shape fallback.** If Deriv ever rejects the barrier-less proposal and says
+  the problem is the barrier (a Higher/Lower style contract that wants one),
+  Node 3 re-proposes once with a signed relative barrier derived from the
+  take-profit distance and rounded to the symbol's pip size. Every order logs
+  the shape that was sent, the `longcode` Deriv priced, `echo_req` on
+  rejection, and the `contracts_for` snapshot of what Deriv currently offers —
+  so a rejected order names what happened instead of leaving the raw error.
+- **Minimum stake.** Deriv answers a stake below the contract minimum with
+  `InvalidMinStake` (`Please enter a stake amount that's at least 0.50.` for
+  `frxXAUUSD`); `ORDER_SIZE` below `DERIV_MIN_STAKE` (default `0.50`) is
+  clamped up with a warning, so a too-small `ORDER_SIZE` cannot silently kill
+  every trade.
 
 ### PAT credentials checklist
 

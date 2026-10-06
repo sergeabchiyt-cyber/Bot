@@ -188,8 +188,11 @@ async fn main() -> anyhow::Result<()> {
                                                         .await;
                                                 }
                                                 Err(e) => {
-                                                    error!("Trade execution failed: {e}");
-                                                    hub.record_trade_failed(&e.to_string()).await;
+                                                    // `{e:#}` prints the whole
+                                                    // anyhow chain, not just the
+                                                    // outermost message.
+                                                    error!("Trade execution failed: {e:#}");
+                                                    hub.record_trade_failed(&format!("{e:#}")).await;
                                                 }
                                             }
                                         }
