@@ -1,21 +1,42 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
+use std::sync::Arc;
 use tracing::{info, warn};
 use crate::config::{Config, ExecutionVenue};
 use crate::execution_chelsea::ChelseaExecution;
 use crate::execution_deriv::DerivExecution;
+use crate::execution_mt5::{Mt5BridgeLink, Mt5Execution};
 use crate::types::{ProjectedOrder, TradeEvent};
 
 pub struct ExecutionManager {
     pub config: Config,
     pub deriv: Option<DerivExecution>,
     pub chelsea: Option<ChelseaExecution>,
+    /// Deriv MT5 **demo** executor (broker-confirmed fills only). Present when
+    /// the MT5 venue is configured, so a halted venue still reports its state
+    /// through the same object the strategy uses.
+    pub mt5: Option<Mt5Execution>,
+    /// Shared bridge link, also held by `DiagnosticsHub` for `/mt5/*`.
+    pub mt5_link: Option<Arc<Mt5BridgeLink>>,
     pub atr: f64,
 }
 
 impl ExecutionManager {
+    /// Build an execution manager. `shared_link` lets the caller pass the
+    /// `Mt5BridgeLink` owned by `DiagnosticsHub`, so the venue the strategy uses
+    /// and the link `/mt5/*` reports on are the same object. When it is `None`
+    /// and the MT5 venue is configured, a private link is created (tests).
     pub fn new(config: Config) -> Self {
+        Self::new_with_link(config, None)
+    }
+
+    pub fn new_with_link(config: Config, shared_link: Option<Arc<Mt5BridgeLink>>) -> Self {
         let venue = config.execution_venue();
         info!("Node 3 Execution Venue: {:?}", venue);
+        if let Some(err) = config.venue_selection_error() {
+            // Fail closed: a contradictory venue configuration must never be
+            // resolved silently towards whichever credential happens to exist.
+            warn!("Execution venue configuration error: {err}");
+        }
 
         let deriv = match venue {
             ExecutionVenue::DerivDemo => Some(DerivExecution::new(&config)),
@@ -25,11 +46,24 @@ impl ExecutionManager {
             ExecutionVenue::ChelseaLive => Some(ChelseaExecution::new(&config)),
             _ => None,
         };
+        // The link exists whenever MT5 credentials are configured, regardless
+        // of which venue is selected: `/mt5/*` and the kill switch must keep
+        // working (and must be able to flatten) even if the strategy is not
+        // currently trading MT5.
+        let (mt5, mt5_link) = if config.mt5_configured() {
+            let link = shared_link.unwrap_or_else(|| Arc::new(Mt5BridgeLink::new(&config)));
+            let exec = Mt5Execution::new(&config, link.clone());
+            (Some(exec), Some(link))
+        } else {
+            (None, None)
+        };
 
         Self {
             config,
             deriv,
             chelsea,
+            mt5,
+            mt5_link,
             atr: 3.0,
         }
     }
@@ -102,6 +136,12 @@ impl ExecutionManager {
         level_name: &str,
     ) -> Result<TradeEvent> {
         let (sl, tp, _, _, rr) = self.compute_sl_tp_details(entry, side);
+
+        // Fail closed on a contradictory configuration instead of falling
+        // through to signal-only execution.
+        if let Some(err) = self.config.venue_selection_error() {
+            bail!("execution venue configuration error: {err}");
+        }
         let venue = self.config.execution_venue();
 
         info!(
@@ -128,6 +168,17 @@ impl ExecutionManager {
                     t.entry = entry;
                 }
                 t
+            }
+            ExecutionVenue::DerivMt5Demo => {
+                let mt5 = self
+                    .mt5
+                    .as_ref()
+                    .expect("MT5 demo executor missing despite venue selection");
+                // `size` is a status-quo parameter for the other venues; the MT5
+                // venue sizes in **lots** from MT5_VOLUME_LOTS and reports the
+                // broker's confirmed fill (never the requested price).
+                mt5.place_order(side, self.config.mt5_volume_lots, entry, sl, tp, level_name)
+                    .await?
             }
             ExecutionVenue::None => {
                 warn!("No execution venue credentials provided — simulated signal only");

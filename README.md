@@ -13,8 +13,9 @@ For detailed architecture, configuration parameters, WebSocket wire schema, and 
 - **Break & Retest Engine**: Automated state machine with volume threshold confirmation (`> 10,500` on XAUUSD), retest zones (`±$0.50`), invalidation bounds (`$2.00`), and projected SL/TP/RR per level.
 - **Valid Deriv contract shapes**: Intraday `frxXAUUSD` trades as an at-the-money Rise/Fall contract with **no `barrier` field** (Deriv rejects any barrier with `InvalidBarrier`), with a signed-barrier re-proposal only if Deriv asks for one. Stakes below Deriv's minimum (`0.50` USD) are clamped up instead of failing. Evidence and how to reproduce: `ci/deriv_probe.py` → `ci/deriv/DERIV.md` (see [`node3-execution/README.md`](node3-execution/README.md#deriv-connection-notes)).
 - **Risk Management**: Dynamic ATR-based Stop Loss (`200–300` pips) and Take Profit (`600–800` pips) targeting a `2:1` to `3:1` Risk-to-Reward ratio.
-- **Multi-Venue Execution**: Supports Deriv Demo API, Chelsea Live MCP, or Node 1 Signal Mode.
-- **HTTP Endpoints**: CORS-enabled `GET /health`, `GET /diagnostics`, `GET /scanning`, `GET /open-trades`, and `GET /deriv` on port `10000`.
+- **Multi-Venue Execution**: Supports Deriv MT5 **demo** (via the `mt5-bridge` service, see below), Deriv options Demo API, Chelsea Live MCP, or Node 1 Signal Mode. Venues are mutually exclusive and fail closed: configuring two without an explicit `EXECUTION_VENUE` is a startup error, and a configured-but-unavailable venue refuses trades instead of falling back to another one.
+- **Deriv MT5 Demo Bridge**: `mt5-bridge/` runs next to the MT5 terminal, dials out to this service, and gives it full control of the demo account — place/modify/close/close-all, halt/resume kill switch, account/positions/closed-deal history, reconciliation and restart-safe history. Demo-only, broker-confirmed fills only, no live fallback. See [`docs/mt5/EXECUTION_ARCHITECTURE.md`](docs/mt5/EXECUTION_ARCHITECTURE.md).
+- **HTTP Endpoints**: CORS-enabled `GET /health`, `GET /diagnostics`, `GET /scanning`, `GET /open-trades`, `GET /deriv`, `GET /mt5/account`, `GET /mt5/positions`, `GET /mt5/history`, `GET /mt5/status` and token-gated `POST /mt5/control` on port `10000`.
 
 ## Quick Start
 
@@ -47,7 +48,18 @@ curl http://localhost:10000/health        # -> ok
 curl http://localhost:10000/diagnostics   # -> Full JSON diagnostics snapshot
 curl http://localhost:10000/scanning      # -> Current scanned VP levels & armed setups
 curl http://localhost:10000/open-trades   # -> Node 3 open trades + Deriv open contracts
-curl http://localhost:10000/deriv         # -> Deriv Demo balance & open contracts
+curl http://localhost:10000/deriv         # -> Deriv options Demo balance & open contracts
+
+# Deriv MT5 demo (inert unless MT5_BRIDGE_TOKEN is set and the bridge dials in)
+curl http://localhost:10000/mt5/account     # -> configured/connected/authorized/account_type/... 
+curl http://localhost:10000/mt5/positions   # -> broker positions (volume, SL/TP, unrealized PnL)
+curl http://localhost:10000/mt5/history     # -> closed deals with realized P&L
+curl http://localhost:10000/mt5/status      # -> bridge/EA link state and counters
+
+# Operator kill switch (403 unless MT5_CONTROL_TOKEN is set and sent)
+curl -X POST http://localhost:10000/mt5/control \
+     -H "X-Control-Token: $MT5_CONTROL_TOKEN" \
+     -d '{"action":"halt","reason":"operator"}'   # halt | resume | close_all | close_position
 ```
 
 ### 5. Deriv credentials
@@ -70,3 +82,20 @@ DERIV_APP_ID=12345
 
 `GET /deriv` reports `token_kind`, `app_id_configured` and a `setup_hint` naming the
 missing variable, so a misconfiguration is visible without reading the service logs.
+
+### 6. Deriv MT5 demo venue (optional)
+
+Node 3 needs one secret for this venue — `MT5_BRIDGE_TOKEN` — plus an explicit
+venue selection when more than one venue is configured:
+
+```env
+EXECUTION_VENUE=deriv_mt5_demo
+MT5_BRIDGE_TOKEN=<shared with the bridge>
+MT5_CONTROL_TOKEN=<random; enables POST /mt5/control>
+MT5_VOLUME_LOTS=0.01        # lots, NOT ORDER_SIZE (that is an options stake in USD)
+```
+
+`MT5_LOGIN` / `MT5_PASSWORD` are read **only** by `mt5-bridge`, on the MT5 host.
+Build and run the bridge from [`mt5-bridge/README.md`](mt5-bridge/README.md); its
+live-demo checklist lives in
+[`docs/mt5/EXECUTION_ARCHITECTURE.md`](docs/mt5/EXECUTION_ARCHITECTURE.md).

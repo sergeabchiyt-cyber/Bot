@@ -4,3 +4,6 @@ node3-execution/target/
 node3-execution/.env
 build-errors.log
 __pycache__/
+mt5-bridge/target/
+mt5-bridge/data/
+mt5-bridge-errors.log

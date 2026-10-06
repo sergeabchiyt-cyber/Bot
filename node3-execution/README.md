@@ -24,12 +24,22 @@ High-performance, low-latency execution service built entirely in **Rust** to re
 |   5. Live Deriv Demo Account Monitor (Balance & Open Trades) |
 |   6. Outbound WSS (/ws) & REST (/diagnostics) for Frontend   |
 |                                                              |
-|   Routes to:                                                 |
-|   -> Deriv Demo API (if DERIV_DEMO_API is set)               |
+|   Routes to exactly one venue (mutually exclusive, fail closed): |
+|   -> Deriv MT5 demo via mt5-bridge (if MT5_BRIDGE_TOKEN)     |
+|   -> Deriv options Demo API (if DERIV_DEMO_API is set)       |
 |   -> Chelsea Live MCP (if MCP_CHELSEA_URL is set)            |
-|   -> Signal Mode (broadcasts TradeEvent to Node 1)           |
+|   -> Signal Mode (no venue credentials configured)           |
 +--------------------------------------------------------------+
 ```
+
+The Deriv MT5 demo venue executes through a separate service, `mt5-bridge/`,
+that runs next to the MT5 terminal and **dials out** to this one — see
+[`../docs/mt5/EXECUTION_ARCHITECTURE.md`](../docs/mt5/EXECUTION_ARCHITECTURE.md)
+and [`../mt5-bridge/README.md`](../mt5-bridge/README.md). Node 3 never holds MT5
+credentials, never opens an inbound connection to the terminal, never marks a
+trade open without a broker-confirmed fill, and refuses to trade (instead of
+falling back to another venue) when the bridge is disconnected, the account is
+not demo, or the symbol/stops do not validate.
 
 ## Strategy Logic Implemented
 1. **PW (Previous Week)**: Tracks Sunday 18:00 to Sunday 18:00 UTC-4 levels: `PW PoC`, `PW VaH`, `PW VaL`.
@@ -51,13 +61,24 @@ Production URL: `https://execution-southeastasia-sng-main.onrender.com`
 | `GET /scanning` | HTTPS | JSON `ScanningSnapshot` of all tracked VP levels and break/retest state machine setups. |
 | `GET /open-trades` (or `/trades`) | HTTPS | JSON `OpenTradesSnapshot` (`node3_open_trades`, `deriv_open_trades`, `recent_trades`). |
 | `GET /deriv` (or `/account`) | HTTPS | JSON `DerivAccountSnapshot` (`balance`, `currency`, `account_id`, `open_trades`, `total_unrealized_pnl`). |
+| `GET /mt5/account` | HTTPS | JSON `Mt5AccountSnapshot`: `configured`, `connected`, `authorized`, `account_type`, login/server, balance/equity/margin, symbol contract data, `halted`/`halt_reason`, `error`, `setup_hint`. |
+| `GET /mt5/positions` | HTTPS | JSON `Mt5PositionsSnapshot`: broker positions (volume, SL/TP, current price, unrealized PnL). |
+| `GET /mt5/history` | HTTPS | JSON `Mt5HistorySnapshot`: closed deals with profit/swap/commission and realized totals. |
+| `GET /mt5/status` | HTTPS | JSON `Mt5BridgeStatus`: bridge/EA link state, protocol, counters, uptime, last error. |
+| `POST /mt5/control` | HTTPS | Operator kill switch. `{"action":"halt"\|"resume"\|"close_all"\|"close_position"}`, requires `X-Control-Token: $MT5_CONTROL_TOKEN`; 403 when that token is unset. |
 
 ### WebSocket Topics & Client Commands
 
-On connection to `/ws`, Node 3 immediately sends the current `diagnostics`, `scanning`, `open_trades`, and `deriv_account` snapshots, and streams updates in real time.
+On connection to `/ws`, Node 3 immediately sends the current `diagnostics`, `scanning`, `open_trades`, `deriv_account`, `mt5_account`, `mt5_positions`, `mt5_history` and `bridge_status` snapshots, and streams updates in real time.
+
+The same endpoint also accepts the **MT5 bridge** connection: if the first frame
+is `{"type":"bridge_hello","token":"$MT5_BRIDGE_TOKEN",...}`, the socket becomes
+the bridge session (validated token, snapshot ingestion, command correlation) and
+is never treated as a browser client. `bridge_hello` / `bridge_hello_ack` /
+`bridge_ack` frames are never forwarded to frontends.
 
 Clients may optionally send:
-- `{"type": "subscribe", "topics": ["diagnostics", "scanning", "open_trades", "deriv_account", "trades", "diagnostic_event"]}`
+- `{"type": "subscribe", "topics": ["diagnostics", "scanning", "open_trades", "deriv_account", "mt5_account", "mt5_positions", "mt5_history", "bridge_status", "trades", "diagnostic_event"]}`
 - `{"type": "snapshot"}` (requests an immediate replay of all snapshots)
 - `{"type": "heartbeat"}` (replies with `{"type": "heartbeat"}`)
 
@@ -70,7 +91,10 @@ NODE1_WS_URL=wss://engine-southeastasia-sng-main.onrender.com/ws
 # Local HTTP & WebSocket port — hosting platforms inject PORT
 PORT=10000
 
-# Execution Venues (Only 1 minimum required)
+# Execution Venues — EXACTLY ONE. Setting two without picking one is a startup
+# error on purpose; selecting a venue whose credentials are missing fails too.
+#   deriv_mt5_demo | deriv_demo | chelsea_live | none
+EXECUTION_VENUE=
 # PAT (pat_...) tokens REQUIRE DERIV_APP_ID; legacy a1-... tokens do not.
 DERIV_DEMO_API=your_deriv_token
 # Required whenever DERIV_DEMO_API is a PAT (pat_...) token — register a free
@@ -99,6 +123,17 @@ RR_MAX=3.0
 # up and a warning is logged.
 ORDER_SIZE=0.50
 DERIV_MIN_STAKE=0.50
+
+# Deriv MT5 demo venue. MT5_LOGIN / MT5_PASSWORD live ONLY on the MT5 host, in
+# the bridge's environment; Node 3 never sees them.
+MT5_BRIDGE_TOKEN=            # required to enable the venue; absent => inert
+MT5_CONTROL_TOKEN=            # enables POST /mt5/control; absent => 403
+MT5_SYMBOL=XAUUSD             # requested instrument
+MT5_SYMBOL_MAP=               # explicit broker mapping, e.g. XAUUSD=XAUUSD.a
+MT5_VOLUME_LOTS=0.01          # lots — NOT ORDER_SIZE (that is an options stake)
+MT5_MAX_RISK_PER_TRADE=       # optional pre-send risk cap in account currency
+MT5_ORDER_TIMEOUT_MS=15000
+MT5_HISTORY_PAGE_SIZE=100
 ```
 
 ## Running

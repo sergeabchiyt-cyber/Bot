@@ -4,9 +4,12 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 
 use crate::config::Config;
+use crate::execution_mt5::Mt5BridgeLink;
 use crate::types::{
     ActivityLogEntry, DerivAccountSnapshot, DerivOpenContract, DiagnosticsSnapshot,
-    EngineWorkDiagnostics, OpenTradesSnapshot, ScanningSnapshot, TradeEvent, VpCandle, WsFrame,
+    EngineWorkDiagnostics, Mt5AccountSnapshot, Mt5BridgeStatus, Mt5Diagnostics,
+    Mt5HistorySnapshot, Mt5PositionsSnapshot, OpenTradesSnapshot, ScanningSnapshot, TradeEvent,
+    VpCandle, WsFrame,
 };
 
 const MAX_RECENT_EVENTS: usize = 50;
@@ -22,6 +25,12 @@ struct DiagnosticsInner {
     node3_open_trades: Vec<TradeEvent>,
     recent_trades: VecDeque<TradeEvent>,
     deriv_account: DerivAccountSnapshot,
+    /// Latest MT5 bridge snapshots (authoritative copy lives in the link; this
+    /// one is what `/diagnostics` and `/open-trades` render).
+    mt5_account: Mt5AccountSnapshot,
+    mt5_positions: Mt5PositionsSnapshot,
+    mt5_history: Mt5HistorySnapshot,
+    mt5_status: Mt5BridgeStatus,
     work: EngineWorkDiagnostics,
     recent_events: VecDeque<ActivityLogEntry>,
 }
@@ -31,6 +40,7 @@ pub struct DiagnosticsHub {
     inner: Arc<RwLock<DiagnosticsInner>>,
     tx: broadcast::Sender<WsFrame>,
     ws_clients: Arc<AtomicUsize>,
+    mt5: Arc<Mt5BridgeLink>,
 }
 
 impl DiagnosticsHub {
@@ -38,6 +48,19 @@ impl DiagnosticsHub {
         let (tx, _) = broadcast::channel(256);
         let started_at = now_ms();
         let deriv_configured = config.deriv_demo_api.is_some();
+        let mt5 = Arc::new(Mt5BridgeLink::new(config));
+
+        // Seed the MT5 view from configuration so `/mt5/account` is meaningful
+        // before the bridge ever connects (configured=false, clear error).
+        let mut mt5_account = Mt5AccountSnapshot::default();
+        mt5_account.configured = config.mt5_configured();
+        mt5_account.requested_symbol = config.mt5_symbol.clone();
+        if !config.mt5_configured() {
+            mt5_account.error = Some("MT5_BRIDGE_TOKEN is not set".into());
+        }
+        let mut mt5_status = Mt5BridgeStatus::default();
+        mt5_status.configured = config.mt5_configured();
+        mt5_status.protocol = crate::execution_mt5::BRIDGE_PROTOCOL_VERSION;
 
         let scanning = ScanningSnapshot {
             active_setups_count: 0,
@@ -153,12 +176,22 @@ impl DiagnosticsHub {
                 node3_open_trades: Vec::new(),
                 recent_trades: VecDeque::with_capacity(MAX_RECENT_TRADES),
                 deriv_account,
+                mt5_account,
+                mt5_positions: Mt5PositionsSnapshot::default(),
+                mt5_history: Mt5HistorySnapshot::default(),
+                mt5_status,
                 work,
                 recent_events,
             })),
             tx,
             ws_clients: Arc::new(AtomicUsize::new(0)),
+            mt5,
         }
+    }
+
+    /// Shared MT5 bridge link (session registry + snapshot cache).
+    pub fn mt5(&self) -> Arc<Mt5BridgeLink> {
+        self.mt5.clone()
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<WsFrame> {
@@ -198,14 +231,26 @@ impl DiagnosticsHub {
     }
 
     fn build_open_trades_locked(inner: &DiagnosticsInner, ts: i64) -> OpenTradesSnapshot {
-        let total_open_count =
-            inner.node3_open_trades.len() + inner.deriv_account.open_trades.len();
+        let total_open_count = inner.node3_open_trades.len()
+            + inner.deriv_account.open_trades.len()
+            + inner.mt5_positions.positions.len();
         OpenTradesSnapshot {
             node3_open_trades: inner.node3_open_trades.clone(),
             deriv_open_trades: inner.deriv_account.open_trades.clone(),
+            mt5_open_positions: inner.mt5_positions.positions.clone(),
             recent_trades: inner.recent_trades.iter().cloned().collect(),
             total_open_count,
+            mt5_open_count: inner.mt5_positions.positions.len(),
             timestamp: ts,
+        }
+    }
+
+    fn build_mt5_locked(inner: &DiagnosticsInner) -> Mt5Diagnostics {
+        Mt5Diagnostics {
+            account: inner.mt5_account.clone(),
+            positions: inner.mt5_positions.clone(),
+            history: inner.mt5_history.clone(),
+            status: inner.mt5_status.clone(),
         }
     }
 
@@ -223,6 +268,7 @@ impl DiagnosticsHub {
             scanning: inner.scanning.clone(),
             open_trades: Self::build_open_trades_locked(inner, ts),
             deriv_account: inner.deriv_account.clone(),
+            mt5: Self::build_mt5_locked(inner),
             work,
             recent_events: inner.recent_events.iter().cloned().collect(),
         }
@@ -672,6 +718,96 @@ impl DiagnosticsHub {
         deriv.open_trades_count = deriv.open_trades.len();
         deriv.total_open_stake = deriv.open_trades.iter().map(|c| c.buy_price).sum();
         deriv.total_unrealized_pnl = deriv.open_trades.iter().map(|c| c.profit).sum();
+    }
+
+    // ---- MT5 bridge state -------------------------------------------------
+
+    pub async fn mt5_account_snapshot(&self) -> Mt5AccountSnapshot {
+        let inner = self.inner.read().await;
+        inner.mt5_account.clone()
+    }
+
+    pub async fn mt5_positions_snapshot(&self) -> Mt5PositionsSnapshot {
+        let inner = self.inner.read().await;
+        inner.mt5_positions.clone()
+    }
+
+    pub async fn mt5_history_snapshot(&self) -> Mt5HistorySnapshot {
+        let inner = self.inner.read().await;
+        inner.mt5_history.clone()
+    }
+
+    pub async fn mt5_status_snapshot(&self) -> Mt5BridgeStatus {
+        let inner = self.inner.read().await;
+        inner.mt5_status.clone()
+    }
+
+    /// Apply a frame pushed by the bridge: update the display copies, then
+    /// rebroadcast it (plus a fresh diagnostics snapshot) to frontend clients.
+    ///
+    /// The bridge itself is not a subscriber, so this never echoes back to it.
+    pub async fn apply_mt5_frame(&self, frame: WsFrame) -> Option<WsFrame> {
+        let rebroadcast = self.mt5.apply_frame(frame).await;
+        let Some(frame) = rebroadcast else {
+            return None;
+        };
+
+        let (extra, snapshot) = {
+            let mut inner = self.inner.write().await;
+            match &frame {
+                WsFrame::Mt5Account { data } => {
+                    inner.mt5_account = data.clone();
+                    inner.mt5_status.connected = data.connected;
+                    inner.mt5_status.authorized = data.authorized;
+                    inner.mt5_status.halted = data.halted;
+                    inner.mt5_status.halt_reason = data.halt_reason.clone();
+                }
+                WsFrame::Mt5Positions { data } => {
+                    inner.mt5_positions = data.clone();
+                    inner.mt5_status.positions_open = data.count;
+                }
+                WsFrame::Mt5History { data } => {
+                    inner.mt5_history = data.clone();
+                    inner.mt5_status.history_deals = data.count;
+                }
+                WsFrame::BridgeStatus { data } => {
+                    inner.mt5_status = data.clone();
+                }
+                WsFrame::BridgeEvent { event, data } => {
+                    let detail = data
+                        .get("reason")
+                        .or_else(|| data.get("error"))
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("");
+                    Self::push_event_locked(
+                        &mut inner,
+                        "warn",
+                        "mt5_bridge",
+                        format!("MT5 bridge event: {event} {detail}").trim().to_string(),
+                    );
+                }
+                _ => {}
+            }
+
+            // Events move the open-trades view too (positions change); mirror
+            // the change for clients that only subscribe to `open_trades`.
+            let extra = if matches!(frame, WsFrame::BridgeEvent { .. }) {
+                Some(WsFrame::OpenTrades {
+                    data: Self::build_open_trades_locked(&inner, now_ms()),
+                })
+            } else {
+                None
+            };
+            let snapshot = Self::build_snapshot_locked(&inner, self.connected_clients());
+            (extra, snapshot)
+        };
+
+        let _ = self.tx.send(frame.clone());
+        if let Some(extra) = extra {
+            let _ = self.tx.send(extra);
+        }
+        let _ = self.tx.send(WsFrame::Diagnostics { data: snapshot });
+        Some(frame)
     }
 
     pub async fn broadcast_tick(&self) {

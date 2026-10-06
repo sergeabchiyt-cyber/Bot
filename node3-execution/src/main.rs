@@ -3,6 +3,7 @@ mod diagnostics;
 mod execution;
 mod execution_chelsea;
 mod execution_deriv;
+mod execution_mt5;
 mod health;
 mod strategy;
 mod types;
@@ -34,11 +35,33 @@ async fn main() -> anyhow::Result<()> {
 
     let hub = DiagnosticsHub::new(&config);
 
+    // MT5 demo bridge status at startup. The bridge dials out to this service
+    // and authenticates with `bridge_hello`; Node 3 never connects to it, so a
+    // missing bridge shows up here as "configured but not connected".
+    if config.mt5_configured() {
+        info!(
+            "MT5 venue: requested symbol {} | lots {} | order timeout {} ms | control {}",
+            config.mt5_symbol,
+            config.mt5_volume_lots,
+            config.mt5_order_timeout_ms,
+            if config.mt5_control_enabled() {
+                "enabled (/mt5/control)"
+            } else {
+                "disabled (MT5_CONTROL_TOKEN not set)"
+            }
+        );
+    } else {
+        info!("MT5 venue: MT5_BRIDGE_TOKEN not set — the MT5 bridge view stays inert");
+    }
+    if let Some(err) = config.venue_selection_error() {
+        warn!("Execution venue configuration error: {err}");
+    }
+
     // Make the Deriv credential shape explicit at startup: PAT (pat_...) tokens
     // are rejected by Deriv unless DERIV_APP_ID is set (Deriv-App-ID header).
     info!(
-        "Deriv venue: {:?} | token kind: {} | {}: {}",
-        config.execution_venue(),
+        "Execution venue: {} | Deriv token kind: {} | {}: {}",
+        config.execution_venue().label(),
         execution_deriv::token_kind_label(config.deriv_demo_api.as_deref()),
         execution_deriv::DERIV_APP_ID_ENV_VAR,
         if config.deriv_app_id_configured() {
@@ -54,8 +77,10 @@ async fn main() -> anyhow::Result<()> {
         warn!("{hint}");
     }
 
-    // Serve HTTP (/health, /diagnostics, /scanning, /open-trades, /deriv) and WebSocket (/ws) on 0.0.0.0:$PORT
-    tokio::spawn(health::serve(config.port, hub.clone()));
+    // Serve HTTP (/health, /diagnostics, /scanning, /open-trades, /deriv,
+    // /mt5/account|positions|history|status, POST /mt5/control) and WebSocket
+    // (/ws, where frontends and the MT5 bridge both connect) on 0.0.0.0:$PORT.
+    tokio::spawn(health::serve(config.port, hub.clone(), config.clone()));
 
     // Spawn live Deriv Demo account monitor (streams balance & open contracts when DERIV_DEMO_API is set)
     tokio::spawn(execution_deriv::spawn_deriv_monitor(
@@ -74,7 +99,9 @@ async fn main() -> anyhow::Result<()> {
         config.rr_max
     );
 
-    let mut exec_mgr = ExecutionManager::new(config.clone());
+    // Share the hub's bridge link so the venue that places orders and the
+    // `/mt5/*` resources the operator watches are the same session.
+    let mut exec_mgr = ExecutionManager::new_with_link(config.clone(), Some(hub.mt5()));
     let mut strategy = StrategyEngine::new();
     let mut first_attempt = true;
 
