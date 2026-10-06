@@ -141,9 +141,31 @@ MT5_HISTORY_PAGE_SIZE=100
 
 ```bash
 cargo run --release
-# or Docker:
-docker build -t node3-execution . && docker run --env-file .env -p 10000:10000 node3-execution
+# or Docker (the Dockerfile lives in this crate directory):
+docker build -f Dockerfile -t node3-execution . \
+  && docker run --env-file .env -p 10000:10000 node3-execution
 ```
+
+### MT5 demo venue (`deriv_mt5_demo`)
+
+Inert until `MT5_BRIDGE_TOKEN` is set and the bridge dials in:
+
+```bash
+curl -s localhost:10000/mt5/account     # configured/connected/authorized/account_type/error
+curl -s localhost:10000/mt5/positions   # broker positions (volume, SL/TP, unrealized PnL)
+curl -s localhost:10000/mt5/history     # closed deals with realized P&L
+curl -s localhost:10000/mt5/status      # bridge / EA link state and counters
+
+# operator kill switch (403 unless MT5_CONTROL_TOKEN is set and sent)
+curl -sX POST localhost:10000/mt5/control \
+     -H "X-Control-Token: $MT5_CONTROL_TOKEN" \
+     -d '{"action":"halt","reason":"operator"}'   # halt | resume | close_all | close_position
+```
+
+`MT5_LOGIN` / `MT5_PASSWORD` are read only by `mt5-bridge`, on the MT5 host.
+Build and run the bridge from [`../mt5-bridge/README.md`](../mt5-bridge/README.md);
+its live-demo checklist is in
+[`../docs/mt5/EXECUTION_ARCHITECTURE.md`](../docs/mt5/EXECUTION_ARCHITECTURE.md).
 
 ## Deriv connection notes
 
