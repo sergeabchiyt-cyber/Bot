@@ -111,10 +111,11 @@ impl McpClient {
                 if data.is_empty() {
                     continue;
                 }
-                if let Ok(v) = serde_json::from_str::<Value>(data) {
-                    if body.get("id").is_some() && v.get("id") == body.get("id") {
-                        return Ok(Some(v));
-                    }
+                if let Ok(v) = serde_json::from_str::<Value>(data)
+                    && body.get("id").is_some()
+                    && v.get("id") == body.get("id")
+                {
+                    return Ok(Some(v));
                 }
             }
             return Ok(None);
@@ -187,10 +188,10 @@ impl McpClient {
     /// Pick a tool by trying env override first, then the candidate list
     /// against the server's actual tools/list output.
     pub async fn find_tool(&self, candidates: &[&str], env_key: &str) -> Option<String> {
-        if let Ok(name) = std::env::var(env_key) {
-            if !name.trim().is_empty() {
-                return Some(name.trim().to_string());
-            }
+        if let Ok(name) = std::env::var(env_key)
+            && !name.trim().is_empty()
+        {
+            return Some(name.trim().to_string());
         }
         let tools = match self.list_tools().await {
             Ok(t) => t,
@@ -290,11 +291,11 @@ fn extract_text(result: &Value) -> Option<String> {
     let content = result.get("content")?.as_array()?;
     let mut out = String::new();
     for item in content {
-        if item.get("type").and_then(|t| t.as_str()) == Some("text") {
-            if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
-                out.push_str(text);
-                out.push('\n');
-            }
+        if item.get("type").and_then(|t| t.as_str()) == Some("text")
+            && let Some(text) = item.get("text").and_then(|t| t.as_str())
+        {
+            out.push_str(text);
+            out.push('\n');
         }
     }
     if out.is_empty() { None } else { Some(out) }

@@ -129,7 +129,7 @@ fn candle_interval(candles: &[VpCandle]) -> i64 {
 /// inside that leg, not the arbitrary bounds of a calendar window.
 fn latest_swing(candles: &[VpCandle]) -> Option<SwingLeg> {
     let mut pivots = Vec::new();
-    if candles.len() >= SWING_PIVOT_RADIUS * 2 + 1 {
+    if candles.len() > SWING_PIVOT_RADIUS * 2 {
         for index in SWING_PIVOT_RADIUS..candles.len() - SWING_PIVOT_RADIUS {
             let high = candles[index].high;
             let low = candles[index].low;
@@ -247,17 +247,17 @@ fn fallback_leg(candles: &[VpCandle]) -> Option<SwingLeg> {
 }
 
 fn push_pivot(pivots: &mut Vec<Pivot>, kind: PivotKind, index: usize, candles: &[VpCandle]) {
-    if let Some(previous) = pivots.last_mut() {
-        if previous.kind == kind {
-            let replace = match kind {
-                PivotKind::High => candles[index].high >= candles[previous.index].high,
-                PivotKind::Low => candles[index].low <= candles[previous.index].low,
-            };
-            if replace {
-                previous.index = index;
-            }
-            return;
+    if let Some(previous) = pivots.last_mut()
+        && previous.kind == kind
+    {
+        let replace = match kind {
+            PivotKind::High => candles[index].high >= candles[previous.index].high,
+            PivotKind::Low => candles[index].low <= candles[previous.index].low,
+        };
+        if replace {
+            previous.index = index;
         }
+        return;
     }
     pivots.push(Pivot { index, kind });
 }

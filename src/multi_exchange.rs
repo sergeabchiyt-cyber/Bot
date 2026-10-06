@@ -763,10 +763,10 @@ pub async fn run_itick_stream(
                         if d["type"].as_str().is_some_and(|t| t != "tick") {
                             continue;
                         }
-                        if let Some(s) = d["s"].as_str() {
-                            if s != symbol {
-                                continue;
-                            }
+                        if let Some(s) = d["s"].as_str()
+                            && s != symbol
+                        {
+                            continue;
                         }
                         let Some(price) = num_str(&d["ld"]) else {
                             continue;

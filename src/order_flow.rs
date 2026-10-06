@@ -150,10 +150,10 @@ impl OrderFlowAnalyzer {
     }
 
     fn should_emit(&mut self, kind: &str, now_ms: i64) -> bool {
-        if let Some(&last) = self.last_emit.get(kind) {
-            if now_ms - last < DEBOUNCE_MS {
-                return false;
-            }
+        if let Some(&last) = self.last_emit.get(kind)
+            && now_ms - last < DEBOUNCE_MS
+        {
+            return false;
         }
         self.last_emit.insert(kind.to_string(), now_ms);
         true

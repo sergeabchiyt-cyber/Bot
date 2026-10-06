@@ -8,7 +8,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use std::time::Duration;
@@ -31,7 +30,6 @@ const CANDLE_REPLAY_LIMIT: usize = 15;
 #[derive(Clone)]
 pub struct AppState {
     pub tx: broadcast::Sender<WsFrame>,
-    pub subscriptions: Arc<DashMap<String, Vec<String>>>,
     pub cached_levels: Arc<RwLock<Vec<VpLevels>>>,
     pub cached_candles: Arc<RwLock<Vec<VpCandle>>>,
     pub cached_calendar: Arc<RwLock<serde_json::Value>>,
@@ -553,7 +551,6 @@ mod tests {
 
         let state = AppState {
             tx: tx.clone(),
-            subscriptions: Arc::new(DashMap::new()),
             cached_levels: Arc::new(RwLock::new(Vec::new())),
             cached_candles: Arc::new(RwLock::new(vec![VpCandle {
                 time: 1_700_000_000_000,

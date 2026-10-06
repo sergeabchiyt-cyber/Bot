@@ -653,7 +653,6 @@ async fn main() -> anyhow::Result<()> {
     // ---------- HTTP + WS server ----------
     let state = AppState {
         tx: bc_tx.clone(),
-        subscriptions: Arc::new(dashmap::DashMap::new()),
         cached_levels: cached_levels.clone(),
         cached_candles: cached_candles.clone(),
         cached_calendar: cached_calendar.clone(),

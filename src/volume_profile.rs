@@ -144,6 +144,9 @@ pub struct VolumeProfileEngine {
 }
 
 impl VolumeProfileEngine {
+    /// Plain engine for unit tests; production builds through
+    /// `with_settings` so the histogram model is always explicit.
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::with_settings(ProfileModel::default(), LowerTf::Tv)
     }
@@ -207,23 +210,9 @@ impl VolumeProfileEngine {
         self.recompute_time_windows(Utc::now().timestamp_millis());
     }
 
-    /// Seed PW/PS/CW from fine-grained bars in one pass.
-    pub fn ingest_profile_candles(&mut self, candles: Vec<VpCandle>) {
-        upsert_candles(&mut self.profile_candles, candles);
-        self.recompute_time_windows(Utc::now().timestamp_millis());
-    }
-
     /// Add/replace a 15m candle for the swing profile only.
     pub fn ingest_swing_candle(&mut self, candle: VpCandle) {
         self.upsert_swing_candle(candle);
-        self.swing_candles
-            .retain(|c| c.time >= Utc::now().timestamp_millis() - RETAIN_MS);
-        self.recompute_swing();
-    }
-
-    /// Seed the swing detector independently from the profile-history bars.
-    pub fn ingest_swing_candles(&mut self, candles: Vec<VpCandle>) {
-        upsert_candles(&mut self.swing_candles, candles);
         self.swing_candles
             .retain(|c| c.time >= Utc::now().timestamp_millis() - RETAIN_MS);
         self.recompute_swing();
@@ -500,15 +489,20 @@ impl VolumeProfileEngine {
         self.ps_session_end
     }
 
+    /// Number of retained profile bars (tests only).
+    #[cfg(test)]
     pub fn candle_count(&self) -> usize {
         self.profile_candles.len()
     }
 
     /// Most recent 18:00 America/New_York boundary at or before `now_ms`.
+    /// Thin re-export of the session helper for the tests.
+    #[cfg(test)]
     pub fn last_session_close_utc(now_ms: i64) -> i64 {
         session::last_session_close_utc(now_ms)
     }
 
+    #[cfg(test)]
     pub fn most_recent_week_start_utc(now_ms: i64) -> i64 {
         weekly::most_recent_week_start_utc(now_ms)
     }

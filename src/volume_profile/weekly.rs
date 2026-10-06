@@ -34,7 +34,7 @@ pub fn most_recent_week_start_utc(now_ms: i64) -> i64 {
         .single()
         .expect("valid Sunday 18:00 local time");
     if sunday.with_timezone(&Utc) > now {
-        sunday = sunday - Duration::days(7);
+        sunday -= Duration::days(7);
     }
     sunday.with_timezone(&Utc).timestamp_millis()
 }

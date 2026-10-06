@@ -171,6 +171,9 @@ impl Histogram {
     }
 
     /// Build the `VpLevels` wire payload for this histogram.
+    /// Every argument is a field of the emitted `VpLevels` audit block, so the
+    /// list is deliberately flat rather than wrapped in a builder.
+    #[allow(clippy::too_many_arguments)]
     pub fn levels(
         &self,
         window: &str,

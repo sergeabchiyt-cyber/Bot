@@ -166,7 +166,7 @@ fn urlencode(s: &str) -> String {
 /// Base64 (standard alphabet, padded) — the wire format Node3 expects.
 pub fn b64_encode(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = *chunk.get(1).unwrap_or(&0) as u32;
@@ -531,7 +531,7 @@ mod tests {
             ev("Core CPI m/m", "USD", "High", now + 10 * 60_000), // inside pre-window
             ev("German Factory Orders", "EUR", "High", now),     // wrong currency
             ev("ADP Non-Farm Employment", "USD", "Medium", now), // below min impact
-            ev("FOMC Press Conference", "USD", "High", now - 2 * 3600_000), // after window
+            ev("FOMC Press Conference", "USD", "High", now - 2 * 3_600_000), // after window
         ];
         let active = active_events(&events, now, 900, 3600, 2, &["USD".to_string()]);
         let titles: Vec<&str> = active.iter().map(|e| e.event.as_str()).collect();

@@ -66,10 +66,10 @@ impl AiCache {
         if !entry.is_object() {
             entry = serde_json::json!({ "data": entry });
         }
-        if let Some(obj) = entry.as_object_mut() {
-            if !matches!(obj.get("ts"), Some(serde_json::Value::Number(_))) {
-                obj.insert("ts".into(), chrono::Utc::now().timestamp_millis().into());
-            }
+        if let Some(obj) = entry.as_object_mut()
+            && !matches!(obj.get("ts"), Some(serde_json::Value::Number(_)))
+        {
+            obj.insert("ts".into(), chrono::Utc::now().timestamp_millis().into());
         }
 
         let mut buf = buf.lock().unwrap();

@@ -251,6 +251,9 @@ impl TickState {
 /// was available at startup. Tick-volume bars are written to `tick_store`
 /// before they're broadcast, so a client subscribing mid-bucket replays the
 /// live bar.
+// One argument per channel/out dependency the stream fans out to, plus its
+// three connection parameters.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_sifting_stream(
     base_url: String,
     api_key: String,

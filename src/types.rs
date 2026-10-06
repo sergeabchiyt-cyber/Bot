@@ -26,8 +26,6 @@ pub struct AggTrade {
     pub trade_time: i64,
     #[serde(rename = "m")]
     pub is_buyer_maker: bool,
-    #[serde(rename = "st", skip_serializing, default)]
-    pub symbol_type: Option<i32>,
 
     #[serde(default = "default_exchange")]
     pub exchange: String,
@@ -70,7 +68,6 @@ impl AggTrade {
             last_trade_id: 0,
             trade_time: ts,
             is_buyer_maker: !taker_buy,
-            symbol_type: None,
             exchange: exchange.into(),
             has_flow_side,
         }

@@ -51,6 +51,10 @@ struct SiftingBarsResponse {
     meta: SiftingBarsMeta,
 }
 
+// Eight positional arguments, one per SiftingIO history query parameter plus
+// the pagination cursor. Every one is read at the call site, so collapsing
+// them into a struct would only move the noise.
+#[allow(clippy::too_many_arguments)]
 fn history_url(
     base_url: &str,
     symbol: &str,
@@ -87,15 +91,15 @@ fn parse_page(
     symbol: &str,
     expected_interval: &str,
 ) -> Result<(Vec<VpCandle>, Option<String>)> {
-    if let Some(response_symbol) = response.meta.symbol.as_deref() {
-        if !response_symbol.eq_ignore_ascii_case(symbol) {
-            anyhow::bail!("SiftingIO returned symbol {response_symbol}, expected {symbol}");
-        }
+    if let Some(response_symbol) = response.meta.symbol.as_deref()
+        && !response_symbol.eq_ignore_ascii_case(symbol)
+    {
+        anyhow::bail!("SiftingIO returned symbol {response_symbol}, expected {symbol}");
     }
-    if let Some(interval) = response.meta.interval.as_deref() {
-        if interval != expected_interval {
-            anyhow::bail!("SiftingIO returned interval {interval}, expected {expected_interval}");
-        }
+    if let Some(interval) = response.meta.interval.as_deref()
+        && interval != expected_interval
+    {
+        anyhow::bail!("SiftingIO returned interval {interval}, expected {expected_interval}");
     }
 
     let mut candles: Vec<VpCandle> = response
@@ -277,8 +281,8 @@ pub async fn fetch_sifting_profile_candles(
         let url = history_url(
             base_url,
             symbol,
-            start.clone(),
-            end.clone(),
+            start,
+            end,
             interval,
             "asc",
             PROFILE_HISTORY_PAGE_LIMIT,
