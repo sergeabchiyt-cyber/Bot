@@ -1005,6 +1005,41 @@ mod tests {
         port
     }
 
+    /// Read the next *command* frame from the fake bridge, skipping the
+    /// housekeeping Node 3 sends on its own (session snapshot request,
+    /// heartbeats). Returns `None` when nothing command-like arrives in time.
+    async fn next_command_frame<S>(
+        ws: &mut S,
+        wait: Duration,
+    ) -> Option<serde_json::Value>
+    where
+        S: futures_util::Stream<
+                Item = Result<Message, tokio_tungstenite::tungstenite::Error>,
+            > + Unpin,
+    {
+        let deadline = tokio::time::Instant::now() + wait;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return None;
+            }
+            let message = match tokio::time::timeout(remaining, ws.next()).await {
+                Ok(Some(Ok(message))) => message,
+                _ => return None,
+            };
+            let Ok(text) = message.to_text() else {
+                continue;
+            };
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+                continue;
+            };
+            match value["type"].as_str().unwrap_or("") {
+                "mt5_snapshot_request" | "mt5_ping" | "heartbeat" => continue,
+                _ => return Some(value),
+            }
+        }
+    }
+
     fn mt5_config() -> crate::config::Config {
         let mut cfg = crate::config::Config::from_env();
         cfg.mt5_bridge_token = Some("test-bridge-token".into());
@@ -1126,12 +1161,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(denied.status().as_u16(), 403);
-        assert!(
-            tokio::time::timeout(Duration::from_millis(300), bridge_ws.next())
-                .await
-                .is_err(),
-            "an unauthorised control request reached the bridge"
-        );
+        if let Some(frame) = next_command_frame(&mut bridge_ws, Duration::from_millis(300)).await {
+            panic!("an unauthorised control request reached the bridge: {frame}");
+        }
 
         // 4. With the token the command travels to the bridge and the HTTP
         //    response reflects the bridge's acknowledgement.
@@ -1147,12 +1179,9 @@ mod tests {
         let (http_reply, bridge_frame) = tokio::join!(
             control,
             async {
-                let msg = tokio::time::timeout(Duration::from_secs(5), bridge_ws.next())
+                next_command_frame(&mut bridge_ws, Duration::from_secs(5))
                     .await
                     .expect("bridge never received the halt command")
-                    .expect("bridge socket closed")
-                    .unwrap();
-                serde_json::from_str::<serde_json::Value>(msg.to_text().unwrap()).unwrap()
             }
         );
         assert_eq!(bridge_frame["type"], "mt5_halt");

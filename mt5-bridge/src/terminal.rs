@@ -976,6 +976,15 @@ pub fn normalize_volume(volume: f64, spec: &SymbolSpec) -> Result<f64, Validatio
     if !volume.is_finite() || volume <= 0.0 {
         return Err(ValidationError::VolumeNotPositive(volume));
     }
+    // Check the minimum against the *requested* volume, before any grid
+    // flooring: 0.001 lots against a 0.01 minimum is "below the minimum", and
+    // saying so is more useful than "not a multiple of the step".
+    if volume + 1e-9 < spec.volume_min {
+        return Err(ValidationError::VolumeBelowMin {
+            volume,
+            min: spec.volume_min,
+        });
+    }
     if volume > spec.volume_max {
         return Err(ValidationError::VolumeAboveMax {
             volume,
