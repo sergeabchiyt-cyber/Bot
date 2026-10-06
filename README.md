@@ -1,72 +1,97 @@
-# XAUUSD Node 3 — Rust Automated Execution Service
+# Node 3 — XAUUSD Strategy Engine
 
-This repository branch (`Node3`) hosts the standalone automated execution service built in **Rust** for the XAUUSD trading system. It directly interfaces with **Node 1 (`xauusd-engine`)** over low-latency WebSockets and executes trades based on the Volume Profile break-and-retest strategy, while streaming live execution diagnostics, scanned setups, open trades, and Deriv Demo account state over its own WebSocket server.
+This branch contains **one service only**: the Node 3 strategy engine. Node 3
+consumes market data and volume-profile levels from Node 1, evaluates the
+break-and-retest strategy, and emits versioned, idempotent trade intents to
+Node 4 over an authenticated private WebSocket.
 
-For detailed architecture, configuration parameters, WebSocket wire schema, and strategy details, see **[`node3-execution/README.md`](node3-execution/README.md)**.
+Node 3 does **not** connect to MT5, Deriv, Chelsea MCP, or any other broker. It
+has no broker credentials, no account sizing, and no order placement code.
+Execution and broker-authoritative state belong exclusively to the new Node 4
+execution branch/service.
 
-## Features
+## Clean service split
 
-- **Direct WSS Integration**: Subscribes directly to live candle, level, and trade streams from Node 1.
-- **Live Execution & Diagnostics WSS Stream (`/ws`)**: Broadcasts real-time `diagnostics`, `scanning`, `open_trades`, `deriv_account`, `trades`, and `diagnostic_event` frames to connected dashboards (e.g., Node 2 frontend at `wss://execution-southeastasia-sng-main.onrender.com/ws`).
-- **Live Deriv Demo Account Monitor**: Streams real-time Deriv Demo account `balance`, `currency`, `account_id`, and live open contracts (`portfolio` + `proposal_open_contract` with unrealized PnL, spot price, payout, and expiry).
-- **Volume Profile Strategy**: Tracks Previous Week (`PW PoC/VaH/VaL`), Previous Session (`PS PoC`), and Current Week (`CW PoC/VaH/VaL`) levels.
-- **Break & Retest Engine**: Automated state machine with volume threshold confirmation (`> 10,500` on XAUUSD), retest zones (`±$0.50`), invalidation bounds (`$2.00`), and projected SL/TP/RR per level.
-- **Valid Deriv contract shapes**: Intraday `frxXAUUSD` trades as an at-the-money Rise/Fall contract with **no `barrier` field** (Deriv rejects any barrier with `InvalidBarrier`), with a signed-barrier re-proposal only if Deriv asks for one. Stakes below Deriv's minimum (`0.50` USD) are clamped up instead of failing. Evidence and how to reproduce: `ci/deriv_probe.py` → `ci/deriv/DERIV.md` (see [`node3-execution/README.md`](node3-execution/README.md#deriv-connection-notes)).
-- **Risk Management**: Dynamic ATR-based Stop Loss (`200–300` pips) and Take Profit (`600–800` pips) targeting a `2:1` to `3:1` Risk-to-Reward ratio.
-- **Multi-Venue Execution**: Supports Deriv Demo API, Chelsea Live MCP, or Node 1 Signal Mode.
-- **HTTP Endpoints**: CORS-enabled `GET /health`, `GET /diagnostics`, `GET /scanning`, `GET /open-trades`, and `GET /deriv` on port `10000`.
-
-## Quick Start
-
-### 1. Configuration
-
-Copy the example environment file and configure your Node 1 endpoint and execution credentials:
-
-```bash
-cd node3-execution
-cp .env.example .env
+```text
+Node 1 (market/data) ── candle + levels ──► Node 3 (strategy)
+                                                   │
+                                      private /execution
+                                      immutable trade_intent
+                                                   │
+                                                   ▼
+Node 2 (browser) ◄── public diagnostics ── Node 4 (execution) ──► MT5 / venues
+        │                                      │
+        └── Node 1 market + Node 3 strategy ───┘
 ```
 
-### 2. Run with Cargo
+| Node | Branch/service responsibility | Must not contain |
+|---|---|---|
+| Node 1 | feeds, candles, order flow, volume profile, calendar | strategy decisions, broker credentials, execution clients, MT5 bridge |
+| Node 2 | static browser dashboard | secrets, broker writes, strategy or execution logic |
+| Node 3 | strategy state machine, risk-price projection, trade intents | broker adapters, account sizing, MT5/Deriv credentials |
+| Node 4 | execution policy, idempotency, broker adapters, MT5 bridge and broker state | market-data analytics or strategy trigger logic |
+
+See [the branch architecture](docs/BRANCH_ARCHITECTURE.md), the
+[Node 3 ↔ Node 4 protocol](docs/NODE3_NODE4_PROTOCOL.md), and the
+[Node 4 MT5 handoff/runbook](docs/MT5_NODE4_RUNBOOK.md).
+
+## Run Node 3
 
 ```bash
+cd node3-strategy
+cp .env.example .env
+# Set NODE4_SHARED_TOKEN to the same random service secret configured on Node 4.
 cargo run --release
 ```
 
-### 3. Run with Docker
+Or build from the repository root:
 
 ```bash
-docker build -t node3-execution .
-docker run --env-file .env -p 10000:10000 node3-execution
+docker build -t xauusd-node3-strategy .
+docker run --env-file node3-strategy/.env -p 10000:10000 xauusd-node3-strategy
 ```
 
-### 4. Endpoints (`PORT=10000`)
+## Interfaces
+
+### Node 1 → Node 3
+
+Node 3 connects to `NODE1_WS_URL`, subscribes only to `candle` and `levels`,
+and never publishes trades back to Node 1.
+
+### Public diagnostics (Node 2/operator)
+
+| Resource | Purpose |
+|---|---|
+| `GET /health` | platform health probe |
+| `GET /diagnostics` (`/status`) | strategy health, counters, scanner, and signal delivery state |
+| `GET /scanning` | current level scanner state and strategy-side SL/TP projections |
+| `GET /signals` | pending/recent intents and Node 4 reports (no credentials) |
+| `WS /ws` | `diagnostics`, `scanning`, `signals`, `diagnostic_event`, `heartbeat` |
+
+### Private execution link (Node 4 only)
+
+`WS /execution` requires the first frame to be `execution_hello` with the
+shared `NODE4_SHARED_TOKEN`. Only one authenticated Node 4 consumer is allowed.
+Node 3 sends `trade_intent`; Node 4 persists the intent ID, validates it,
+executes at most once, and returns `execution_report`.
+
+The public `/ws` route cannot subscribe to or receive private execution frames,
+even with `topics: ["all"]`.
+
+## Safety properties
+
+- A deterministic `intent_id` is the cross-service idempotency key.
+- Unacknowledged, unexpired intents replay after Node 4 reconnects.
+- Intent TTL defaults to 120 seconds; Node 4 must also reject expired intents.
+- The pending queue is bounded. A full queue refuses a new intent instead of
+  emitting an untracked order.
+- Node 3 contains no stake, lot-size, account, venue, password, API token, or
+  MT5 control configuration. Node 4 owns all account-aware decisions.
+- No fallback execution exists in Node 3.
+
+## Test
 
 ```bash
-curl http://localhost:10000/health        # -> ok
-curl http://localhost:10000/diagnostics   # -> Full JSON diagnostics snapshot
-curl http://localhost:10000/scanning      # -> Current scanned VP levels & armed setups
-curl http://localhost:10000/open-trades   # -> Node 3 open trades + Deriv open contracts
-curl http://localhost:10000/deriv         # -> Deriv Demo balance & open contracts
+cargo test --manifest-path node3-strategy/Cargo.toml --all-targets -- --nocapture
+cargo check --manifest-path node3-strategy/Cargo.toml --all-targets
 ```
-
-### 5. Deriv credentials
-
-Node 3 auto-detects the token shape from `DERIV_DEMO_API`:
-
-- **Legacy `a1-...` token** — only `DERIV_DEMO_API` is needed.
-- **Personal Access Token `pat_...`** — Deriv needs your App ID on every REST call,
-  so `DERIV_APP_ID` must be set as well. Without it the account monitor answers
-  `HTTP 401: Deriv-App-ID header is required for PAT tokens`.
-
-Register a free app at <https://developers.deriv.com> (API dashboard) and set both
-variables **in the environment of the deployed service** (e.g. Render → Environment),
-not just in a local `.env`:
-
-```env
-DERIV_DEMO_API=pat_...
-DERIV_APP_ID=12345
-```
-
-`GET /deriv` reports `token_kind`, `app_id_configured` and a `setup_hint` naming the
-missing variable, so a misconfiguration is visible without reading the service logs.

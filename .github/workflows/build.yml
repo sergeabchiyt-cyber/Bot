@@ -1,51 +1,41 @@
-name: build
+name: node3-strategy-build
 
 on:
   push:
     branches: ["**"]
+  pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: node3-execution
+        working-directory: node3-strategy
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.94.0"
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "node3-execution -> target"
+          workspaces: "node3-strategy -> target"
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
 
       - name: Check
-        id: check
-        run: |
-          set -o pipefail
-          cargo check --all-targets 2>&1 | tee /tmp/check.log
+        run: cargo check --all-targets --locked
 
-      - name: Save error log to branch
-        if: failure() && steps.check.outcome == 'failure'
-        working-directory: ${{ github.workspace }}
-        run: |
-          git config user.email ci@example.invalid
-          git config user.name ci
-          git fetch origin ${{ github.ref_name }}
-          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
-          tail -c 60000 /tmp/check.log > build-errors.log
-          git add -f build-errors.log
-          git commit -m "ci: build error log [skip ci]"
-          git push origin ${{ github.ref_name }}
+      - name: Tests
+        run: cargo test --all-targets --locked -- --nocapture
 
-      - name: Unit tests
-        run: |
-          set -o pipefail
-          cargo test --all-targets -- --nocapture 2>&1 | tee /tmp/unit.log
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
 
-      - name: Build release
-        run: cargo build --release
+      - name: Release build
+        run: cargo build --release --locked
