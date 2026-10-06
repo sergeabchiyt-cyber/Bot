@@ -83,3 +83,122 @@ jobs:
           git add ci/PROOF.md
           git diff --cached --quiet || git commit -m "ci: proof log [skip ci]"
           git push origin ${{ github.ref_name }}
+
+  # Node 3 is its own crate (node3-execution/), so it gets its own check/test
+  # cycle; the base `build` job above covers the engine crate at the root.
+  node3:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: node3-execution
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "node3-execution -> target"
+
+      - name: Check
+        id: check
+        run: |
+          set -o pipefail
+          cargo check --all-targets 2>&1 | tee /tmp/check.log
+
+      - name: Save error log to branch
+        if: failure() && steps.check.outcome == 'failure'
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          tail -c 400000 /tmp/check.log > node3-errors.log
+          git add -f node3-errors.log
+          git commit -m "ci: node3 build error log [skip ci]"
+          git push origin ${{ github.ref_name }}
+
+      - name: Unit tests
+        id: tests
+        run: |
+          set -o pipefail
+          cargo test --all-targets -- --nocapture 2>&1 | tee /tmp/unit.log
+
+      - name: Save test log to branch
+        if: failure() && steps.tests.outcome == 'failure'
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          tail -c 400000 /tmp/unit.log > node3-test-errors.log
+          git add -f node3-test-errors.log
+          git commit -m "ci: node3 test log [skip ci]"
+          git push origin ${{ github.ref_name }}
+
+      - name: Build release
+        run: cargo build --release
+
+  # The MT5 demo bridge is a separate crate (it runs next to the MT5 terminal,
+  # not on the Node 3 host), so it gets its own check/test cycle. It is a real
+  # job, not documentation: it must compile and its contract tests must pass.
+  bridge:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mt5-bridge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "mt5-bridge -> target"
+
+      - name: Protocol lint (EA ⇄ bridge ⇄ Node 3)
+        working-directory: ${{ github.workspace }}
+        run: python3 ci/mt5/protocol_lint.py
+
+      - name: Check
+        id: check
+        run: |
+          set -o pipefail
+          cargo check --all-targets 2>&1 | tee /tmp/bridge-check.log
+
+      - name: Save error log to branch
+        if: failure() && steps.check.outcome == 'failure'
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          tail -c 400000 /tmp/bridge-check.log > mt5-bridge-errors.log
+          git add -f mt5-bridge-errors.log
+          git commit -m "ci: mt5-bridge build error log [skip ci]"
+          git push origin ${{ github.ref_name }}
+
+      - name: Contract + unit tests
+        id: tests
+        run: |
+          set -o pipefail
+          cargo test --all-targets -- --nocapture 2>&1 | tee /tmp/bridge-tests.log
+
+      - name: Save test log to branch
+        if: failure() && steps.tests.outcome == 'failure'
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          tail -c 400000 /tmp/bridge-tests.log > mt5-bridge-test-errors.log
+          git add -f mt5-bridge-test-errors.log
+          git commit -m "ci: mt5-bridge test log [skip ci]"
+          git push origin ${{ github.ref_name }}
+
+      - name: Build release
+        run: cargo build --release

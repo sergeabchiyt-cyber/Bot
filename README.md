@@ -458,3 +458,51 @@ cp .env.example .env
 python3 -u ws_client.py                      # ~1.8GB RSS, FOMC-RoBERTa tier
 # or: python3 -m uvicorn main:app --host 0.0.0.0 --port 8000  # HTTP health/test
 ```
+
+---
+
+## Node 3 execution service (`node3-execution/`)
+
+The same repository also carries the automated execution service that consumes
+this engine's `/ws` stream (candles, levels, trades) and executes the Volume
+Profile break-and-retest strategy on exactly one venue:
+
+* **Deriv MT5 demo** via `mt5-bridge/` — a separate Rust service that runs next
+  to the MT5 terminal, dials *out* to Node 3, and gives it full control (place /
+  modify / close / close-all, halt-resume kill switch, account / positions /
+  closed-deal history, restart-safe history, reconciliation). Demo-only,
+  broker-confirmed fills only, no fallback to live or to another venue.
+* **Deriv options demo** (`DERIV_DEMO_API`), **Chelsea Live MCP**
+  (`MCP_CHELSEA_URL`), or **signal mode** (no venue credential).
+
+Venues are mutually exclusive and fail closed: two configured credential sets
+are a startup error even with `EXECUTION_VENUE` set (unset the credential you
+are leaving behind), and a configured-but-unavailable venue refuses trades
+instead of falling back.
+
+```bash
+cd node3-execution
+cp .env.example .env
+cargo run --release
+# or: docker build -f Dockerfile -t node3-execution . && docker run --env-file .env -p 10000:10000 node3-execution
+
+curl -s localhost:10000/health
+curl -s localhost:10000/diagnostics
+curl -s localhost:10000/mt5/account    # configured/connected/authorized/account_type
+curl -s localhost:10000/mt5/positions  # broker positions (SL/TP, unrealized PnL)
+curl -s localhost:10000/mt5/status     # bridge / EA link counters
+
+# operator kill switch (403 unless MT5_CONTROL_TOKEN is set and sent)
+curl -sX POST localhost:10000/mt5/control \
+     -H "X-Control-Token: $MT5_CONTROL_TOKEN" \
+     -d '{"action":"halt","reason":"operator"}'
+```
+
+`MT5_LOGIN` / `MT5_PASSWORD` are read **only** by `mt5-bridge`, on the MT5 host;
+Node 3 holds nothing but the shared `MT5_BRIDGE_TOKEN`.
+
+Read next: [`node3-execution/README.md`](node3-execution/README.md) (strategy,
+wire schema, full configuration), [`docs/mt5/EXECUTION_ARCHITECTURE.md`](docs/mt5/EXECUTION_ARCHITECTURE.md)
+(topology, venue rules, order path, integration gate, runbook),
+[`docs/mt5/FRONTEND_RESOURCES.md`](docs/mt5/FRONTEND_RESOURCES.md) (dashboard
+contract) and [`mt5-bridge/README.md`](mt5-bridge/README.md).
