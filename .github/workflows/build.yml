@@ -26,25 +26,15 @@ jobs:
         id: fmt
         continue-on-error: true
         run: |
+          set +e
           cargo fmt --all -- --check > /tmp/fmt-check.txt 2>&1
-          echo "=== cargo fmt --check output ==="
+          echo "cargo fmt --check exit code: $?"
+          echo "--- cargo fmt --check output ---"
           cat /tmp/fmt-check.txt
+          echo "--- end ---"
           cargo fmt --all
-          git --no-pager diff -- '*.rs' > /tmp/fmt.patch
-          echo "=== rustfmt patch: $(wc -c < /tmp/fmt.patch) bytes / $(grep -c '^diff' /tmp/fmt.patch) files ==="
-
-      - name: Publish rustfmt patch to branch
-        if: always()
-        run: |
-          git config user.email ci@example.invalid
-          git config user.name ci
-          git fetch origin ${{ github.ref_name }}
-          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
-          cp /tmp/fmt.patch fmt.patch 2>/dev/null || true
-          cp /tmp/fmt-check.txt fmt-check.txt 2>/dev/null || true
-          git add -f fmt.patch fmt-check.txt
-          git diff --cached --quiet || git commit -m "ci: rustfmt patch [skip ci]"
-          git push origin ${{ github.ref_name }} || true
+          git --no-pager diff -- '*.rs' > /tmp/fmt.patch 2>&1
+          echo "rustfmt patch: $(wc -c < /tmp/fmt.patch) bytes"
 
       - name: Check
         id: check
@@ -117,6 +107,12 @@ jobs:
             echo
             echo '## Runtime smoke test'
             cat /tmp/proof.log 2>/dev/null || echo "(missing)"
+            echo
+            echo '## rustfmt (cargo fmt --all -- --check)'
+            cat /tmp/fmt-check.txt 2>/dev/null || echo "(missing)"
+            echo
+            echo '## rustfmt patch (what cargo fmt --all would change)'
+            cat /tmp/fmt.patch 2>/dev/null || echo "(missing)"
           } | sed -r 's/\x1b\[[0-9;]*m//g' > ci/PROOF.md
           git add ci/PROOF.md
           git diff --cached --quiet || git commit -m "ci: proof log [skip ci]"
