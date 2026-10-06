@@ -211,6 +211,40 @@ def ws_frame_renames(source: str) -> set[str]:
     return set(re.findall(r'#\[serde\(rename = "([a-z_0-9]+)"\)\]', source))
 
 
+def documented_bridge_events(bridge_dir, docs_dir) -> int:
+    """Every `bridge_event` name the frontend doc promises must actually exist.
+
+    The bridge writes these names as string literals in node3.rs; if one is
+    renamed, the dashboard would silently never see that event again. The doc is
+    the only place they are written down outside the Rust source.
+    """
+    node3_src = read(Path(bridge_dir) / "src/node3.rs")
+    emitted = set(re.findall(r'"(\w+)"\.into\(\)', node3_src))
+    emitted |= set(re.findall(r'\n\s*"([a-z_]+)",\n', node3_src))
+
+    doc = read(Path(docs_dir) / "mt5" / "FRONTEND_RESOURCES.md")
+    paragraph = ""
+    for chunk in doc.split("\n\n"):
+        if "bridge_event" in chunk and "names" in chunk:
+            paragraph = chunk
+            break
+    if not paragraph:
+        error("FRONTEND_RESOURCES.md no longer describes the bridge_event names")
+        return 0
+
+    documented = set(re.findall(r"`([a-z_]+)`", paragraph))
+    skip = {"bridge_event", "mt5_positions", "mt5_history", "reason", "auto"}
+    checked = 0
+    for name in sorted(documented - skip):
+        checked += 1
+        if name not in emitted:
+            error(
+                f"FRONTEND_RESOURCES.md documents bridge_event '{name}' but "
+                "mt5-bridge/src/node3.rs never emits it"
+            )
+    return checked
+
+
 def main() -> int:
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.cwd()
     bridge = root / "mt5-bridge"
@@ -325,6 +359,9 @@ def main() -> int:
                 f"never matches Node3ToBridge::{command}"
             )
 
+    # --- 7. documented bridge_event names --------------------------------
+    events_checked = documented_bridge_events(bridge, root / "docs")
+
     # --- report -----------------------------------------------------------
     for message in WARNINGS:
         print(f"warning: {message}")
@@ -336,7 +373,8 @@ def main() -> int:
     print(
         "protocol lint ok: "
         f"{len(rust_methods)} EA methods, {len(sent)} request params, "
-        f"{len(read_fields)} response fields, {len(bridge_frames)} frames checked"
+        f"{len(read_fields)} response fields, {len(bridge_frames)} frames, "
+        f"{events_checked} bridge events checked"
     )
     return 0
 

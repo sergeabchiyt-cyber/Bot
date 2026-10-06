@@ -70,6 +70,10 @@ implemented.
 * The three real venues are **mutually exclusive**. With more than one
   credential set and no explicit `EXECUTION_VENUE`, startup is an error; the
   service never picks one silently.
+* An explicit `EXECUTION_VENUE` does **not** paper over a second configured
+  venue: it must still be the only one, so a strategy can never trade an account
+  it was not pointed at. Unset the other credential (e.g. `DERIV_DEMO_API` when
+  switching to MT5) rather than relying on the override.
 * Selecting a venue whose credentials are missing is an error.
 * If MT5 demo is configured but unavailable (bridge disconnected, EA
   disconnected, wrong account mode, symbol missing), the strategy **refuses**
@@ -150,7 +154,10 @@ order, even across a Node 3 restart.
 | `/mt5/positions` | GET | `Mt5PositionsSnapshot`: broker positions with volume, SL/TP, current price, unrealized PnL |
 | `/mt5/history` | GET | `Mt5HistorySnapshot`: closed deals with profit/swap/commission and realized totals |
 | `/mt5/status` | GET | `Mt5BridgeStatus`: bridge/EA link state, protocol, counters, uptime, last error |
-| `/mt5/control` | POST | `{"action": "halt"\|"resume"\|"close_all"\|"close_position", ...}` — requires `X-Control-Token: $MT5_CONTROL_TOKEN`; 403 when the token is unset |
+| `/mt5/control` | POST | `{"action": "halt"\|"resume"\|"close_all"\|"close_position", ...}` — requires `X-Control-Token: $MT5_CONTROL_TOKEN`; 403 when the token is unset. Bridge-only, token-gated; never exposed to browsers without the token |
+
+Field-by-field payloads for every resource and frame are in
+[`FRONTEND_RESOURCES.md`](FRONTEND_RESOURCES.md).
 
 WebSocket frames on `/ws`: `mt5_account`, `mt5_positions`, `mt5_history`,
 `bridge_status`, `bridge_event` (plus the existing Deriv options and diagnostics
@@ -203,8 +210,10 @@ Unit / contract (runnable in CI and locally, no terminal needed):
 - [x] fake-terminal contract tests: accepted fill, rejected order, duplicate
       request id, bridge disconnect, stale quote, account-mode mismatch
       (`mt5-bridge/tests/contract.rs`, `MT5_SIM_TERMINAL=1`)
-- [x] protocol lint: EA methods/params/response fields and the Node 3 frame +
-      struct contract (`ci/mt5/protocol_lint.py`, run in CI)
+- [x] protocol lint: EA methods/params/response fields, the Node 3 frame +
+      struct contract, and the bridge-event names documented for the frontend
+      (`ci/mt5/protocol_lint.py`, run in CI)
+- [x] both `build` and `bridge` jobs green on `arena/c2a01e42-bot`
 
 Live demo (manual, on the real Deriv MT5 demo account):
 

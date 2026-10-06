@@ -91,8 +91,9 @@ NODE1_WS_URL=wss://engine-southeastasia-sng-main.onrender.com/ws
 # Local HTTP & WebSocket port — hosting platforms inject PORT
 PORT=10000
 
-# Execution Venues — EXACTLY ONE. Setting two without picking one is a startup
-# error on purpose; selecting a venue whose credentials are missing fails too.
+# Execution Venues — EXACTLY ONE. Two configured credentials are a startup
+# error even with EXECUTION_VENUE set, so switching venues means unsetting the
+# old credential; selecting a venue whose credentials are missing fails too.
 #   deriv_mt5_demo | deriv_demo | chelsea_live | none
 EXECUTION_VENUE=
 # PAT (pat_...) tokens REQUIRE DERIV_APP_ID; legacy a1-... tokens do not.

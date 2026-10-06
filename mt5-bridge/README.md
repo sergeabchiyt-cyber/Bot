@@ -82,12 +82,17 @@ Node 3 needs exactly one thing from the bridge: the shared secret.
 
 ```bash
 MT5_BRIDGE_TOKEN=<same value as the bridge>
-EXECUTION_VENUE=deriv_mt5_demo          # optional when it is the only venue configured
+EXECUTION_VENUE=deriv_mt5_demo          # optional while MT5 is the only venue configured
 MT5_CONTROL_TOKEN=<random>              # enables POST /mt5/control
 MT5_SYMBOL=XAUUSD
 MT5_VOLUME_LOTS=0.01
 MT5_ORDER_TIMEOUT_MS=15000
 ```
+
+Venues are mutually exclusive, and an explicit `EXECUTION_VENUE` does not
+override that: while `DERIV_DEMO_API` (or `MCP_CHELSEA_URL`) is still set,
+Node 3 refuses to start. Unset the credential you are leaving behind before
+switching, so the strategy can never trade an account it was not pointed at.
 
 ---
 

@@ -231,10 +231,21 @@ Subscribe with:
 An empty `topics` list (or omitting the frame) means "everything". New clients
 receive the current snapshots immediately.
 
-`bridge_event` names worth rendering: `order_filled`, `order_rejected`,
-`order_unknown`, `position_opened`, `position_closed`, `halted`, `resumed`,
-`ea_link_disconnected`, `demo_guard_failed`, `reconciled`. Payloads carry the
-intent id / position ticket / reason.
+`bridge_event` names (exactly these, in the bridge's own words):
+`order_filled`, `order_rejected`, `order_unknown`, `halted`, `resumed`,
+`ea_link_disconnected`, `trade_transaction`.
+
+* `order_filled` / `order_rejected` / `order_unknown` carry an `OrderOutcome`
+  (intent id, tickets, price, volume, retcode, `reconciled`).
+* `halted` carries `{reason, auto, flattened, halted}` — `auto: true` is how a
+  demo-guard failure or an EA disconnect surfaces; a `resume` must come from an
+  operator (`POST /mt5/control`).
+* `resumed` carries `{halted: false}`.
+* `ea_link_disconnected` carries `{reason}`.
+* Anything else about position state arrives as a fresh `mt5_positions` /
+  `mt5_history` snapshot (the bridge pushes one after every fill, halt and
+  position change, and on its own interval anyway) — the dashboard should not
+  wait for a per-position event.
 
 Bridge-only frames (`bridge_hello`, `bridge_hello_ack`, `bridge_ack`) are never
 forwarded to browser clients, whatever they subscribe to.
