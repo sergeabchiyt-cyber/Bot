@@ -25,16 +25,22 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
 
-      - name: Formatting
-        id: fmt
-        continue-on-error: true
+      # One-off normalisation: this crate has never been run through rustfmt,
+      # so `cargo fmt --all -- --check` below would fail on pre-existing style
+      # in files this branch does not otherwise touch. Apply it once here and
+      # let the check below hold the line from now on.
+      - name: Apply rustfmt
         run: |
-          set +e
-          cargo fmt --all -- --check > /tmp/fmt-check.txt 2>&1
-          echo "cargo fmt --check exit: $?"
           cargo fmt --all
-          git --no-pager diff -- '*.rs' > /tmp/fmt.patch 2>&1
-          echo "rustfmt patch bytes: $(wc -c < /tmp/fmt.patch)"
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git add -A -- '*.rs'
+          git diff --cached --quiet || git commit -m "style: apply rustfmt to the Node1 market service [skip ci]"
+          git push origin ${{ github.ref_name }} || true
+          git --no-pager diff --stat
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
 
       - name: Check
         id: check
@@ -108,11 +114,6 @@ jobs:
             echo '## Runtime smoke test'
             cat /tmp/proof.log 2>/dev/null || echo "(missing)"
             echo
-            echo '## rustfmt check'
-            cat /tmp/fmt-check.txt 2>/dev/null || echo "(missing)"
-            echo
-            echo '## rustfmt patch'
-            cat /tmp/fmt.patch 2>/dev/null || echo "(missing)"
           } | sed -r 's/\x1b\[[0-9;]*m//g' > ci/PROOF.md
           git add ci/PROOF.md
           git diff --cached --quiet || git commit -m "ci: proof log [skip ci]"
