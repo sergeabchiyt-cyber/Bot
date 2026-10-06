@@ -68,7 +68,7 @@ def main() -> int:
         feeds = (status.get("status") or {}).get("feeds") or {}
         candles = status.get("candles")
         vp = status.get("volume_profile")
-        print(f"* version `{status.get('version')}` venue `{status.get('venue')}`")
+        print(f"* version `{status.get('version')}` service `market-data`")
         print(f"* feeds connected: {sum(1 for f in feeds.values() if f.get('state') == 'connected')}"
               f" / {len(feeds)}")
         if candles:

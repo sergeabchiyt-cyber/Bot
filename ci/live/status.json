@@ -1,1 +1,84 @@
-{"candles":{"bars":2000,"edge_lag_minutes":20,"first_bar":1789416000000,"interval":"15m","last_bar":1791304200000,"seed_bars":2000},"status":{"feeds":{"alltick":{"last_msg":0,"msgs":0,"state":"off (no token)"},"binance":{"last_msg":0,"msgs":0,"state":"connected"},"bitget":{"last_msg":1791305428603,"msgs":27553,"state":"connected"},"bybit":{"last_msg":1791305459447,"msgs":78545,"state":"connected"},"calendar":{"last_msg":0,"msgs":0,"state":"connected"},"econ_monitor":{"last_msg":0,"msgs":0,"state":"idle (no active event windows)"},"gate":{"last_msg":1791305459567,"msgs":51060,"state":"connected"},"itick":{"last_msg":0,"msgs":0,"state":"off (no token)"},"kraken":{"last_msg":1791305332415,"msgs":2838,"state":"connected"},"mcp_browser":{"last_msg":0,"msgs":0,"state":"error"},"okx":{"last_msg":1791305448852,"msgs":97587,"state":"connected"},"sifting":{"last_msg":1791305459580,"msgs":434340,"state":"connected"}},"ts":1791305459775},"venue":"DerivDemo","version":"0.3.0","volume_profile":{"audit":"/vp?window=PW","bin_size":0.5,"input":"tv","row_mode":"rows","rows":128,"va_pct":70.0}}
+{
+  "candles": {
+    "bars": 2000,
+    "edge_lag_minutes": 20,
+    "first_bar": 1789416000000,
+    "interval": "15m",
+    "last_bar": 1791304200000,
+    "seed_bars": 2000
+  },
+  "status": {
+    "feeds": {
+      "alltick": {
+        "last_msg": 0,
+        "msgs": 0,
+        "state": "off (no token)"
+      },
+      "binance": {
+        "last_msg": 0,
+        "msgs": 0,
+        "state": "connected"
+      },
+      "bitget": {
+        "last_msg": 1791305428603,
+        "msgs": 27553,
+        "state": "connected"
+      },
+      "bybit": {
+        "last_msg": 1791305459447,
+        "msgs": 78545,
+        "state": "connected"
+      },
+      "calendar": {
+        "last_msg": 0,
+        "msgs": 0,
+        "state": "connected"
+      },
+      "econ_monitor": {
+        "last_msg": 0,
+        "msgs": 0,
+        "state": "idle (no active event windows)"
+      },
+      "gate": {
+        "last_msg": 1791305459567,
+        "msgs": 51060,
+        "state": "connected"
+      },
+      "itick": {
+        "last_msg": 0,
+        "msgs": 0,
+        "state": "off (no token)"
+      },
+      "kraken": {
+        "last_msg": 1791305332415,
+        "msgs": 2838,
+        "state": "connected"
+      },
+      "mcp_browser": {
+        "last_msg": 0,
+        "msgs": 0,
+        "state": "error"
+      },
+      "okx": {
+        "last_msg": 1791305448852,
+        "msgs": 97587,
+        "state": "connected"
+      },
+      "sifting": {
+        "last_msg": 1791305459580,
+        "msgs": 434340,
+        "state": "connected"
+      }
+    },
+    "ts": 1791305459775
+  },
+  "version": "0.3.0",
+  "volume_profile": {
+    "audit": "/vp?window=PW",
+    "bin_size": 0.5,
+    "input": "tv",
+    "row_mode": "rows",
+    "rows": 128,
+    "va_pct": 70.0
+  }
+}

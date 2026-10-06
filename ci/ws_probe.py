@@ -14,7 +14,9 @@ import time
 
 import websocket  # websocket-client
 
-TOPICS = ["levels", "candle", "tick_volume", "bubbles", "trades", "calendar"]
+# Node1 publishes market topics only — there is no `trades` topic any more:
+# execution lives on Node4.
+TOPICS = ["levels", "candle", "tick_volume", "bubbles", "calendar"]
 
 
 def main() -> int:

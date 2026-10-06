@@ -8,9 +8,6 @@ mod sifting_rest;
 mod multi_exchange;
 mod volume_profile;
 mod order_flow;
-mod execution;
-mod execution_deriv;
-mod execution_chelsea;
 mod econ_monitor;
 mod mcp_client;
 mod sifting_ws;
@@ -25,11 +22,10 @@ use tracing_subscriber::EnvFilter;
 
 use ai_cache::AiCache;
 use config::Config;
-use execution::ExecutionManager;
 use order_flow::OrderFlowAnalyzer;
 use status::FeedStatus;
 use tick_volume::TickVolumeStore;
-use types::{OrderflowEvent, VpCandle, WsFrame};
+use types::{VpCandle, WsFrame};
 use volume_profile::VolumeProfileEngine;
 use ws_server::AppState;
 
@@ -64,19 +60,6 @@ fn synthetic_history(now_ms: i64) -> Vec<VpCandle> {
         });
     }
     out
-}
-
-/// Returns true if `price` is within `pips` of any PoC/VaH/VaL across all windows.
-fn near_level(levels: &[types::VpLevels], price: f64, pips: f64) -> bool {
-    let dollars = pips * 0.01;
-    for lvl in levels {
-        for target in [lvl.poc, lvl.vah, lvl.val] {
-            if (price - target).abs() <= dollars {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 fn same_level_values(a: &types::VpLevels, b: &types::VpLevels) -> bool {
@@ -117,8 +100,6 @@ async fn main() -> anyhow::Result<()> {
     // Fine 1m bars feed PW/PS/CW. The chart and swing detector stay on 15m.
     let (sifting_profile_candle_tx, mut sifting_profile_candle_rx) =
         mpsc::channel::<VpCandle>(1024);
-    // Closed-candle fan-out for the execution trigger.
-    let (exec_tx, mut exec_rx) = mpsc::channel::<types::VpCandle>(64);
 
     let status = FeedStatus::new(bc_tx.clone());
     // TradingView-parity histogram model + profile input resolution.
@@ -146,7 +127,6 @@ async fn main() -> anyhow::Result<()> {
     )));
     let cached_levels = Arc::new(RwLock::new(Vec::new()));
     let cached_candles = Arc::new(RwLock::new(Vec::<VpCandle>::new()));
-    let recent_bubbles: Arc<RwLock<Vec<OrderflowEvent>>> = Arc::new(RwLock::new(Vec::new()));
     // Live tick-volume bars (closed + in-progress) for /tick-volume and WS
     // replay. Same span as the candle cache.
     let tick_volume = TickVolumeStore::new(sifting_rest::SIFTING_HISTORY_CANDLE_LIMIT);
@@ -488,7 +468,6 @@ async fn main() -> anyhow::Result<()> {
     {
         let vp = vp.clone();
         let bc = bc_tx.clone();
-        let recent = recent_bubbles.clone();
         let st = status.clone();
         let mut analyzer = OrderFlowAnalyzer::new(20_000);
         tokio::spawn(async move {
@@ -499,21 +478,13 @@ async fn main() -> anyhow::Result<()> {
                 let events = analyzer.detect_events(&vp_read, trade.price_f64(), 0.90, 0.97);
                 drop(vp_read);
                 for ev in events {
-                    {
-                        let mut buf = recent.write().await;
-                        buf.push(ev.clone());
-                        if buf.len() > 200 {
-                            let drain = buf.len() - 200;
-                            buf.drain(0..drain);
-                        }
-                    }
                     let _ = bc.send(WsFrame::Bubbles { data: ev });
                 }
             }
         });
     }
 
-    // ---------- Sifting 15m candle consumer (chart + swing + execution) ----------
+    // ---------- Sifting 15m candle consumer (chart + swing) ----------
     // SiftingIO broadcasts in-progress chart candles directly from the WS
     // adapter. Closed 15m candles keep the chart and swing detector current;
     // time-window profiles use the separate 1m stream below when available.
@@ -522,7 +493,6 @@ async fn main() -> anyhow::Result<()> {
         let cached = cached_levels.clone();
         let cached_c = cached_candles.clone();
         let bc = bc_tx.clone();
-        let exec = exec_tx.clone();
         let profile_uses_fine_bars = profile_uses_fine_bars;
         tokio::spawn(async move {
             while let Some(candle) = sifting_candle_rx.recv().await {
@@ -554,7 +524,6 @@ async fn main() -> anyhow::Result<()> {
                         let _ = bc.send(WsFrame::Levels { data: lvl });
                     }
                 }
-                let _ = exec.send(candle).await;
             }
         });
     }
@@ -672,63 +641,6 @@ async fn main() -> anyhow::Result<()> {
                         lvl.window, lvl.poc, lvl.vah, lvl.val
                     );
                     let _ = bc.send(WsFrame::Levels { data: lvl });
-                }
-            }
-        });
-    }
-
-    // ---------- Execution trigger loop ----------
-    {
-        let levels = cached_levels.clone();
-        let bubbles = recent_bubbles.clone();
-        let exec_mgr = Arc::new(ExecutionManager::new(config.clone()));
-        let proximity = config.level_proximity_pips;
-        let bc = bc_tx.clone();
-        tokio::spawn(async move {
-            const MIN_CONFIRM_STRENGTH: f64 = 15.0;
-            while let Some(candle) = exec_rx.recv().await {
-                let price = candle.close;
-                let lvls = levels.read().await.clone();
-                if lvls.is_empty() || !near_level(&lvls, price, proximity) {
-                    continue;
-                }
-                let cutoff = candle.time;
-                let candidates: Vec<OrderflowEvent> = {
-                    let buf = bubbles.read().await;
-                    buf.iter()
-                        .filter(|b| b.timestamp >= cutoff && b.strength >= MIN_CONFIRM_STRENGTH)
-                        .cloned()
-                        .collect()
-                };
-                if candidates.is_empty() {
-                    info!(
-                        "Price {:.3} near level but no qualifying bubble — skipping",
-                        price
-                    );
-                    continue;
-                }
-                let best = candidates
-                    .iter()
-                    .max_by(|a, b| a.strength.partial_cmp(&b.strength).unwrap())
-                    .unwrap();
-                let side = match best.kind.as_str() {
-                    "BUY_BUBBLE" | "ABS_BUY" => "buy",
-                    "SELL_BUBBLE" | "ABS_SELL" => "sell",
-                    _ => continue,
-                };
-                info!(
-                    "Execution trigger: {} @ {:.3} (strength {:.1}, kind {})",
-                    side, price, best.strength, best.kind
-                );
-                match exec_mgr
-                    .execute(side, 0.01, price, &lvls[0])
-                    .await
-                {
-                    Ok(ev) => {
-                        info!("Trade event: {:?}", ev);
-                        let _ = bc.send(WsFrame::Trades { data: ev });
-                    }
-                    Err(e) => warn!("Execution failed: {e}"),
                 }
             }
         });

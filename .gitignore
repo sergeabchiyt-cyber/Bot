@@ -1,7 +1,5 @@
-# Rust (engine + Node 3 + bridge)
+# Rust (the Node1 market-data / volume-profile engine)
 target/
-node3-execution/target/
-mt5-bridge/target/
 
 # Python (tooling)
 .venv/
@@ -13,29 +11,16 @@ __pycache__/
 *.so
 *.pyc
 
-# Environment
+# Environment — Node1 holds market/feed/calendar credentials only. It has no
+# broker credential, so there is no execution .env to ignore here.
 .env
 .env.local
-node3-execution/.env
 
 # Logs and runtime artifacts
 *.log
 *.err
 build-errors.log
 build-test-errors.log
-node3-errors.log
-node3-test-errors.log
-mt5-bridge-errors.log
-mt5-bridge-test-errors.log
-node3.log
-node3.err
-learner_state.json
-mt5-bridge/data/
-
-# Model checkpoints and weights (downloaded on the VM, persisted there)
-models/
-node3-ai/models/
-*.onnx
 
 # Testing & coverage
 .pytest_cache/

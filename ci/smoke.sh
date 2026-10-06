@@ -5,7 +5,8 @@
 #       profiles a hand-selected range (?start=&end=) as `CUSTOM`
 #   2. /calendar is actually populated with real ForexFactory events
 #   3. CORS lets the Node2 static origin (and only that origin) read the REST API
-#   4. /ws upgrades, replays levels + 15 candles, and fans Node3 trades to dashboards
+#   4. /ws upgrades, replays levels + 15 candles, and proves it accepts no
+#      execution/fill frame (Node1 has no broker write path)
 #   5. /tick-volume serves well-formed live tick-volume bars
 #   6. the econ-news audio pipeline serves `audio_chunk`/`learn` on /ws and
 #      caches Node3 transcripts for GET /ai (test-tone mode, no ffmpeg needed)

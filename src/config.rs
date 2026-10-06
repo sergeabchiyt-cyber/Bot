@@ -12,13 +12,6 @@ fn normalize_origin(raw: &str) -> String {
     raw.trim().trim_end_matches('/').to_string()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ExecutionVenue {
-    DerivDemo,
-    ChelseaLive,
-    None,
-}
-
 #[derive(Clone)]
 pub struct Config {
     pub port: u16,
@@ -50,9 +43,6 @@ pub struct Config {
     pub alltick_code: String,
     pub itick_ws_url: String,
     pub itick_symbol: String,
-
-    // ---- Strategy ----
-    pub level_proximity_pips: f64,
 
     // ---- Browser API ----
     /// The only origin allowed to call the REST API from a browser (the Node2
@@ -129,18 +119,6 @@ pub struct Config {
     pub vp_lower_tf: String,
     /// Second-chance interval if the 1m profile history cannot cover PW.
     pub vp_fallback_interval: String,
-
-    // ---- Execution ----
-    pub mcp_chelsea_url: Option<String>,
-    pub deriv_api_url: String,
-    pub deriv_app_id: Option<String>,
-    pub deriv_demo_api: Option<String>,
-    pub sl_min_pips: f64,
-    pub sl_max_pips: f64,
-    pub tp_min_pips: f64,
-    pub tp_max_pips: f64,
-    pub rr_min: f64,
-    pub rr_max: f64,
 }
 
 fn env_str(key: &str, default: &str) -> String {
@@ -234,8 +212,6 @@ impl Config {
             itick_ws_url: env_str("ITICK_WS_URL", "wss://api-free.itick.org/forex"),
             itick_symbol: env_str("ITICK_SYMBOL", "XAUUSD"),
 
-            level_proximity_pips: env_f64("LEVEL_PROXIMITY_PIPS", 5.0),
-
             cors_allowed_origin: normalize_origin(&env_str(
                 "CORS_ALLOWED_ORIGIN",
                 DEFAULT_CORS_ALLOWED_ORIGIN,
@@ -271,27 +247,6 @@ impl Config {
             vp_va_pct: env_f64("VP_VA_PCT", 70.0),
             vp_lower_tf: env_str("VP_LOWER_TF", "tv").to_ascii_lowercase(),
             vp_fallback_interval: env_str("VP_FALLBACK_INTERVAL", "5m").to_ascii_lowercase(),
-
-            mcp_chelsea_url: env_opt("MCP_CHELSEA_URL"),
-            deriv_api_url: env_str("DERIV_API_URL", "wss://ws.derivws.com/websockets/v3"),
-            deriv_app_id: env_opt("DERIV_APP_ID"),
-            deriv_demo_api: env_opt("DERIV_DEMO_API"),
-            sl_min_pips: env_f64("SL_MIN_PIPS", 10.0),
-            sl_max_pips: env_f64("SL_MAX_PIPS", 50.0),
-            tp_min_pips: env_f64("TP_MIN_PIPS", 15.0),
-            tp_max_pips: env_f64("TP_MAX_PIPS", 100.0),
-            rr_min: env_f64("RR_MIN", 1.0),
-            rr_max: env_f64("RR_MAX", 3.0),
-        }
-    }
-
-    pub fn execution_venue(&self) -> ExecutionVenue {
-        if self.mcp_chelsea_url.is_some() {
-            ExecutionVenue::ChelseaLive
-        } else if self.deriv_demo_api.is_some() {
-            ExecutionVenue::DerivDemo
-        } else {
-            ExecutionVenue::None
         }
     }
 

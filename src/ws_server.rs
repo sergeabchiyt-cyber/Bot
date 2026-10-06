@@ -310,7 +310,6 @@ async fn status_snapshot(State(state): State<AppState>) -> Response {
     };
     let body = serde_json::json!({
         "status": state.status.snapshot(),
-        "venue": format!("{:?}", state.config.execution_venue()),
         "version": env!("CARGO_PKG_VERSION"),
         "candles": {
             "interval": "15m",
@@ -439,16 +438,15 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                 let _ = state.tx.send(frame);
                             }
 
-                            // Node3 (or another execution producer) publishes
-                            // completed orders/signals on `trades`. Rebroadcast
-                            // unchanged so every dashboard subscribed to the
-                            // trades topic sees the same TradeEvent envelope.
-                            WsFrame::Trades { .. } => {
-                                let _ = state.tx.send(frame);
-                            }
-
                             // Node3 answers: cache for GET /ai and fan out to
                             // subscribers of the matching topic.
+                            //
+                            // These four are the only inbound frames Node1
+                            // acts on. There is deliberately no `trades` arm:
+                            // Node1 is a read-only market service, so an
+                            // execution/fill frame a client tries to publish
+                            // never even parses and reaches the ignore arm
+                            // below instead of the bus.
                             WsFrame::Transcript { .. }
                             | WsFrame::Sentiment { .. }
                             | WsFrame::Health { .. }
@@ -485,7 +483,6 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             WsFrame::Candle { .. } => "candle",
                             WsFrame::TickVolume { .. } => "tick_volume",
                             WsFrame::Bubbles { .. } => "bubbles",
-                            WsFrame::Trades { .. } => "trades",
                             WsFrame::Calendar { .. } => "calendar",
                             WsFrame::Status { .. } => "status",
                             WsFrame::AudioChunk { .. } => "audio_chunk",
@@ -733,6 +730,45 @@ mod tests {
             .unwrap();
         let res = app(ALLOWED).oneshot(req).await.unwrap();
         assert_eq!(acao(&res), None, "a foreign origin must not pass preflight");
+    }
+
+    /// Node1 is a market-data service only: there is no route that accepts an
+    /// order, a fill or any other broker write. The CORS layer offers just
+    /// `GET, OPTIONS`, so a write to any market route is rejected outright.
+    #[tokio::test]
+    async fn no_route_accepts_a_broker_write() {
+        for method in ["POST", "PUT", "PATCH", "DELETE"] {
+            for uri in REST_ROUTES {
+                let res = send(method, uri, Some(ALLOWED)).await;
+                assert!(
+                    res.status().is_client_error(),
+                    "{} {} was accepted ({}) - Node1 takes no writes",
+                    method,
+                    uri,
+                    res.status()
+                );
+            }
+        }
+
+        // The router advertises read-only methods for the market routes.
+        let res = send("POST", "/levels", Some(ALLOWED)).await;
+        if let Some(allow) = res.headers().get(header::ALLOW) {
+            let allow = allow.to_str().unwrap();
+            assert!(allow.contains("GET"), "GET must stay advertised");
+            assert!(!allow.contains("POST"), "POST must not be advertised");
+        }
+    }
+
+    /// The only inbound frame Node1 could ever have fanned out for an
+    /// execution was `trades`. It is gone, so a client publishing one is
+    /// simply ignored instead of reaching other subscribers.
+    #[test]
+    fn an_execution_frame_cannot_be_submitted_to_node1() {
+        let raw = r#"{"type":"trades","data":{"trade_id":"n3-1","symbol":"XAUUSD","side":"buy","size":0.01,"entry":2340.0,"sl":2335.0,"tp":2350.0,"status":"signal","timestamp":1700000000000}}"#;
+        assert!(
+            serde_json::from_str::<WsFrame>(raw).is_err(),
+            "Node1 must not parse an execution/fill frame"
+        );
     }
 
     #[tokio::test]

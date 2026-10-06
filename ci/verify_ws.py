@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runtime proof for /ws replay, subscriptions, and Node3 trade fan-out.
+"""Runtime proof for /ws replay, subscriptions and market-only publication.
 
 The browser upgrade request is a plain GET carrying `Upgrade: websocket`, so the
 CORS layer must pass it through untouched. A small raw-socket frame codec keeps
@@ -151,13 +151,10 @@ def read_json(reader, deadline):
     return None
 
 
-# Node3-style client: the subscription must accept all three market topics and
+# Node3-style client: the subscription must accept the market topics and
 # replay the latest supported levels plus enough recent candles to seed ATR(14).
 node3_sock, node3_reader = connect()
-send_json(
-    node3_sock,
-    {"type": "subscribe", "topics": ["candle", "levels", "trades"]},
-)
+send_json(node3_sock, {"type": "subscribe", "topics": ["candle", "levels"]})
 
 levels, candles = [], []
 deadline = time.monotonic() + 25
@@ -191,10 +188,9 @@ print(f"replay: {len(levels)} levels, {len(candles)} candles")
 print(f"candle: source={candle['source']} close={candle['close']}")
 print(f"levels: {levels[0]['window']} poc={levels[0]['poc']}")
 
-# Node2-style dashboard: subscribe only to trades, then prove a TradeEvent sent
-# by Node3 is parsed by Node1 and fanned out on the `trades` topic.
+# Node2-style dashboard: subscribes to the read-only market topics.
 dashboard_sock, dashboard_reader = connect()
-send_json(dashboard_sock, {"type": "subscribe", "topics": ["trades"]})
+send_json(dashboard_sock, {"type": "subscribe", "topics": ["levels", "bubbles"]})
 status_deadline = time.monotonic() + 10
 status_seen = False
 while time.monotonic() < status_deadline:
@@ -207,39 +203,52 @@ while time.monotonic() < status_deadline:
 if not status_seen:
     fail("timed out waiting for the post-subscribe status frame")
 
-trade = {
-    "type": "trades",
-    "data": {
-        "trade_id": "node3-ws-smoke",
-        "symbol": "XAUUSD",
-        "side": "buy",
-        "size": 0.01,
-        "entry": 2340.0,
-        "sl": 2335.0,
-        "tp": 2350.0,
-        "status": "signal",
-        "timestamp": 1_700_000_000_000,
+# Node1 is a market-data service: there is no broker write path, so an
+# execution/fill frame published by any client must never be rebroadcast.
+# `trades` is not part of the Node1 wire contract at all — the engine cannot
+# parse it, so it cannot be fanned out to another subscriber.
+send_json(
+    node3_sock,
+    {
+        "type": "trades",
+        "data": {
+            "trade_id": "node3-ws-smoke",
+            "symbol": "XAUUSD",
+            "side": "buy",
+            "size": 0.01,
+            "entry": 2340.0,
+            "sl": 2335.0,
+            "tp": 2350.0,
+            "status": "signal",
+            "timestamp": 1_700_000_000_000,
+        },
     },
-}
-send_json(node3_sock, trade)
-trade_deadline = time.monotonic() + 10
-while time.monotonic() < trade_deadline:
-    frame = read_json(dashboard_reader, trade_deadline)
+)
+silence_deadline = time.monotonic() + 5
+while time.monotonic() < silence_deadline:
+    frame = read_json(dashboard_reader, silence_deadline)
     if frame is None:
-        fail("Node1 did not fan the Node3 trade frame out to the trades subscriber")
-    trade_data = frame.get("data")
-    if (
-        frame["type"] == "trades"
-        and isinstance(trade_data, dict)
-        and trade_data.get("trade_id") == "node3-ws-smoke"
-    ):
-        if trade_data != trade["data"]:
-            fail(f"trade payload changed during fan-out: {frame}")
         break
-else:
-    fail("timed out waiting for the rebroadcast trade frame")
+    if frame["type"] == "trades":
+        fail(f"Node1 rebroadcast an execution frame: {frame}")
+print("no broker write path: an inbound `trades` frame is never rebroadcast")
+
+# The topics Node3 and Node2 do consume must still be live: re-subscribing to
+# `levels` replays cached profiles on the same socket.
+send_json(dashboard_sock, {"type": "subscribe", "topics": ["levels"]})
+replay_deadline = time.monotonic() + 10
+replayed = False
+while time.monotonic() < replay_deadline:
+    frame = read_json(dashboard_reader, replay_deadline)
+    if frame is None:
+        break
+    if frame["type"] == "levels":
+        replayed = True
+        break
+if not replayed:
+    fail("re-subscribing to `levels` replayed no cached profile")
+print("market topics intact: `levels` still replays on re-subscribe")
 
 node3_sock.close()
 dashboard_sock.close()
-print("trade fan-out: Node3 TradeEvent reached the trades subscriber unchanged")
 print("WS CHECK PASSED")

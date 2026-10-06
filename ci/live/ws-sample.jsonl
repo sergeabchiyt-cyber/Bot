@@ -1,4 +1,4 @@
-{"kind": "probe", "topics": ["levels", "candle", "tick_volume", "bubbles", "trades", "calendar"], "seconds": 45.0}
+{"kind": "probe", "topics": ["levels", "candle", "tick_volume", "bubbles", "calendar"], "seconds": 45.0}
 {"type": "heartbeat"}
 {"type": "levels", "data": {"window": "PW", "poc": 4155.780000000001, "vah": 4182.6900000000005, "val": 4134.39, "start": 1790546400000, "end": 1790978400000, "timestamp": 1791305460456, "direction": "neutral", "swing_high": null, "swing_low": null, "sunday_open": 4287.25, "meta": {"row_mode": "rows", "row_height": 1.3800000000000001, "rows": 128, "range_high": 4287.25, "range_low": 4110.93, "input_interval": "5m", "input_bars": 1428, "total_volume": 17577744099.00134, "va_pct": 0.7}}}
 {"type": "levels", "data": {"window": "PS", "poc": 4158.305, "vah": 4169.22, "val": 4144.06, "start": 1791151200000, "end": 1791237600000, "timestamp": 1791305460456, "direction": "neutral", "swing_high": null, "swing_low": null, "meta": {"row_mode": "rows", "row_height": 0.37, "rows": 128, "range_high": 4170.38, "range_low": 4123.34, "input_interval": "1m", "input_bars": 1439, "total_volume": 2262765129.999364, "va_pct": 0.7}}}

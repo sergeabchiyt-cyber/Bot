@@ -226,23 +226,6 @@ pub struct OrderflowEvent {
 }
 
 // =====================================================================
-// Trades
-// =====================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TradeEvent {
-    pub trade_id: String,
-    pub symbol: String,
-    pub side: String,
-    pub size: f64,
-    pub entry: f64,
-    pub sl: f64,
-    pub tp: f64,
-    pub status: String,
-    pub timestamp: i64,
-}
-
-// =====================================================================
 // WebSocket frames
 // =====================================================================
 
@@ -260,9 +243,6 @@ pub enum WsFrame {
 
     #[serde(rename = "bubbles")]
     Bubbles { data: OrderflowEvent },
-
-    #[serde(rename = "trades")]
-    Trades { data: TradeEvent },
 
     #[serde(rename = "calendar")]
     Calendar { data: serde_json::Value },
@@ -368,8 +348,12 @@ mod tests {
         assert_eq!(wire["data"]["sunday_open"], 2_341.25);
     }
 
+    /// Node1 has no broker write path: a `trades` frame is not a variant the
+    /// market service can parse, so an inbound one is ignored rather than
+    /// fanned out. The enum is a tagged union, so deserialization simply
+    /// fails — there is no execution/fill frame for a client to submit.
     #[test]
-    fn node3_trade_event_uses_the_tagged_trades_envelope() {
+    fn trade_frames_are_not_part_of_the_node1_wire_contract() {
         let raw = serde_json::json!({
             "type": "trades",
             "data": {
@@ -384,10 +368,37 @@ mod tests {
                 "timestamp": 1_700_000_000_000_i64
             }
         });
-        let frame: WsFrame = serde_json::from_value(raw).expect("deserialize Node3 trade");
-        let wire = serde_json::to_value(frame).expect("rebroadcast trade frame");
-        assert_eq!(wire["type"], "trades");
-        assert_eq!(wire["data"]["trade_id"], "n3-1");
-        assert_eq!(wire["data"]["status"], "signal");
+        assert!(
+            serde_json::from_value::<WsFrame>(raw).is_err(),
+            "Node1 must not accept an execution/fill frame"
+        );
+
+        // The market frames Node3 and Node2 do consume still parse: candles
+        // for ATR seeding and order-flow bubbles for the chart.
+        let candle = serde_json::json!({
+            "type": "candle",
+            "data": {
+                "time": 1_700_000_000_000_i64, "open": 1.0, "high": 2.0,
+                "low": 0.5, "close": 1.5, "volume": 10.0, "source": "sifting"
+            }
+        });
+        let frame: WsFrame = serde_json::from_value(candle).unwrap();
+        assert!(
+            matches!(frame, WsFrame::Candle { .. }),
+            "the market candle frame must still parse"
+        );
+
+        let bubbles = serde_json::json!({
+            "type": "bubbles",
+            "data": {
+                "kind": "BUY_BUBBLE", "level": 2340.0, "strength": 20.0,
+                "timestamp": 1_700_000_000_000_i64, "exchange": "binance"
+            }
+        });
+        let frame: WsFrame = serde_json::from_value(bubbles).unwrap();
+        assert!(
+            matches!(frame, WsFrame::Bubbles { .. }),
+            "the order-flow bubbles frame must still parse"
+        );
     }
 }

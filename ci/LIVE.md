@@ -4,7 +4,7 @@ generated: 2026-10-06T16:51:57Z
 
 ## /status
 
-* version `0.3.0` venue `DerivDemo`
+* version `0.3.0` service `market-data`
 * feeds connected: 8 / 12
 * **candles: interval='15m' seed_bars=2000**
 * history edge: 2026-10-06 16:30 UTC (**20 min behind now**) over 2000 bars
