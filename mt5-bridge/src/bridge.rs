@@ -1,5 +1,5 @@
 //! Bridge service layer: the only place that decides whether an order may be
-//! sent, what the broker did, and how that is reported to Node 3.
+//! sent, what the broker did, and how that is reported to Node 4.
 //!
 //! Invariants enforced here (see `docs/mt5/EXECUTION_ARCHITECTURE.md`):
 //!
@@ -104,7 +104,7 @@ pub enum BridgeEvent {
     BrokerTrade(BTreeMap<String, String>),
 }
 
-/// Request payload from Node 3 (mirrors `Node3ToBridge::Mt5Order`).
+/// Request payload from Node 4 (mirrors `Node4ToBridge::Mt5Order`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct OrderIntent {
     pub idempotency_key: String,
@@ -239,7 +239,7 @@ pub enum HistoryRecord {
 
 /// Append-only JSONL store: closed deals plus an order/control audit trail.
 ///
-/// This is what makes history survive a Node 3 **or** bridge restart: deals are
+/// This is what makes history survive a Node 4 **or** bridge restart: deals are
 /// mirrored from broker history on startup and appended as they close.
 pub struct HistoryStore {
     path: PathBuf,
@@ -574,7 +574,7 @@ impl Bridge {
 
     // ---- order flow -------------------------------------------------------
 
-    /// Place one market order for Node 3. Never sends the same idempotency key
+    /// Place one market order for Node 4. Never sends the same idempotency key
     /// twice, and never reports a fill the broker did not confirm.
     pub async fn place_order(&self, intent: OrderIntent) -> OrderOutcome {
         let started = now_ms();
@@ -1058,7 +1058,7 @@ impl Bridge {
     }
 
     /// Adopt broker positions that carry this bridge's magic number but are not
-    /// in the local ledger (e.g. a fill that happened while Node 3 was down).
+    /// in the local ledger (e.g. a fill that happened while Node 4 was down).
     pub async fn reconcile_positions(&self) -> Vec<Mt5Position> {
         let positions = match read_retry!(self.terminal.positions(None), 3) {
             Ok(positions) => positions,
@@ -1191,7 +1191,7 @@ impl Bridge {
     }
 
     /// Modify SL/TP of a position this bridge owns. `sl`/`tp` of `None` keep
-    /// the current level, so Node 3 can move a stop without restating both.
+    /// the current level, so Node 4 can move a stop without restating both.
     pub async fn modify_position(
         &self,
         position_ticket: i64,
@@ -1498,7 +1498,7 @@ impl Bridge {
             authorized: link.connected && link.write_enabled && !control.halted,
             protocol: BRIDGE_PROTOCOL_VERSION,
             bridge_version: BRIDGE_VERSION.to_string(),
-            node3_url: self.cfg.node3_ws_url.clone(),
+            node4_url: self.cfg.node4_ws_url.clone(),
             ea_connected: link.connected,
             ea_write_enabled: link.write_enabled,
             ea_mode: link.mode.clone(),
@@ -1715,14 +1715,14 @@ mod tests {
     fn reconcile_requires_broker_evidence() {
         let intent = OrderIntent {
             idempotency_key: "k".into(),
-            intent_id: "N3-1".into(),
+            intent_id: "N4-1".into(),
             side: "buy".into(),
             ..Default::default()
         };
         let recorded = OrderOutcome {
             status: "unknown".into(),
             idempotency_key: "k".into(),
-            intent_id: "N3-1".into(),
+            intent_id: "N4-1".into(),
             ts: 1_700_000_000_000,
             ..Default::default()
         };
@@ -1754,7 +1754,7 @@ mod tests {
         assert_eq!(outcome.filled_volume, 0.01);
 
         // A closing deal -> the intent existed but is over, which is not a
-        // position Node 3 may mark as open.
+        // position Node 4 may mark as open.
         let report = FindReport {
             positions: Vec::new(),
             deals: vec![Mt5Deal {

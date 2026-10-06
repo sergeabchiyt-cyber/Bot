@@ -418,7 +418,7 @@ pub struct OrderRequest {
     pub tp: f64,
     pub deviation_points: u32,
     pub magic: i64,
-    /// Broker order/position comment; carries the Node 3 intent id so an
+    /// Broker order/position comment; carries the Node 4 intent id so an
     /// uncertain outcome can be resolved by an idempotent lookup.
     pub comment: String,
 }
@@ -582,7 +582,7 @@ impl TerminalClient {
         self.call_order_send(req, self.write_timeout_ms).await
     }
 
-    /// Send a market order with an explicit timeout (Node 3 may request a
+    /// Send a market order with an explicit timeout (Node 4 may request a
     /// shorter or longer one than the bridge default).
     pub async fn call_order_send(
         &self,
@@ -1196,7 +1196,7 @@ pub fn validate_order(
     })
 }
 
-/// Build the broker comment that carries the Node 3 intent id, so an uncertain
+/// Build the broker comment that carries the Node 4 intent id, so an uncertain
 /// outcome can always be resolved by an idempotent `FIND`.
 ///
 /// MT5 comments are limited (typically 31 characters), so the id is truncated
@@ -1214,7 +1214,7 @@ pub fn intent_comment(intent_id: &str) -> String {
         comment.push(ch);
     }
     if comment.is_empty() {
-        comment.push_str("N3");
+        comment.push_str("N4");
     }
     comment
 }
@@ -1475,10 +1475,10 @@ mod tests {
 
     #[test]
     fn intent_comments_are_space_free_broker_safe_tokens() {
-        assert_eq!(intent_comment("N3-1759700000000-PW PoC"), "N3-1759700000000-PWPoC");
+        assert_eq!(intent_comment("N4-1759700000000-PW PoC"), "N4-1759700000000-PWPoC");
         let long = intent_comment(&"a".repeat(80));
         assert!(long.len() <= 31);
-        assert_eq!(intent_comment("!!! ???"), "N3");
+        assert_eq!(intent_comment("!!! ???"), "N4");
     }
 
     #[test]

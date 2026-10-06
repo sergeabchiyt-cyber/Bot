@@ -2,7 +2,7 @@
 //! end-to-end against a fake MT5 terminal.
 //!
 //! ```text
-//!   Node 3 command ──> Bridge ──> TerminalTransport ──> fake terminal
+//!   Node 4 command ──> Bridge ──> TerminalTransport ──> fake terminal
 //!                       │                                  │
 //!                       └────────── OrderOutcome <──────────┘
 //! ```
@@ -31,8 +31,8 @@ fn base_config(history_path: &str) -> BridgeConfig {
     let mut symbol_map = std::collections::BTreeMap::new();
     symbol_map.insert("XAUUSD".to_string(), "XAUUSD.a".to_string());
     BridgeConfig {
-        node3_ws_url: "ws://127.0.0.1:9/ws".into(),
-        node3_token: Some("test-bridge-token".into()),
+        node4_ws_url: "ws://127.0.0.1:9/ws".into(),
+        node4_token: Some("test-bridge-token".into()),
         ea_bind_addr: "127.0.0.1".into(),
         ea_port: 0,
         ea_token: Some("test-ea-token".into()),
@@ -594,7 +594,7 @@ async fn closed_deals_persist_and_history_pages_by_cursor() {
     assert_eq!(next.count, 0);
     assert!(next.complete);
 
-    // A Node 3 restart is simulated by re-reading the same file.
+    // A Node 4 restart is simulated by re-reading the same file.
     let reopened = HistoryStore::open(&h.history_path).await.unwrap();
     assert_eq!(reopened.deal_count().await, first.count);
 
