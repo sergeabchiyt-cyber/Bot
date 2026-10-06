@@ -89,16 +89,12 @@ fn parse_page(
 ) -> Result<(Vec<VpCandle>, Option<String>)> {
     if let Some(response_symbol) = response.meta.symbol.as_deref() {
         if !response_symbol.eq_ignore_ascii_case(symbol) {
-            anyhow::bail!(
-                "SiftingIO returned symbol {response_symbol}, expected {symbol}"
-            );
+            anyhow::bail!("SiftingIO returned symbol {response_symbol}, expected {symbol}");
         }
     }
     if let Some(interval) = response.meta.interval.as_deref() {
         if interval != expected_interval {
-            anyhow::bail!(
-                "SiftingIO returned interval {interval}, expected {expected_interval}"
-            );
+            anyhow::bail!("SiftingIO returned interval {interval}, expected {expected_interval}");
         }
     }
 
@@ -373,9 +369,10 @@ mod tests {
             None,
         )
         .unwrap();
-        assert!(url
-            .as_str()
-            .starts_with("https://api.sifting.io/v1/hist/commodities/XAUUSD/bars?"));
+        assert!(
+            url.as_str()
+                .starts_with("https://api.sifting.io/v1/hist/commodities/XAUUSD/bars?")
+        );
         assert!(url.as_str().contains("interval=15m"));
         assert!(url.as_str().contains("order=desc"));
         assert!(url.as_str().contains("limit=2000"));
@@ -400,7 +397,10 @@ mod tests {
         assert!(url.as_str().contains("interval=1m"));
         assert!(url.as_str().contains("order=asc"));
         assert!(url.as_str().contains("limit=2000"));
-        assert!(url.as_str().contains("cursor=cursor%2Fwith%2Breserved%3Dchars"));
+        assert!(
+            url.as_str()
+                .contains("cursor=cursor%2Fwith%2Breserved%3Dchars")
+        );
     }
 
     #[test]
@@ -433,7 +433,13 @@ mod tests {
         let start = 1_700_000_000_000;
         let week: i64 = 5 * 86_400_000;
         let candles: Vec<VpCandle> = (0..(119 * 60)).map(|i| bar(start + i * 60_000)).collect();
-        assert!(profile_history_covers(&candles, start, start + week, 60_000, 2 * 3_600_000));
+        assert!(profile_history_covers(
+            &candles,
+            start,
+            start + week,
+            60_000,
+            2 * 3_600_000
+        ));
     }
 
     /// ...while a page that only *reaches* the ends but is mostly empty fails.
@@ -446,10 +452,22 @@ mod tests {
         let candles: Vec<VpCandle> = (0..(week / 1_800_000) - 1)
             .map(|i| bar(start + i * 1_800_000))
             .collect();
-        assert!(!profile_history_covers(&candles, start, start + week, 60_000, 2 * 3_600_000));
+        assert!(!profile_history_covers(
+            &candles,
+            start,
+            start + week,
+            60_000,
+            2 * 3_600_000
+        ));
         // Nothing at all, or nothing near the far end, is rejected too.
         assert!(!profile_history_covers(&[], start, start + week, 60_000, 0));
-        assert!(!profile_history_covers(&candles, start, start + 2 * week, 60_000, 0));
+        assert!(!profile_history_covers(
+            &candles,
+            start,
+            start + 2 * week,
+            60_000,
+            0
+        ));
     }
 
     #[test]

@@ -1,5 +1,5 @@
-use std::collections::{HashMap, VecDeque};
 use chrono::Utc;
+use std::collections::{HashMap, VecDeque};
 
 use crate::types::{AggTrade, OrderflowEvent};
 use crate::volume_profile::VolumeProfileEngine;
@@ -11,7 +11,7 @@ const SLIDING_WINDOW_MS: i64 = 300_000; // 5 minutes
 const MIN_SAMPLES: usize = 50;
 
 // Absolute floors in USD notional.
-const FLOOR_BUBBLE: f64 = 50_000.0;   // $50k net delta over 500 trades
+const FLOOR_BUBBLE: f64 = 50_000.0; // $50k net delta over 500 trades
 const FLOOR_ABSORPTION: f64 = 100_000.0; // $100k total volume over 500 trades
 const ABSORPTION_DELTA_CAP: f64 = 20_000.0; // |net delta| must be < $20k to count as "near zero"
 
@@ -46,48 +46,83 @@ impl OrderFlowAnalyzer {
         let qty = trade.qty_f64();
         // Feeds without a taker side (quote ticks) must not fabricate
         // directional delta — they only count toward total volume.
-        let signed_qty = if trade.has_flow_side { trade.signed_delta() } else { 0.0 };
+        let signed_qty = if trade.has_flow_side {
+            trade.signed_delta()
+        } else {
+            0.0
+        };
 
         let notional_delta = signed_qty * price;
         let notional_volume = qty * price;
-        
+
         self.cumulative_delta += notional_delta;
         self.last_exchange = trade.exchange.clone();
-        self.delta_history.push_back((trade.trade_time, price, notional_delta, notional_volume));
-        
+        self.delta_history
+            .push_back((trade.trade_time, price, notional_delta, notional_volume));
+
         while self.delta_history.len() > self.window_size {
             self.delta_history.pop_front();
         }
 
         if self.delta_history.len() >= LOOKBACK {
-            let net_delta: f64 = self.delta_history.iter().rev().take(LOOKBACK).map(|(_, _, d, _)| *d).sum();
-            let total_vol: f64 = self.delta_history.iter().rev().take(LOOKBACK).map(|(_, _, _, v)| *v).sum();
+            let net_delta: f64 = self
+                .delta_history
+                .iter()
+                .rev()
+                .take(LOOKBACK)
+                .map(|(_, _, d, _)| *d)
+                .sum();
+            let total_vol: f64 = self
+                .delta_history
+                .iter()
+                .rev()
+                .take(LOOKBACK)
+                .map(|(_, _, _, v)| *v)
+                .sum();
             let t = self.delta_history.back().unwrap().0;
 
             self.bubble_mags.push_back((t, net_delta.abs()));
-            
+
             if net_delta.abs() < ABSORPTION_DELTA_CAP {
                 self.abs_vols.push_back((t, total_vol));
             }
 
             let cutoff = t - SLIDING_WINDOW_MS;
             while let Some(&front) = self.bubble_mags.front() {
-                if front.0 < cutoff { self.bubble_mags.pop_front(); } else { break; }
+                if front.0 < cutoff {
+                    self.bubble_mags.pop_front();
+                } else {
+                    break;
+                }
             }
             while let Some(&front) = self.abs_vols.front() {
-                if front.0 < cutoff { self.abs_vols.pop_front(); } else { break; }
+                if front.0 < cutoff {
+                    self.abs_vols.pop_front();
+                } else {
+                    break;
+                }
             }
         }
     }
 
     pub fn recent_delta_notional(&self) -> f64 {
         let n = LOOKBACK.min(self.delta_history.len());
-        self.delta_history.iter().rev().take(n).map(|(_, _, d, _)| *d).sum()
+        self.delta_history
+            .iter()
+            .rev()
+            .take(n)
+            .map(|(_, _, d, _)| *d)
+            .sum()
     }
 
     pub fn recent_total_volume(&self) -> f64 {
         let n = LOOKBACK.min(self.delta_history.len());
-        self.delta_history.iter().rev().take(n).map(|(_, _, _, v)| *v).sum()
+        self.delta_history
+            .iter()
+            .rev()
+            .take(n)
+            .map(|(_, _, _, v)| *v)
+            .sum()
     }
 
     fn price_at(&self, lookback: usize) -> Option<f64> {
@@ -125,7 +160,9 @@ impl OrderFlowAnalyzer {
     }
 
     fn percentile(sorted: &[f64], p: f64) -> f64 {
-        if sorted.is_empty() { return 0.0; }
+        if sorted.is_empty() {
+            return 0.0;
+        }
         let idx = (((sorted.len() as f64) - 1.0) * p).round() as usize;
         sorted[idx.min(sorted.len() - 1)]
     }
@@ -191,13 +228,12 @@ impl OrderFlowAnalyzer {
         if let Some(start_price) = self.price_at(LOOKBACK) {
             let displacement = current_price - start_price;
 
-            if total_vol > absorption_threshold 
-                && net_delta.abs() < ABSORPTION_DELTA_CAP * 2.0 
-                && displacement >= -0.5 
+            if total_vol > absorption_threshold
+                && net_delta.abs() < ABSORPTION_DELTA_CAP * 2.0
+                && displacement >= -0.5
                 && self.should_emit("ABS_BUY", now_ms)
             {
-                let reference = Self::nearest_level(vp, current_price)
-                    .unwrap_or(current_price);
+                let reference = Self::nearest_level(vp, current_price).unwrap_or(current_price);
                 events.push(OrderflowEvent {
                     kind: "ABS_BUY".into(),
                     level: reference,
@@ -207,13 +243,12 @@ impl OrderFlowAnalyzer {
                 });
             }
 
-            if total_vol > absorption_threshold 
+            if total_vol > absorption_threshold
                 && net_delta.abs() < ABSORPTION_DELTA_CAP * 2.0
-                && displacement <= 0.5 
+                && displacement <= 0.5
                 && self.should_emit("ABS_SELL", now_ms)
             {
-                let reference = Self::nearest_level(vp, current_price)
-                    .unwrap_or(current_price);
+                let reference = Self::nearest_level(vp, current_price).unwrap_or(current_price);
                 events.push(OrderflowEvent {
                     kind: "ABS_SELL".into(),
                     level: reference,

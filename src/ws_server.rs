@@ -1,26 +1,26 @@
-use std::sync::Arc;
-use std::time::Duration;
 use axum::{
+    Json, Router,
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{header, HeaderValue, Method},
+    http::{HeaderValue, Method, header},
     response::{IntoResponse, Response},
     routing::get,
-    Json, Router,
 };
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
-use tokio::sync::{broadcast, RwLock};
-use tracing::info;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::{RwLock, broadcast};
 use tower_http::cors::{AllowOrigin, CorsLayer};
+use tracing::info;
 
 use crate::ai_cache::AiCache;
 use crate::config::Config;
 use crate::status::FeedStatus;
 use crate::tick_volume::TickVolumeStore;
-use crate::types::{TickVolumeBar, VpLevels, VpCandle, WsFrame};
+use crate::types::{TickVolumeBar, VpCandle, VpLevels, WsFrame};
 use crate::volume_profile::{CustomRangeError, VolumeProfileEngine};
 
 /// Fourteen ATR true ranges need fifteen OHLC bars (the first close is the
@@ -150,8 +150,10 @@ async fn vp_audit(
     // Hand-selected range: the chart already knows which range it drew, so
     // profile exactly that instead of one of the engine's own windows.
     if params.contains_key("start") || params.contains_key("end") {
-        let (start, end) = match (parse_epoch_ms(&params, "start"), parse_epoch_ms(&params, "end"))
-        {
+        let (start, end) = match (
+            parse_epoch_ms(&params, "start"),
+            parse_epoch_ms(&params, "end"),
+        ) {
             (Some(start), Some(end)) => (start, end),
             _ => {
                 return (
@@ -328,17 +330,10 @@ async fn status_snapshot(State(state): State<AppState>) -> Response {
             "audit": "/vp?window=PW",
         },
     });
-    (
-        [(header::CACHE_CONTROL, "no-store")],
-        Json(body),
-    )
-        .into_response()
+    ([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
 }
 
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
     ws.on_upgrade(|socket| handle_socket(socket, state))
 }
 
@@ -623,7 +618,11 @@ mod tests {
             let res = send("GET", uri, Some(ALLOWED)).await;
             assert_eq!(res.status(), StatusCode::OK, "{uri}");
             assert_eq!(acao(&res).as_deref(), Some(ALLOWED), "{uri}");
-            assert_ne!(acao(&res).as_deref(), Some("*"), "{uri} must not use a wildcard");
+            assert_ne!(
+                acao(&res).as_deref(),
+                Some("*"),
+                "{uri} must not use a wildcard"
+            );
 
             let vary = res
                 .headers()
@@ -644,7 +643,11 @@ mod tests {
             // browser on any other page cannot read the response.
             let res = send("GET", uri, Some(FOREIGN)).await;
             assert_eq!(res.status(), StatusCode::OK, "{uri}");
-            assert_eq!(acao(&res), None, "{uri} leaked an allow-header to a foreign origin");
+            assert_eq!(
+                acao(&res),
+                None,
+                "{uri} leaked an allow-header to a foreign origin"
+            );
 
             let res = send("GET", uri, None).await;
             assert_eq!(res.status(), StatusCode::OK, "{uri}");
@@ -658,7 +661,8 @@ mod tests {
         // off — with them a wildcard would expose the API to any site.
         let res = send("GET", "/levels", Some(ALLOWED)).await;
         assert!(
-            !res.headers().contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS),
+            !res.headers()
+                .contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS),
             "credentials must not be enabled"
         );
 
@@ -678,7 +682,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(acao(&res).as_deref(), Some(dev));
-        let res = app(dev).oneshot(build("GET", "/levels", Some(ALLOWED))).await.unwrap();
+        let res = app(dev)
+            .oneshot(build("GET", "/levels", Some(ALLOWED)))
+            .await
+            .unwrap();
         assert_eq!(acao(&res), None);
     }
 
@@ -702,7 +709,10 @@ mod tests {
             .unwrap()
             .to_str()
             .unwrap();
-        assert!(methods.contains("GET") && methods.contains("OPTIONS"), "{methods}");
+        assert!(
+            methods.contains("GET") && methods.contains("OPTIONS"),
+            "{methods}"
+        );
         assert!(
             res.headers()
                 .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
@@ -719,7 +729,10 @@ mod tests {
                 .unwrap(),
             "600"
         );
-        assert!(!res.headers().contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS));
+        assert!(
+            !res.headers()
+                .contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+        );
 
         let req = Request::builder()
             .method("OPTIONS")
@@ -794,9 +807,7 @@ mod tests {
         keys.sort();
         assert_eq!(
             keys,
-            vec![
-                "close", "high", "low", "open", "source", "time", "volume"
-            ]
+            vec!["close", "high", "low", "open", "source", "time", "volume"]
         );
     }
 
@@ -805,7 +816,11 @@ mod tests {
         let res = send("GET", "/tick-volume", Some(ALLOWED)).await;
         assert_eq!(res.status(), StatusCode::OK);
         assert_eq!(
-            res.headers().get(header::CACHE_CONTROL).unwrap().to_str().unwrap(),
+            res.headers()
+                .get(header::CACHE_CONTROL)
+                .unwrap()
+                .to_str()
+                .unwrap(),
             "no-store"
         );
         let body = axum::body::to_bytes(res.into_body(), usize::MAX)

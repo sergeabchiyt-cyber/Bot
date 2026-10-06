@@ -71,10 +71,7 @@ fn ny_close_on(year: i32, month: u32, day: u32) -> i64 {
 /// the market traded 4150+). A session therefore only counts when at least one
 /// of its bars has a body, which is the same closed-market signature the
 /// dashboard uses to drop filler runs.
-pub fn previous_session_slice(
-    candles: &[VpCandle],
-    now_ms: i64,
-) -> (i64, i64, Vec<VpCandle>) {
+pub fn previous_session_slice(candles: &[VpCandle], now_ms: i64) -> (i64, i64, Vec<VpCandle>) {
     let mut end = last_session_close_utc(now_ms);
     let first_end = end;
     let mut first_start = session_close_shift(end, -1);
@@ -170,7 +167,10 @@ mod tests {
         // Sunday 19:00 NY: the most recent close is Sunday 18:00, so the
         // session being described would be the (closed) weekend session.
         let (start, end, slice) = previous_session_slice(&candles, ny(2025, 6, 8, 19, 0));
-        assert_eq!(end, sat_close, "PS ends where the last traded session closed");
+        assert_eq!(
+            end, sat_close,
+            "PS ends where the last traded session closed"
+        );
         assert_eq!(start, fri_close, "PS starts at the previous 18:00 NY");
         assert_eq!(slice.len(), 30, "PS carries the Friday session's bars");
         assert!(slice.iter().any(|c| c.open != c.close));

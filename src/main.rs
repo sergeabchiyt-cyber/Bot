@@ -1,22 +1,22 @@
 mod ai_cache;
+mod binance_ws;
 mod calendar;
 mod config;
-mod status;
-mod types;
-mod binance_ws;
-mod sifting_rest;
-mod multi_exchange;
-mod volume_profile;
-mod order_flow;
 mod econ_monitor;
 mod mcp_client;
+mod multi_exchange;
+mod order_flow;
+mod sifting_rest;
 mod sifting_ws;
+mod status;
 mod tick_volume;
+mod types;
+mod volume_profile;
 mod ws_server;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::sync::{RwLock, broadcast, mpsc};
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -90,7 +90,11 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env();
-    info!("Starting XAUUSD engine v{} on port {}", env!("CARGO_PKG_VERSION"), config.port);
+    info!(
+        "Starting XAUUSD engine v{} on port {}",
+        env!("CARGO_PKG_VERSION"),
+        config.port
+    );
 
     let (bc_tx, _) = broadcast::channel(4096);
     let (tick_tx, mut tick_rx) = mpsc::channel(8192);
@@ -292,9 +296,9 @@ async fn main() -> anyhow::Result<()> {
                 *cached_levels.write().await = levels;
                 seeded = true;
             }
-            Err(e) => warn!(
-                "SiftingIO REST history fetch failed; refusing Binance price fallback: {e}"
-            ),
+            Err(e) => {
+                warn!("SiftingIO REST history fetch failed; refusing Binance price fallback: {e}")
+            }
         }
     } else {
         warn!("No SIFTING_API_KEY set — historical VP seed is unavailable");

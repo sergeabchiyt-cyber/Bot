@@ -126,7 +126,6 @@ impl ProfileModel {
             },
         }
     }
-
 }
 
 /// One price row of the histogram, with the up/down split TradingView's
@@ -370,10 +369,7 @@ pub fn histogram(
     let poc_idx = bins
         .iter()
         .enumerate()
-        .max_by(|a, b| {
-            a.1.partial_cmp(b.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(i, _)| i)?;
 
     // Value area: start at the POC and repeatedly add the larger adjacent
@@ -554,7 +550,11 @@ mod tests {
             candle(2, 4150.0, 4150.5, 10.0),
         ];
         let hist = histogram(&candles, None, &rows_model(12)).expect("profile");
-        assert_eq!(hist.rows.last().unwrap().high, 4150.5, "top row clipped to the profile high");
+        assert_eq!(
+            hist.rows.last().unwrap().high,
+            4150.5,
+            "top row clipped to the profile high"
+        );
         assert_eq!(hist.range_high, 4150.5);
     }
 

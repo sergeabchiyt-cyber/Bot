@@ -29,7 +29,7 @@ use std::collections::HashSet;
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 use tracing::{info, warn};
 
 const SAMPLE_RATE: usize = 16_000;
@@ -264,7 +264,14 @@ async fn resolve_media(url: &str, cfg: &Config) -> Option<String> {
     let out = tokio::time::timeout(
         std::time::Duration::from_secs(45),
         tokio::process::Command::new(&cfg.econ_ytdlp)
-            .args(["-g", "-f", "bestaudio/best", "--no-playlist", "--no-warnings", url])
+            .args([
+                "-g",
+                "-f",
+                "bestaudio/best",
+                "--no-playlist",
+                "--no-warnings",
+                url,
+            ])
             .stdin(Stdio::null())
             .output(),
     )
@@ -272,7 +279,10 @@ async fn resolve_media(url: &str, cfg: &Config) -> Option<String> {
     let out = match out {
         Ok(Ok(out)) => out,
         Ok(Err(e)) => {
-            warn!("econ monitor: could not run {} ({e}) — install yt-dlp or use direct media URLs in ECON_STREAM_SOURCES", cfg.econ_ytdlp);
+            warn!(
+                "econ monitor: could not run {} ({e}) — install yt-dlp or use direct media URLs in ECON_STREAM_SOURCES",
+                cfg.econ_ytdlp
+            );
             return None;
         }
         Err(_) => {
@@ -469,9 +479,7 @@ pub async fn run_econ_monitor(
         // channel + live coverage links discovered by browsing the event.
         let mut candidates: Vec<String> = cfg.econ_stream_sources.clone();
         for ev in &active {
-            if fed_related(&ev.event)
-                && !candidates.iter().any(|c| c.contains("federalreserve"))
-            {
+            if fed_related(&ev.event) && !candidates.iter().any(|c| c.contains("federalreserve")) {
                 candidates.push("https://www.youtube.com/@federalreserve/live".to_string());
             }
         }
@@ -519,10 +527,10 @@ mod tests {
     fn window_selects_only_active_high_impact_usd_events() {
         let now = 1_700_000_000_000i64;
         let events = vec![
-            ev("Nonfarm Payrolls", "USD", "High", now - 60_000),           // active
-            ev("Core CPI m/m", "USD", "High", now + 10 * 60_000),          // inside pre-window
-            ev("German Factory Orders", "EUR", "High", now),               // wrong currency
-            ev("ADP Non-Farm Employment", "USD", "Medium", now),           // below min impact
+            ev("Nonfarm Payrolls", "USD", "High", now - 60_000), // active
+            ev("Core CPI m/m", "USD", "High", now + 10 * 60_000), // inside pre-window
+            ev("German Factory Orders", "EUR", "High", now),     // wrong currency
+            ev("ADP Non-Farm Employment", "USD", "Medium", now), // below min impact
             ev("FOMC Press Conference", "USD", "High", now - 2 * 3600_000), // after window
         ];
         let active = active_events(&events, now, 900, 3600, 2, &["USD".to_string()]);
@@ -548,7 +556,10 @@ mod tests {
         "#;
         let urls = extract_live_urls(text, 8);
         assert_eq!(urls[0], "https://www.youtube.com/@federalreserve/live");
-        assert!(urls.iter().any(|u| u.starts_with("https://www.youtube.com/watch?v=abc123XYZ_-")));
+        assert!(
+            urls.iter()
+                .any(|u| u.starts_with("https://www.youtube.com/watch?v=abc123XYZ_-"))
+        );
         assert!(!urls.iter().any(|u| u.contains("example.com")));
     }
 

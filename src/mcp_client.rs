@@ -1,7 +1,7 @@
-use anyhow::{anyhow, bail, Context, Result};
-use serde_json::{json, Value};
-use std::sync::atomic::{AtomicU64, Ordering};
+use anyhow::{Context, Result, anyhow, bail};
+use serde_json::{Value, json};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{info, warn};
 
 use crate::status::FeedStatus;
@@ -174,10 +174,7 @@ impl McpClient {
             bail!("MCP tools/list error: {err}");
         }
         let mut names = Vec::new();
-        if let Some(tools) = resp
-            .pointer("/result/tools")
-            .and_then(|t| t.as_array())
-        {
+        if let Some(tools) = resp.pointer("/result/tools").and_then(|t| t.as_array()) {
             for t in tools {
                 if let Some(name) = t.get("name").and_then(|n| n.as_str()) {
                     names.push(name.to_string());
@@ -241,7 +238,10 @@ impl McpClient {
     /// the page content back through the MCP browser server.
     pub async fn scrape_calendar(&self, status: &FeedStatus) -> Result<String> {
         status.set("mcp_browser", "connecting");
-        match self.browse_page("https://www.forexfactory.com/calendar").await {
+        match self
+            .browse_page("https://www.forexfactory.com/calendar")
+            .await
+        {
             Ok(text) => {
                 status.set("mcp_browser", "connected");
                 Ok(text)

@@ -470,7 +470,10 @@ mod tests {
         }
         let bar = st.on_tick(100.0, T0 + 10, None).unwrap().live.1;
         // first=flat, +up, =flat, -down, +up, -down
-        assert_eq!((bar.ticks, bar.up_ticks, bar.down_ticks, bar.flat_ticks), (6, 2, 2, 2));
+        assert_eq!(
+            (bar.ticks, bar.up_ticks, bar.down_ticks, bar.flat_ticks),
+            (6, 2, 2, 2)
+        );
     }
 
     #[test]
@@ -488,7 +491,12 @@ mod tests {
     fn bucket_roll_emits_one_closed_bar_then_a_fresh_live_bar() {
         let mut st = TickState::new();
         st.on_tick(100.0, T0, None);
-        assert!(st.on_tick(100.5, T0 + 1_000, None).unwrap().closed.is_none());
+        assert!(
+            st.on_tick(100.5, T0 + 1_000, None)
+                .unwrap()
+                .closed
+                .is_none()
+        );
 
         let out = st.on_tick(101.0, T0 + M15, None).unwrap();
         let (closed_candle, closed_bar) = out.closed.expect("bucket must close");
@@ -550,7 +558,15 @@ mod tests {
             );
         }
         // Control frames and other symbols are ignored.
-        handle_text(r#"{"f":"pong"}"#, "XAUUSD", &mut st, &bc, &ctx, Some(&profile_tx), &store);
+        handle_text(
+            r#"{"f":"pong"}"#,
+            "XAUUSD",
+            &mut st,
+            &bc,
+            &ctx,
+            Some(&profile_tx),
+            &store,
+        );
         handle_text(
             &tick(1.0, T0 + M15 + 1).replace("XAUUSD", "XAGUSD"),
             "XAUUSD",
@@ -572,10 +588,21 @@ mod tests {
         }
         assert_eq!(
             kinds,
-            ["candle", "tv", "candle", "tv", "candle", "tv_closed", "candle", "tv"]
+            [
+                "candle",
+                "tv",
+                "candle",
+                "tv",
+                "candle",
+                "tv_closed",
+                "candle",
+                "tv"
+            ]
         );
 
-        let closed = crx.try_recv().expect("closed candle goes to the chart consumer");
+        let closed = crx
+            .try_recv()
+            .expect("closed candle goes to the chart consumer");
         assert_eq!((closed.time, closed.volume), (T0, 2.0));
         assert!(crx.try_recv().is_err());
 
@@ -602,8 +629,16 @@ mod tests {
         assert_eq!(
             keys,
             [
-                "close", "closed", "down_ticks", "flat_ticks", "last_tick", "source",
-                "ticks", "ticks_per_sec", "time", "up_ticks"
+                "close",
+                "closed",
+                "down_ticks",
+                "flat_ticks",
+                "last_tick",
+                "source",
+                "ticks",
+                "ticks_per_sec",
+                "time",
+                "up_ticks"
             ]
         );
     }

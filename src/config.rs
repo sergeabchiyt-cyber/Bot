@@ -133,7 +133,10 @@ fn env_opt(key: &str) -> Option<String> {
 }
 
 fn env_f64(key: &str, default: f64) -> f64 {
-    env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
 fn env_bool(key: &str, default: bool) -> bool {
@@ -147,11 +150,17 @@ fn env_bool(key: &str, default: bool) -> bool {
 }
 
 fn env_u64(key: &str, default: u64) -> u64 {
-    env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
 fn env_i64(key: &str, default: i64) -> i64 {
-    env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
 /// Comma-separated list env, trimmed and stripped of empties.
@@ -167,7 +176,11 @@ fn env_list(key: &str, default: &str) -> Vec<String> {
 /// tri-state feed switch: FEED_X=on|off|auto (auto = on only when its
 /// credentials exist, or always-on for keyless public feeds).
 fn env_switch(key: &str, has_credentials: bool) -> bool {
-    match env::var(key).unwrap_or_default().to_ascii_lowercase().as_str() {
+    match env::var(key)
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "1" | "true" | "on" | "yes" => true,
         "0" | "false" | "off" | "no" => false,
         _ => has_credentials, // auto
@@ -184,7 +197,10 @@ impl Config {
         let binance_symbol = env_str("BINANCE_SYMBOL", "XAUUSDT").to_lowercase();
 
         Self {
-            port: env::var("PORT").ok().and_then(|v| v.parse().ok()).unwrap_or(3000),
+            port: env::var("PORT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(3000),
 
             binance_ws_url: env::var("BINANCE_WS_URL").unwrap_or_else(|_| {
                 format!("wss://fstream.binance.com/ws/{binance_symbol}@aggTrade")
@@ -295,6 +311,9 @@ mod tests {
             print!("CORS_ALLOWED_ORIGIN is set in the environment; skipping");
             return;
         }
-        assert_eq!(Config::from_env().cors_allowed_origin, DEFAULT_CORS_ALLOWED_ORIGIN);
+        assert_eq!(
+            Config::from_env().cors_allowed_origin,
+            DEFAULT_CORS_ALLOWED_ORIGIN
+        );
     }
 }

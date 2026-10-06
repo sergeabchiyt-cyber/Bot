@@ -81,11 +81,7 @@ impl AiCache {
 
     fn prune(&self, now_ms: i64) {
         let cutoff = now_ms - RETAIN_MS;
-        for buf in [
-            &self.transcripts,
-            &self.sentiments,
-            &self.predictions,
-        ] {
+        for buf in [&self.transcripts, &self.sentiments, &self.predictions] {
             let mut buf = buf.lock().unwrap();
             while let Some(front) = buf.items.front() {
                 let ts = front.get("ts").and_then(|t| t.as_i64()).unwrap_or(0);

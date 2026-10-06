@@ -105,7 +105,10 @@ mod tests {
         s.upsert(bar(0, 1));
         s.upsert(bar(1_800_000, 5));
         let snap = s.snapshot();
-        assert_eq!(snap.iter().map(|b| b.time).collect::<Vec<_>>(), vec![0, 1_800_000]);
+        assert_eq!(
+            snap.iter().map(|b| b.time).collect::<Vec<_>>(),
+            vec![0, 1_800_000]
+        );
         assert_eq!(snap[1].ticks, 5);
     }
 }

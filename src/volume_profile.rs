@@ -39,7 +39,7 @@ use histogram::Histogram;
 // Re-exported so the binary can construct the TradingView-parity model from
 // `Config` without reaching into the submodules.
 pub use histogram::{ProfileModel, RowMode};
-pub use timeframe::{parse_label, LowerTf};
+pub use timeframe::{LowerTf, parse_label};
 
 /// Keep the complete fixed 2,000-candle Sifting 15m swing seed (about 21
 /// days) plus room for live closes and session/week boundaries. The 1m profile
@@ -75,9 +75,7 @@ impl CustomRangeError {
     pub fn message(self) -> &'static str {
         match self {
             Self::Invalid => "start must be before end, and the range at most 35 days",
-            Self::NotRetained => {
-                "the requested range has no retained 1m history to profile"
-            }
+            Self::NotRetained => "the requested range has no retained 1m history to profile",
         }
     }
 }
@@ -197,11 +195,7 @@ impl VolumeProfileEngine {
 
     /// Seed independent profile and swing histories, then compute once. This
     /// avoids caching an empty CW snapshot between two seed operations.
-    pub fn ingest_history(
-        &mut self,
-        profile_candles: Vec<VpCandle>,
-        swing_candles: Vec<VpCandle>,
-    ) {
+    pub fn ingest_history(&mut self, profile_candles: Vec<VpCandle>, swing_candles: Vec<VpCandle>) {
         upsert_candles(&mut self.profile_candles, profile_candles);
         upsert_candles(&mut self.swing_candles, swing_candles);
         self.recompute(Utc::now().timestamp_millis());
@@ -257,10 +251,8 @@ impl VolumeProfileEngine {
         // Keep out-of-order candles in storage; the individual windows apply
         // their own time bounds. This also lets a historical backfill arrive
         // before a caller advances its synthetic/test clock.
-        self.profile_candles
-            .retain(|c| c.time >= retain_floor);
-        self.swing_candles
-            .retain(|c| c.time >= now_ms - RETAIN_MS);
+        self.profile_candles.retain(|c| c.time >= retain_floor);
+        self.swing_candles.retain(|c| c.time >= now_ms - RETAIN_MS);
 
         let pw: Vec<_> = self
             .profile_candles
@@ -458,8 +450,8 @@ impl VolumeProfileEngine {
             },
             None => self.model,
         };
-        let hist = histogram::histogram(&input, None, &model)
-            .ok_or(CustomRangeError::NotRetained)?;
+        let hist =
+            histogram::histogram(&input, None, &model).ok_or(CustomRangeError::NotRetained)?;
         Ok(VpAudit {
             window: "CUSTOM".into(),
             start: start_ms,
@@ -567,14 +559,7 @@ fn build_profile(
     let input_bars = input.len();
     let histogram = histogram::histogram(&input, range, model)?;
     let levels = histogram.levels(
-        label,
-        start,
-        end,
-        direction,
-        swing_high,
-        swing_low,
-        interval,
-        input_bars,
+        label, start, end, direction, swing_high, swing_low, interval, input_bars,
     );
     let stored = StoredProfile {
         histogram,
@@ -596,8 +581,10 @@ fn upsert_candle(candles: &mut Vec<VpCandle>, candle: VpCandle) {
 }
 
 fn upsert_candles(candles: &mut Vec<VpCandle>, incoming: Vec<VpCandle>) {
-    let mut by_time: std::collections::BTreeMap<i64, VpCandle> =
-        candles.drain(..).map(|candle| (candle.time, candle)).collect();
+    let mut by_time: std::collections::BTreeMap<i64, VpCandle> = candles
+        .drain(..)
+        .map(|candle| (candle.time, candle))
+        .collect();
     for candle in incoming {
         by_time.insert(candle.time, candle);
     }
@@ -651,18 +638,40 @@ mod tests {
         let mut e = VolumeProfileEngine::new();
 
         // Session A: Mon 18:00 -> Tue 18:00, price band 3300-3310.
-        fill(&mut e, ny(2025, 6, 9, 18, 0), ny(2025, 6, 10, 18, 0), 3300.0, 3310.0);
+        fill(
+            &mut e,
+            ny(2025, 6, 9, 18, 0),
+            ny(2025, 6, 10, 18, 0),
+            3300.0,
+            3310.0,
+        );
         // Session B: Tue 18:00 -> Wed 18:00, price band 3400-3410.
-        fill(&mut e, ny(2025, 6, 10, 18, 0), ny(2025, 6, 11, 18, 0), 3400.0, 3410.0);
+        fill(
+            &mut e,
+            ny(2025, 6, 10, 18, 0),
+            ny(2025, 6, 11, 18, 0),
+            3400.0,
+            3410.0,
+        );
         // Session C (in progress): Wed 18:00 -> now, band 3500-3510.
-        fill(&mut e, ny(2025, 6, 11, 18, 0), ny(2025, 6, 12, 10, 0), 3500.0, 3510.0);
+        fill(
+            &mut e,
+            ny(2025, 6, 11, 18, 0),
+            ny(2025, 6, 12, 10, 0),
+            3500.0,
+            3510.0,
+        );
 
         // At Tue 20:00 the last closed session is A.
         e.recompute(ny(2025, 6, 10, 20, 0));
         let ps_a = e.ps_levels.clone().expect("PS for session A");
         assert_eq!(ps_a.start, ny(2025, 6, 9, 18, 0));
         assert_eq!(ps_a.end, ny(2025, 6, 10, 18, 0));
-        assert!((3300.0..=3310.0).contains(&ps_a.poc), "poc {} not in A", ps_a.poc);
+        assert!(
+            (3300.0..=3310.0).contains(&ps_a.poc),
+            "poc {} not in A",
+            ps_a.poc
+        );
 
         // Nothing has closed yet at Wed 10:00 -> PS must NOT move.
         assert!(!e.refresh_on_session_close(ny(2025, 6, 11, 10, 0)));
@@ -673,21 +682,35 @@ mod tests {
         let ps_b = e.ps_levels.clone().expect("PS for session B");
         assert_eq!(ps_b.start, ny(2025, 6, 10, 18, 0));
         assert_eq!(ps_b.end, ny(2025, 6, 11, 18, 0));
-        assert!((3400.0..=3410.0).contains(&ps_b.poc), "poc {} not in B", ps_b.poc);
+        assert!(
+            (3400.0..=3410.0).contains(&ps_b.poc),
+            "poc {} not in B",
+            ps_b.poc
+        );
         assert_ne!(ps_a.poc, ps_b.poc, "PS was frozen across a session close");
 
         // Thu 18:00 close passes -> PS rolls to session C.
         assert!(e.refresh_on_session_close(ny(2025, 6, 12, 18, 1)));
         let ps_c = e.ps_levels.clone().expect("PS for session C");
         assert_eq!(ps_c.start, ny(2025, 6, 11, 18, 0));
-        assert!((3500.0..=3510.0).contains(&ps_c.poc), "poc {} not in C", ps_c.poc);
+        assert!(
+            (3500.0..=3510.0).contains(&ps_c.poc),
+            "poc {} not in C",
+            ps_c.poc
+        );
     }
 
     #[test]
     fn ps_skips_the_weekend_gap() {
         let mut e = VolumeProfileEngine::new();
         // Friday session: Thu 18:00 -> Fri 18:00 (market closes Fri 18:00 NY).
-        fill(&mut e, ny(2025, 6, 12, 18, 0), ny(2025, 6, 13, 18, 0), 3350.0, 3360.0);
+        fill(
+            &mut e,
+            ny(2025, 6, 12, 18, 0),
+            ny(2025, 6, 13, 18, 0),
+            3350.0,
+            3360.0,
+        );
 
         // Saturday noon: the "last closed session" window (Fri 18:00 ->
         // Sat 18:00) has no data, so PS must fall back to the Friday session
@@ -702,7 +725,13 @@ mod tests {
     #[test]
     fn refresh_fires_once_per_close_and_ignores_empty_weekend_sessions() {
         let mut e = VolumeProfileEngine::new();
-        fill(&mut e, ny(2025, 6, 12, 18, 0), ny(2025, 6, 13, 18, 0), 3350.0, 3360.0);
+        fill(
+            &mut e,
+            ny(2025, 6, 12, 18, 0),
+            ny(2025, 6, 13, 18, 0),
+            3350.0,
+            3360.0,
+        );
         // Saturday noon: PS is the Friday session.
         e.recompute(ny(2025, 6, 14, 12, 0));
         assert_eq!(
@@ -726,9 +755,21 @@ mod tests {
     fn cw_appears_once_monday_closes_and_freezes_intraday() {
         let mut e = VolumeProfileEngine::new();
         // Monday session: Sun 18:00 -> Mon 18:00.
-        fill(&mut e, ny(2025, 6, 8, 18, 0), ny(2025, 6, 9, 18, 0), 3300.0, 3310.0);
+        fill(
+            &mut e,
+            ny(2025, 6, 8, 18, 0),
+            ny(2025, 6, 9, 18, 0),
+            3300.0,
+            3310.0,
+        );
         // Tuesday session, still in progress.
-        fill(&mut e, ny(2025, 6, 9, 18, 0), ny(2025, 6, 10, 12, 0), 3400.0, 3410.0);
+        fill(
+            &mut e,
+            ny(2025, 6, 9, 18, 0),
+            ny(2025, 6, 10, 12, 0),
+            3400.0,
+            3410.0,
+        );
 
         // Monday 12:00: nothing has closed this week yet -> no CW.
         e.recompute(ny(2025, 6, 9, 12, 0));
@@ -752,7 +793,10 @@ mod tests {
         // Tuesday 12:00: Tuesday still open -> CW frozen on Monday's snapshot.
         e.recompute(ny(2025, 6, 10, 12, 0));
         let frozen = e.cw_levels.clone().expect("CW stays through Tuesday");
-        assert_eq!((frozen.start, frozen.end, frozen.poc), (cw.start, cw.end, cw.poc));
+        assert_eq!(
+            (frozen.start, frozen.end, frozen.poc),
+            (cw.start, cw.end, cw.poc)
+        );
     }
 
     #[test]
@@ -772,7 +816,13 @@ mod tests {
         let mut e = VolumeProfileEngine::new();
         let now = ny(2025, 6, 11, 12, 0);
         let week_start = VolumeProfileEngine::most_recent_week_start_utc(now);
-        fill(&mut e, week_start - 6 * 24 * H, week_start - 24 * H, 3100.0, 3110.0);
+        fill(
+            &mut e,
+            week_start - 6 * 24 * H,
+            week_start - 24 * H,
+            3100.0,
+            3110.0,
+        );
         fill(&mut e, week_start + H, now, 3200.0, 3210.0);
         e.recompute(now);
         let pw = e.pw_levels.clone().expect("PW");
@@ -893,11 +943,7 @@ mod tests {
         );
         // A range reaching years back has no retained bars to profile.
         let err = e
-            .audit_custom_range(
-                base - 400 * 24 * 60 * MIN,
-                base - 399 * 24 * 60 * MIN,
-                None,
-            )
+            .audit_custom_range(base - 400 * 24 * 60 * MIN, base - 399 * 24 * 60 * MIN, None)
             .unwrap_err();
         assert_eq!(err, CustomRangeError::NotRetained);
         assert_eq!(e.retained_bounds(), Some((base, base + 105 * MIN)));

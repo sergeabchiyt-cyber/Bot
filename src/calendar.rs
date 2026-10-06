@@ -11,7 +11,7 @@
 //! browser), normalizes it, and keeps the MCP browser as an optional
 //! fallback for when the feed is rate-limited.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -142,7 +142,9 @@ pub fn parse_calendar_markdown(md: &str) -> Vec<CalendarEvent> {
         // Header row, markdown separator row, or empty event name.
         if cols[0].eq_ignore_ascii_case("time")
             || cols[0].starts_with(':')
-            || cols[0].chars().all(|c| c == '-' || c == ':' || c.is_whitespace())
+            || cols[0]
+                .chars()
+                .all(|c| c == '-' || c == ':' || c.is_whitespace())
             || cols[3].is_empty()
         {
             continue;
@@ -154,7 +156,11 @@ pub fn parse_calendar_markdown(md: &str) -> Vec<CalendarEvent> {
             event: cols[3].to_string(),
             currency,
             impact,
-            time: if cols[0].is_empty() { None } else { Some(cols[0].to_string()) },
+            time: if cols[0].is_empty() {
+                None
+            } else {
+                Some(cols[0].to_string())
+            },
             timestamp: None,
             actual: None,
             forecast: None,
@@ -285,7 +291,10 @@ mod tests {
         // 08:30 EDT == 12:30 UTC
         assert_eq!(cpi.time.as_deref(), Some("2026-09-24T12:30:00+00:00"));
         assert!(cpi.timestamp.is_some());
-        assert!(cpi.gold_relevant, "high-impact USD must flag as gold-relevant");
+        assert!(
+            cpi.gold_relevant,
+            "high-impact USD must flag as gold-relevant"
+        );
 
         assert!(!events[0].gold_relevant);
         assert!(!events[1].gold_relevant, "medium GBP is not gold-relevant");
@@ -373,7 +382,10 @@ mod live_tests {
         for e in &events {
             assert!(!e.event.is_empty(), "empty event title");
             assert!(
-                matches!(e.impact.as_str(), "High" | "Medium" | "Low" | "Holiday" | "Unknown"),
+                matches!(
+                    e.impact.as_str(),
+                    "High" | "Medium" | "Low" | "Holiday" | "Unknown"
+                ),
                 "unnormalized impact: {}",
                 e.impact
             );

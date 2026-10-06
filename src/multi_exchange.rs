@@ -1,11 +1,11 @@
 use anyhow::Result;
 use futures_util::{SinkExt, StreamExt};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::mpsc;
 use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http;
-use tokio_tungstenite::tungstenite::Message;
 use tracing::{error, info, warn};
 
 use crate::status::FeedStatus;
@@ -43,7 +43,11 @@ pub async fn run_bybit_stream(tx: mpsc::Sender<AggTrade>, status: FeedStatus) ->
                     "op": "subscribe",
                     "args": ["publicTrade.XAUUSDT"]
                 });
-                if write.send(Message::Text(sub.to_string().into())).await.is_err() {
+                if write
+                    .send(Message::Text(sub.to_string().into()))
+                    .await
+                    .is_err()
+                {
                     warn!("Bybit subscribe send failed");
                     status.set("bybit", "error");
                     continue;
@@ -83,8 +87,13 @@ pub async fn run_bybit_stream(tx: mpsc::Sender<AggTrade>, status: FeedStatus) ->
                                     let qty = t["v"].as_str().unwrap_or("0");
                                     let ts = t["T"].as_i64().unwrap_or(0);
                                     let agg = AggTrade::new(
-                                        "bybit", "XAUUSDT", price, qty, ts,
-                                        side == "Buy", true,
+                                        "bybit",
+                                        "XAUUSDT",
+                                        price,
+                                        qty,
+                                        ts,
+                                        side == "Buy",
+                                        true,
                                     );
                                     let _ = tx.send(agg).await;
                                 }
@@ -127,7 +136,11 @@ pub async fn run_okx_stream(tx: mpsc::Sender<AggTrade>, status: FeedStatus) -> R
                     "op": "subscribe",
                     "args": [{"channel": "trades", "instId": "XAU-USDT-SWAP"}]
                 });
-                if write.send(Message::Text(sub.to_string().into())).await.is_err() {
+                if write
+                    .send(Message::Text(sub.to_string().into()))
+                    .await
+                    .is_err()
+                {
                     warn!("OKX subscribe send failed");
                     status.set("okx", "error");
                     continue;
@@ -141,7 +154,11 @@ pub async fn run_okx_stream(tx: mpsc::Sender<AggTrade>, status: FeedStatus) -> R
                     loop {
                         iv.tick().await;
                         let ping = json!({"op": "ping"});
-                        if write.send(Message::Text(ping.to_string().into())).await.is_err() {
+                        if write
+                            .send(Message::Text(ping.to_string().into()))
+                            .await
+                            .is_err()
+                        {
                             break;
                         }
                     }
@@ -169,8 +186,13 @@ pub async fn run_okx_stream(tx: mpsc::Sender<AggTrade>, status: FeedStatus) -> R
                                         .and_then(|s| s.parse::<i64>().ok())
                                         .unwrap_or(0);
                                     let agg = AggTrade::new(
-                                        "okx", "XAUUSDT", px, sz, ts,
-                                        side == "buy", true,
+                                        "okx",
+                                        "XAUUSDT",
+                                        px,
+                                        sz,
+                                        ts,
+                                        side == "buy",
+                                        true,
                                     );
                                     let _ = tx.send(agg).await;
                                 }
@@ -201,7 +223,11 @@ pub async fn run_okx_stream(tx: mpsc::Sender<AggTrade>, status: FeedStatus) -> R
 // Push rows are either arrays [price,size,side,ts,seq] or objects.
 // =====================================================================
 
-pub async fn run_bitget_stream(tx: mpsc::Sender<AggTrade>, symbol: String, status: FeedStatus) -> Result<()> {
+pub async fn run_bitget_stream(
+    tx: mpsc::Sender<AggTrade>,
+    symbol: String,
+    status: FeedStatus,
+) -> Result<()> {
     let url = "wss://ws.bitget.com/v2/ws/public";
     loop {
         status.set("bitget", "connecting");
@@ -216,7 +242,11 @@ pub async fn run_bitget_stream(tx: mpsc::Sender<AggTrade>, symbol: String, statu
                         {"instType": "USDT-FUTURES", "channel": "publicTrade", "instId": symbol},
                     ]
                 });
-                if write.send(Message::Text(sub.to_string().into())).await.is_err() {
+                if write
+                    .send(Message::Text(sub.to_string().into()))
+                    .await
+                    .is_err()
+                {
                     warn!("Bitget subscribe send failed");
                     status.set("bitget", "error");
                     continue;
@@ -249,7 +279,10 @@ pub async fn run_bitget_stream(tx: mpsc::Sender<AggTrade>, symbol: String, statu
                             };
                             if let Some(err) = v.get("code").and_then(|c| c.as_str()) {
                                 if err != "0" {
-                                    warn!("Bitget error frame: {}", v["msg"].as_str().unwrap_or("?"));
+                                    warn!(
+                                        "Bitget error frame: {}",
+                                        v["msg"].as_str().unwrap_or("?")
+                                    );
                                 }
                                 continue;
                             }
@@ -265,7 +298,10 @@ pub async fn run_bitget_stream(tx: mpsc::Sender<AggTrade>, symbol: String, statu
                                         (
                                             t.get(0).and_then(num_str),
                                             t.get(1).and_then(num_str),
-                                            t.get(3).and_then(|x| x.as_str().and_then(|s| s.parse().ok()))
+                                            t.get(3)
+                                                .and_then(|x| {
+                                                    x.as_str().and_then(|s| s.parse().ok())
+                                                })
                                                 .or_else(|| t.get(3).and_then(|x| x.as_i64())),
                                             t.get(2).and_then(|s| s.as_str()) == Some("buy"),
                                             true,
@@ -275,17 +311,24 @@ pub async fn run_bitget_stream(tx: mpsc::Sender<AggTrade>, symbol: String, statu
                                         (
                                             t["price"].as_str().map(String::from),
                                             t["size"].as_str().map(String::from),
-                                            t["ts"].as_str().and_then(|s| s.parse().ok())
+                                            t["ts"]
+                                                .as_str()
+                                                .and_then(|s| s.parse().ok())
                                                 .or_else(|| t["ts"].as_i64()),
                                             t["side"].as_str() == Some("buy"),
                                             true,
                                         )
                                     };
                                     if let (Some(price), Some(qty)) = (price, qty) {
-                                        let ts = ts.unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
-                                        let _ = tx.send(AggTrade::new(
-                                            "bitget", &symbol, &price, &qty, ts, taker_buy, has_side,
-                                        )).await;
+                                        let ts = ts.unwrap_or_else(|| {
+                                            chrono::Utc::now().timestamp_millis()
+                                        });
+                                        let _ = tx
+                                            .send(AggTrade::new(
+                                                "bitget", &symbol, &price, &qty, ts, taker_buy,
+                                                has_side,
+                                            ))
+                                            .await;
                                     }
                                 }
                             }
@@ -302,7 +345,10 @@ pub async fn run_bitget_stream(tx: mpsc::Sender<AggTrade>, symbol: String, statu
                 status.set("bitget", "disconnected");
             }
             Err(e) => {
-                warn!("Bitget connect failed: {}. Retrying in {RECONNECT_SECS}s", e);
+                warn!(
+                    "Bitget connect failed: {}. Retrying in {RECONNECT_SECS}s",
+                    e
+                );
                 status.set("bitget", "error");
             }
         }
@@ -315,7 +361,11 @@ pub async fn run_bitget_stream(tx: mpsc::Sender<AggTrade>, symbol: String, statu
 // `size` is signed: >0 buyer-taker, <0 seller-taker.
 // =====================================================================
 
-pub async fn run_gate_stream(tx: mpsc::Sender<AggTrade>, symbol: String, status: FeedStatus) -> Result<()> {
+pub async fn run_gate_stream(
+    tx: mpsc::Sender<AggTrade>,
+    symbol: String,
+    status: FeedStatus,
+) -> Result<()> {
     let url = "wss://fx-ws.gateio.ws/v4/ws/usdt";
     loop {
         status.set("gate", "connecting");
@@ -330,7 +380,11 @@ pub async fn run_gate_stream(tx: mpsc::Sender<AggTrade>, symbol: String, status:
                     "event": "subscribe",
                     "payload": [symbol]
                 });
-                if write.send(Message::Text(sub.to_string().into())).await.is_err() {
+                if write
+                    .send(Message::Text(sub.to_string().into()))
+                    .await
+                    .is_err()
+                {
                     warn!("Gate subscribe send failed");
                     status.set("gate", "error");
                     continue;
@@ -356,14 +410,23 @@ pub async fn run_gate_stream(tx: mpsc::Sender<AggTrade>, symbol: String, status:
                                     if t["contract"].as_str() != Some(symbol.as_str()) {
                                         continue;
                                     }
-                                    let Some(price) = num_str(&t["price"]) else { continue };
+                                    let Some(price) = num_str(&t["price"]) else {
+                                        continue;
+                                    };
                                     let signed_size = t["size"].as_i64().unwrap_or(0);
                                     let qty = signed_size.abs().to_string();
                                     let ts = t["time"].as_i64().unwrap_or(0);
-                                    let _ = tx.send(AggTrade::new(
-                                        "gate", &symbol, &price, &qty, ts,
-                                        signed_size > 0, true,
-                                    )).await;
+                                    let _ = tx
+                                        .send(AggTrade::new(
+                                            "gate",
+                                            &symbol,
+                                            &price,
+                                            &qty,
+                                            ts,
+                                            signed_size > 0,
+                                            true,
+                                        ))
+                                        .await;
                                 }
                             }
                         }
@@ -391,7 +454,11 @@ pub async fn run_gate_stream(tx: mpsc::Sender<AggTrade>, symbol: String, status:
 // Frames: {"feed":"trade", product_id, side, qty, price, time(ms), ...}
 // =====================================================================
 
-pub async fn run_kraken_stream(tx: mpsc::Sender<AggTrade>, product: String, status: FeedStatus) -> Result<()> {
+pub async fn run_kraken_stream(
+    tx: mpsc::Sender<AggTrade>,
+    product: String,
+    status: FeedStatus,
+) -> Result<()> {
     let url = "wss://futures.kraken.com/ws/v1";
     loop {
         status.set("kraken", "connecting");
@@ -405,7 +472,11 @@ pub async fn run_kraken_stream(tx: mpsc::Sender<AggTrade>, product: String, stat
                     "feed": "trade",
                     "product_ids": [product]
                 });
-                if write.send(Message::Text(sub.to_string().into())).await.is_err() {
+                if write
+                    .send(Message::Text(sub.to_string().into()))
+                    .await
+                    .is_err()
+                {
                     warn!("Kraken subscribe send failed");
                     status.set("kraken", "error");
                     continue;
@@ -423,7 +494,10 @@ pub async fn run_kraken_stream(tx: mpsc::Sender<AggTrade>, product: String, stat
                             };
                             if v.get("event").is_some() {
                                 if v["event"].as_str() == Some("error") {
-                                    warn!("Kraken error frame: {}", v["message"].as_str().unwrap_or("?"));
+                                    warn!(
+                                        "Kraken error frame: {}",
+                                        v["message"].as_str().unwrap_or("?")
+                                    );
                                 }
                                 continue;
                             }
@@ -434,9 +508,11 @@ pub async fn run_kraken_stream(tx: mpsc::Sender<AggTrade>, product: String, stat
                                     let qty = num_str(&v["qty"]).unwrap_or_default();
                                     let ts = v["time"].as_i64().unwrap_or(0);
                                     let taker_buy = v["side"].as_str() == Some("buy");
-                                    let _ = tx.send(AggTrade::new(
-                                        "kraken", &product, &price, &qty, ts, taker_buy, true,
-                                    )).await;
+                                    let _ = tx
+                                        .send(AggTrade::new(
+                                            "kraken", &product, &price, &qty, ts, taker_buy, true,
+                                        ))
+                                        .await;
                                 }
                                 "trade_snapshot" => {
                                     // history replay — skip
@@ -455,7 +531,10 @@ pub async fn run_kraken_stream(tx: mpsc::Sender<AggTrade>, product: String, stat
                 status.set("kraken", "disconnected");
             }
             Err(e) => {
-                warn!("Kraken connect failed: {}. Retrying in {RECONNECT_SECS}s", e);
+                warn!(
+                    "Kraken connect failed: {}. Retrying in {RECONNECT_SECS}s",
+                    e
+                );
                 status.set("kraken", "error");
             }
         }
@@ -469,7 +548,12 @@ pub async fn run_kraken_stream(tx: mpsc::Sender<AggTrade>, product: String, stat
 // trade push cmd_id 22001-22003 with price/volume/trade_direction.
 // =====================================================================
 
-pub async fn run_alltick_stream(tx: mpsc::Sender<AggTrade>, url: String, code: String, status: FeedStatus) -> Result<()> {
+pub async fn run_alltick_stream(
+    tx: mpsc::Sender<AggTrade>,
+    url: String,
+    code: String,
+    status: FeedStatus,
+) -> Result<()> {
     let token = std::env::var("ALLTICK_TOKEN").unwrap_or_default();
     let full_url = format!("{url}?token={token}");
 
@@ -483,7 +567,11 @@ pub async fn run_alltick_stream(tx: mpsc::Sender<AggTrade>, url: String, code: S
                     "cmd_id": 22004, "seq_id": 1, "trace": "rust-xauusd-engine",
                     "data": { "symbol_list": [{ "code": code }] }
                 });
-                if write.send(Message::Text(sub.to_string().into())).await.is_err() {
+                if write
+                    .send(Message::Text(sub.to_string().into()))
+                    .await
+                    .is_err()
+                {
                     warn!("AllTick subscribe send failed");
                     status.set("alltick", "error");
                     continue;
@@ -497,7 +585,11 @@ pub async fn run_alltick_stream(tx: mpsc::Sender<AggTrade>, url: String, code: S
                     loop {
                         iv.tick().await;
                         let hb = json!({"cmd_id": 22000, "seq_id": 2, "trace": "hb", "data": {}});
-                        if write.send(Message::Text(hb.to_string().into())).await.is_err() {
+                        if write
+                            .send(Message::Text(hb.to_string().into()))
+                            .await
+                            .is_err()
+                        {
                             break;
                         }
                     }
@@ -506,7 +598,10 @@ pub async fn run_alltick_stream(tx: mpsc::Sender<AggTrade>, url: String, code: S
                 while let Some(msg) = read.next().await {
                     if let Ok(Message::Text(text)) = msg {
                         status.mark_msg("alltick");
-                        let v: Value = match serde_json::from_str(&text) { Ok(v) => v, _ => continue };
+                        let v: Value = match serde_json::from_str(&text) {
+                            Ok(v) => v,
+                            _ => continue,
+                        };
                         let cmd = v["cmd_id"].as_i64().unwrap_or(0);
                         // 22001 quote / 22002 price / 22003 trade pushes
                         if !(22001..=22003).contains(&cmd) {
@@ -521,21 +616,33 @@ pub async fn run_alltick_stream(tx: mpsc::Sender<AggTrade>, url: String, code: S
                             if d["code"].as_str().is_some_and(|c| c != code) {
                                 continue;
                             }
-                            let Some(price) = num_str(&d["price"]) else { continue };
+                            let Some(price) = num_str(&d["price"]) else {
+                                continue;
+                            };
                             let vol = num_str(&d["volume"]).unwrap_or_else(|| "0".into());
                             let ts = d["tick_time"].as_i64().unwrap_or(0);
                             // trade_direction: 1 aggressive buy, 2 aggressive sell.
                             // Price/quote pushes carry no direction → no flow side.
                             match d["trade_direction"].as_i64() {
                                 Some(dir @ (1 | 2)) => {
-                                    let _ = tx.send(AggTrade::new(
-                                        "alltick", &code, &price, &vol, ts, dir == 1, true,
-                                    )).await;
+                                    let _ = tx
+                                        .send(AggTrade::new(
+                                            "alltick",
+                                            &code,
+                                            &price,
+                                            &vol,
+                                            ts,
+                                            dir == 1,
+                                            true,
+                                        ))
+                                        .await;
                                 }
                                 _ => {
-                                    let _ = tx.send(AggTrade::new(
-                                        "alltick", &code, &price, &vol, ts, true, false,
-                                    )).await;
+                                    let _ = tx
+                                        .send(AggTrade::new(
+                                            "alltick", &code, &price, &vol, ts, true, false,
+                                        ))
+                                        .await;
                                 }
                             }
                         }
@@ -546,7 +653,10 @@ pub async fn run_alltick_stream(tx: mpsc::Sender<AggTrade>, url: String, code: S
                 status.set("alltick", "disconnected");
             }
             Err(e) => {
-                warn!("AllTick connect failed: {}. Retrying in {RECONNECT_SECS}s", e);
+                warn!(
+                    "AllTick connect failed: {}. Retrying in {RECONNECT_SECS}s",
+                    e
+                );
                 status.set("alltick", "error");
             }
         }
@@ -561,7 +671,12 @@ pub async fn run_alltick_stream(tx: mpsc::Sender<AggTrade>, url: String, code: S
 // `d`: 2 = aggressive buy, 1 = aggressive sell, 0/absent = unknown.
 // =====================================================================
 
-pub async fn run_itick_stream(tx: mpsc::Sender<AggTrade>, url: String, symbol: String, status: FeedStatus) -> Result<()> {
+pub async fn run_itick_stream(
+    tx: mpsc::Sender<AggTrade>,
+    url: String,
+    symbol: String,
+    status: FeedStatus,
+) -> Result<()> {
     let token = std::env::var("ITICK_TOKEN").unwrap_or_default();
 
     loop {
@@ -617,7 +732,10 @@ pub async fn run_itick_stream(tx: mpsc::Sender<AggTrade>, url: String, symbol: S
                 while let Some(msg) = read.next().await {
                     if let Ok(Message::Text(text)) = msg {
                         status.mark_msg("itick");
-                        let v: Value = match serde_json::from_str(&text) { Ok(v) => v, _ => continue };
+                        let v: Value = match serde_json::from_str(&text) {
+                            Ok(v) => v,
+                            _ => continue,
+                        };
 
                         // Handshake/ack frames
                         if v.get("resAc").is_some() {
@@ -625,7 +743,8 @@ pub async fn run_itick_stream(tx: mpsc::Sender<AggTrade>, url: String, symbol: S
                             let ok = v["code"].as_i64().unwrap_or(0) == 0
                                 || v["code"].as_i64() == Some(1);
                             if ac == "auth" && ok && !subscribed {
-                                let sub = json!({"ac": "subscribe", "params": format!("{symbol},tick")});
+                                let sub =
+                                    json!({"ac": "subscribe", "params": format!("{symbol},tick")});
                                 if out_tx.send(Message::Text(sub.to_string().into())).is_ok() {
                                     subscribed = true;
                                     info!("iTick subscribed to {symbol} ticks");
@@ -649,20 +768,32 @@ pub async fn run_itick_stream(tx: mpsc::Sender<AggTrade>, url: String, symbol: S
                                 continue;
                             }
                         }
-                        let Some(price) = num_str(&d["ld"]) else { continue };
+                        let Some(price) = num_str(&d["ld"]) else {
+                            continue;
+                        };
                         let vol = num_str(&d["v"]).unwrap_or_else(|| "0".into());
                         let ts = d["t"].as_i64().unwrap_or(0);
                         match d["d"].as_i64() {
                             Some(dir @ (1 | 2)) => {
-                                let _ = tx.send(AggTrade::new(
-                                    "itick", &symbol, &price, &vol, ts, dir == 2, true,
-                                )).await;
+                                let _ = tx
+                                    .send(AggTrade::new(
+                                        "itick",
+                                        &symbol,
+                                        &price,
+                                        &vol,
+                                        ts,
+                                        dir == 2,
+                                        true,
+                                    ))
+                                    .await;
                             }
                             _ => {
                                 // No taker side published — volume only.
-                                let _ = tx.send(AggTrade::new(
-                                    "itick", &symbol, &price, &vol, ts, true, false,
-                                )).await;
+                                let _ = tx
+                                    .send(AggTrade::new(
+                                        "itick", &symbol, &price, &vol, ts, true, false,
+                                    ))
+                                    .await;
                             }
                         }
                     }

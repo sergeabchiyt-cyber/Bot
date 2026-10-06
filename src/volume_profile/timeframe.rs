@@ -141,10 +141,7 @@ pub fn tv_lower_timeframe(candles: &[VpCandle]) -> (i64, &'static str) {
 /// coarser than the requested resolution (the 15m chart seed fallback), the
 /// history is used as-is and its own resolution is reported, so a client can
 /// see that this profile was built from 15m bars.
-pub fn prepare_input(
-    candles: &[VpCandle],
-    lower_tf: LowerTf,
-) -> (Vec<VpCandle>, &'static str) {
+pub fn prepare_input(candles: &[VpCandle], lower_tf: LowerTf) -> (Vec<VpCandle>, &'static str) {
     if candles.is_empty() {
         return (Vec::new(), "15m");
     }
@@ -300,7 +297,10 @@ mod tests {
     #[test]
     fn prepare_input_never_downscales_coarse_history() {
         // 15m history: asking for TV parity cannot invent finer bars.
-        let candles = vec![bar(0, 4100.0, 4101.0, 1.0), bar(900_000, 4101.0, 4102.0, 1.0)];
+        let candles = vec![
+            bar(0, 4100.0, 4101.0, 1.0),
+            bar(900_000, 4101.0, 4102.0, 1.0),
+        ];
         let (out, label) = prepare_input(&candles, LowerTf::Tv);
         assert_eq!(out.len(), 2);
         assert_eq!(label, "15m");

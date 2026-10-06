@@ -8,9 +8,9 @@
 
 use crate::types::{VpCandle, VpLevels};
 
+use super::StoredProfile;
 use super::histogram;
 use super::timeframe::LowerTf;
-use super::StoredProfile;
 
 /// Bars on each side of a fractal pivot. 3 × 15m = 45 minutes of
 /// confirmation lag: responsive enough to track the current swing without
@@ -138,14 +138,10 @@ fn latest_swing(candles: &[VpCandle]) -> Option<SwingLeg> {
             // double tops/bottoms anchor at their second touch.
             let is_high = high.is_finite()
                 && (index - SWING_PIVOT_RADIUS..=index + SWING_PIVOT_RADIUS)
-                    .all(|j| {
-                        j == index || !candles[j].high.is_finite() || high >= candles[j].high
-                    });
+                    .all(|j| j == index || !candles[j].high.is_finite() || high >= candles[j].high);
             let is_low = low.is_finite()
                 && (index - SWING_PIVOT_RADIUS..=index + SWING_PIVOT_RADIUS)
-                    .all(|j| {
-                        j == index || !candles[j].low.is_finite() || low <= candles[j].low
-                    });
+                    .all(|j| j == index || !candles[j].low.is_finite() || low <= candles[j].low);
 
             if is_high {
                 push_pivot(&mut pivots, PivotKind::High, index, candles);
@@ -213,9 +209,7 @@ fn fallback_leg(candles: &[VpCandle]) -> Option<SwingLeg> {
         {
             high_rel = i;
         }
-        if c.low.is_finite()
-            && (!window[low_rel].low.is_finite() || c.low <= window[low_rel].low)
-        {
+        if c.low.is_finite() && (!window[low_rel].low.is_finite() || c.low <= window[low_rel].low) {
             low_rel = i;
         }
     }
@@ -252,12 +246,7 @@ fn fallback_leg(candles: &[VpCandle]) -> Option<SwingLeg> {
     }
 }
 
-fn push_pivot(
-    pivots: &mut Vec<Pivot>,
-    kind: PivotKind,
-    index: usize,
-    candles: &[VpCandle],
-) {
+fn push_pivot(pivots: &mut Vec<Pivot>, kind: PivotKind, index: usize, candles: &[VpCandle]) {
     if let Some(previous) = pivots.last_mut() {
         if previous.kind == kind {
             let replace = match kind {
@@ -297,14 +286,7 @@ mod tests {
         prices
             .iter()
             .enumerate()
-            .map(|(i, price)| {
-                candle(
-                    start + i as i64 * 15 * MIN,
-                    price - 0.5,
-                    price + 0.5,
-                    100.0,
-                )
-            })
+            .map(|(i, price)| candle(start + i as i64 * 15 * MIN, price - 0.5, price + 0.5, 100.0))
             .collect()
     }
 
@@ -313,20 +295,21 @@ mod tests {
         histogram::ProfileModel::default()
     }
 
-    fn levels_of(
-        computed: Option<(VpLevels, StoredProfile)>,
-    ) -> VpLevels {
+    fn levels_of(computed: Option<(VpLevels, StoredProfile)>) -> VpLevels {
         computed.expect("swing profile").0
     }
 
     #[test]
     fn bearish_swing_is_anchored_high_to_low() {
         let prices = [
-            100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 104.0, 103.0, 102.0, 101.0,
-            100.0, 99.0, 98.0, 97.0, 96.0, 95.0, 96.0, 97.0, 98.0, 99.0, 100.0, 101.0,
-            102.0, 103.0, 104.0,
+            100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 104.0, 103.0, 102.0, 101.0, 100.0, 99.0,
+            98.0, 97.0, 96.0, 95.0, 96.0, 97.0, 98.0, 99.0, 100.0, 101.0, 102.0, 103.0, 104.0,
         ];
-        let swing = levels_of(compute_swing(&swing_history(&prices), &model(), LowerTf::Tv));
+        let swing = levels_of(compute_swing(
+            &swing_history(&prices),
+            &model(),
+            LowerTf::Tv,
+        ));
         assert_eq!(swing.window, "SWING_BEAR");
         assert_eq!(swing.direction, "bearish");
         assert_eq!(swing.swing_high, Some(105.5));
@@ -337,11 +320,15 @@ mod tests {
     #[test]
     fn bullish_swing_is_anchored_low_to_high() {
         let prices = [
-            105.0, 104.0, 103.0, 102.0, 101.0, 100.0, 101.0, 102.0, 103.0, 104.0, 105.0,
-            106.0, 107.0, 108.0, 109.0, 110.0, 109.0, 108.0, 107.0, 106.0, 105.0, 104.0,
-            103.0, 102.0, 101.0,
+            105.0, 104.0, 103.0, 102.0, 101.0, 100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0,
+            107.0, 108.0, 109.0, 110.0, 109.0, 108.0, 107.0, 106.0, 105.0, 104.0, 103.0, 102.0,
+            101.0,
         ];
-        let swing = levels_of(compute_swing(&swing_history(&prices), &model(), LowerTf::Tv));
+        let swing = levels_of(compute_swing(
+            &swing_history(&prices),
+            &model(),
+            LowerTf::Tv,
+        ));
         assert_eq!(swing.window, "SWING_BULL");
         assert_eq!(swing.direction, "bullish");
         assert_eq!(swing.swing_low, Some(99.5));
@@ -354,8 +341,8 @@ mod tests {
         // Double top with two equal 103 touches: the leg must start at the
         // *second* touch (index 4), not the first.
         let prices = [
-            100.0, 101.0, 102.0, 103.0, 103.0, 102.0, 101.0, 100.0, 99.0, 98.0,
-            99.0, 100.0, 101.0, 102.0, 103.0,
+            100.0, 101.0, 102.0, 103.0, 103.0, 102.0, 101.0, 100.0, 99.0, 98.0, 99.0, 100.0, 101.0,
+            102.0, 103.0,
         ];
         let candles = swing_history(&prices);
         let swing = levels_of(compute_swing(&candles, &model(), LowerTf::Tv));
