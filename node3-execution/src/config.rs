@@ -570,16 +570,26 @@ mod tests {
         assert!(err.contains("multiple execution venues"));
         assert!(err.contains("EXECUTION_VENUE"));
 
-        // An explicit selection resolves it.
+        // An explicit selection does NOT paper over a second configured venue:
+        // the operator must unset one, so a strategy can never trade the wrong
+        // account by accident.
         config.execution_venue_override = Some("deriv_mt5_demo".into());
+        let err = config.venue_decision().unwrap_err();
+        assert!(err.contains("mutually exclusive"));
+
+        // With the other venue's credential gone, the explicit choice resolves.
+        config.deriv_demo_api = None;
         assert_eq!(config.venue_decision().unwrap(), ExecutionVenue::DerivMt5Demo);
 
-        // …but not if the other venue is still configured.
+        // A fresh config with only the MT5 token and an explicit choice works.
         let mut conflicting = base();
+        conflicting.deriv_demo_api = None;
         conflicting.mt5_bridge_token = Some("bridge-token".into());
         conflicting.execution_venue_override = Some("deriv_mt5_demo".into());
-        let err = conflicting.venue_decision().unwrap_err();
-        assert!(err.contains("mutually exclusive"));
+        assert_eq!(
+            conflicting.venue_decision().unwrap(),
+            ExecutionVenue::DerivMt5Demo
+        );
 
         // Selecting a venue without its credentials is refused.
         let mut missing = base();

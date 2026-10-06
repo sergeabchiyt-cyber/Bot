@@ -40,10 +40,11 @@ async fn main() -> anyhow::Result<()> {
     // missing bridge shows up here as "configured but not connected".
     if config.mt5_configured() {
         info!(
-            "MT5 venue: requested symbol {} | lots {} | order timeout {} ms | control {}",
+            "MT5 venue: requested symbol {} | lots {} | order timeout {} ms | history page {} | control {}",
             config.mt5_symbol,
             config.mt5_volume_lots,
             config.mt5_order_timeout_ms,
+            config.mt5_history_page_size,
             if config.mt5_control_enabled() {
                 "enabled (/mt5/control)"
             } else {

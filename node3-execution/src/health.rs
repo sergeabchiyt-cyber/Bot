@@ -263,32 +263,6 @@ where
     Ok(())
 }
 
-/// Handle one frontend client frame. Returns `true` when snapshots should be
-/// re-sent (subscribe / snapshot requests).
-async fn handle_client_frame<S>(
-    frame: WsFrame,
-    topics: &mut Vec<String>,
-    sender: &mut S,
-) -> Result<bool, tokio_tungstenite::tungstenite::Error>
-where
-    S: Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
-{
-    match frame {
-        WsFrame::Subscribe { topics: new_topics } => {
-            *topics = new_topics;
-            return Ok(true);
-        }
-        WsFrame::Snapshot => return Ok(true),
-        WsFrame::Heartbeat => {
-            if let Ok(txt) = serde_json::to_string(&WsFrame::Heartbeat) {
-                sender.send(Message::Text(txt.into())).await?;
-            }
-        }
-        _ => {}
-    }
-    Ok(false)
-}
-
 /// The MT5 bridge's own session on `/ws`.
 ///
 /// The bridge is a *client* of this endpoint: it dials out from the terminal
@@ -343,9 +317,17 @@ async fn handle_bridge_session(
         }
     }
 
-    // Tell the bridge what we already know, so its first order is validated
-    // against the freshest account metadata it can have.
-    let _ = link.request_snapshot(&["account", "positions"]).await;
+    // Ask for a fresh snapshot in the background: the request waits for a
+    // `bridge_ack` that only the loop below can read, so awaiting it here would
+    // stall the session until the timeout.
+    {
+        let link = hub.mt5();
+        tokio::spawn(async move {
+            let _ = link
+                .request_snapshot(&["account", "positions", "history"])
+                .await;
+        });
+    }
 
     let mut heartbeat = interval(Duration::from_secs(20));
     heartbeat.tick().await;

@@ -15,8 +15,6 @@ pub struct ExecutionManager {
     /// the MT5 venue is configured, so a halted venue still reports its state
     /// through the same object the strategy uses.
     pub mt5: Option<Mt5Execution>,
-    /// Shared bridge link, also held by `DiagnosticsHub` for `/mt5/*`.
-    pub mt5_link: Option<Arc<Mt5BridgeLink>>,
     pub atr: f64,
 }
 
@@ -50,12 +48,11 @@ impl ExecutionManager {
         // of which venue is selected: `/mt5/*` and the kill switch must keep
         // working (and must be able to flatten) even if the strategy is not
         // currently trading MT5.
-        let (mt5, mt5_link) = if config.mt5_configured() {
+        let mt5 = if config.mt5_configured() {
             let link = shared_link.unwrap_or_else(|| Arc::new(Mt5BridgeLink::new(&config)));
-            let exec = Mt5Execution::new(&config, link.clone());
-            (Some(exec), Some(link))
+            Some(Mt5Execution::new(&config, link))
         } else {
-            (None, None)
+            None
         };
 
         Self {
@@ -63,7 +60,6 @@ impl ExecutionManager {
             deriv,
             chelsea,
             mt5,
-            mt5_link,
             atr: 3.0,
         }
     }

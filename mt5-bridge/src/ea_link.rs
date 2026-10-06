@@ -25,6 +25,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 use tracing::{debug, info, warn};
 
+use crate::bridge::{LinkStatusProvider, LinkStatusView};
 use crate::config::BridgeConfig;
 use crate::proto::{self, EaKind, EaMessage};
 use crate::terminal::{now_ms, BoxFut, EaResponse, TerminalError, TerminalTransport};
@@ -531,6 +532,27 @@ impl EaLink {
                 debug!("ignoring unrecognised EA line: {}", message.name);
             }
         }
+    }
+}
+
+impl LinkStatusProvider for EaLink {
+    fn status<'a>(&'a self) -> BoxFut<'a, LinkStatusView> {
+        Box::pin(async move {
+            let state = self.state.read().await.clone();
+            let now = now_ms();
+            LinkStatusView {
+                connected: state.connected,
+                write_enabled: state.write_enabled,
+                mode: state.reported_mode(),
+                login: state.hello.as_ref().map(|hello| hello.login),
+                server: state.hello.as_ref().map(|hello| hello.server.clone()),
+                ea_version: state.hello.as_ref().map(|hello| hello.ea_version.clone()),
+                build: state.hello.as_ref().map(|hello| hello.build),
+                last_heartbeat_ms: state.last_heartbeat.as_ref().map(|hb| hb.received_at),
+                heartbeat_age_ms: state.heartbeat_age_ms(now),
+                last_error: state.last_error.clone(),
+            }
+        })
     }
 }
 
