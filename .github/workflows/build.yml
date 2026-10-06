@@ -20,21 +20,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.94.0"
+          # The default profile does not ship these, and `cargo fmt` / `cargo
+          # clippy` then fail with "not installed for the toolchain".
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
 
       - name: Formatting
-        id: fmt
-        continue-on-error: true
-        run: |
-          set +e
-          cargo fmt --all -- --check > /tmp/fmt-check.txt 2>&1
-          echo "cargo fmt --check exit code: $?"
-          echo "--- cargo fmt --check output ---"
-          cat /tmp/fmt-check.txt
-          echo "--- end ---"
-          cargo fmt --all
-          git --no-pager diff -- '*.rs' > /tmp/fmt.patch 2>&1
-          echo "rustfmt patch: $(wc -c < /tmp/fmt.patch) bytes"
+        run: cargo fmt --all -- --check
 
       - name: Check
         id: check
@@ -107,12 +99,6 @@ jobs:
             echo
             echo '## Runtime smoke test'
             cat /tmp/proof.log 2>/dev/null || echo "(missing)"
-            echo
-            echo '## rustfmt (cargo fmt --all -- --check)'
-            cat /tmp/fmt-check.txt 2>/dev/null || echo "(missing)"
-            echo
-            echo '## rustfmt patch (what cargo fmt --all would change)'
-            cat /tmp/fmt.patch 2>/dev/null || echo "(missing)"
           } | sed -r 's/\x1b\[[0-9;]*m//g' > ci/PROOF.md
           git add ci/PROOF.md
           git diff --cached --quiet || git commit -m "ci: proof log [skip ci]"
