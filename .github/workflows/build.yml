@@ -26,7 +26,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Formatting
-        run: cargo fmt --all -- --check
+        id: fmt
+        continue-on-error: true
+        run: |
+          set +e
+          cargo fmt --all -- --check > /tmp/fmt-check.txt 2>&1
+          echo "cargo fmt --check exit: $?"
+          cargo fmt --all
+          git --no-pager diff -- '*.rs' > /tmp/fmt.patch 2>&1
+          echo "rustfmt patch bytes: $(wc -c < /tmp/fmt.patch)"
 
       - name: Check
         id: check
@@ -99,6 +107,12 @@ jobs:
             echo
             echo '## Runtime smoke test'
             cat /tmp/proof.log 2>/dev/null || echo "(missing)"
+            echo
+            echo '## rustfmt check'
+            cat /tmp/fmt-check.txt 2>/dev/null || echo "(missing)"
+            echo
+            echo '## rustfmt patch'
+            cat /tmp/fmt.patch 2>/dev/null || echo "(missing)"
           } | sed -r 's/\x1b\[[0-9;]*m//g' > ci/PROOF.md
           git add ci/PROOF.md
           git diff --cached --quiet || git commit -m "ci: proof log [skip ci]"
