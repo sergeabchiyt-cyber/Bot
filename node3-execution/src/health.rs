@@ -26,7 +26,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{interval, timeout};
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::config::Config;
 use crate::diagnostics::DiagnosticsHub;

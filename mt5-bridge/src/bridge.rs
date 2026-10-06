@@ -601,7 +601,7 @@ impl Bridge {
                 .reject_early(
                     &intent,
                     &requested_symbol,
-                    "trading is disabled by configuration (MT5_TRADING_ENABLED=0)",
+                    "trading is disabled by configuration (MT5_TRADING_ENABLED=0)".to_string(),
                     "trading_disabled",
                 )
                 .await;
@@ -712,7 +712,8 @@ impl Bridge {
                 .reject_early(
                     &intent,
                     &requested_symbol,
-                    "the account reports trade_allowed=false (trading disabled by the broker)",
+                    "the account reports trade_allowed=false (trading disabled by the broker)"
+                        .to_string(),
                     "trade_disabled",
                 )
                 .await;
@@ -998,12 +999,16 @@ impl Bridge {
             side: normalized.side.as_str().to_string(),
             requested_volume: normalized.volume,
             filled_volume: 0.0,
+            price: None,
             sl: Some(normalized.sl),
             tp: if normalized.tp > 0.0 {
                 Some(normalized.tp)
             } else {
                 None
             },
+            order_ticket: None,
+            deal_ticket: None,
+            position_ticket: None,
             retcode: 0,
             retcode_desc: "outcome unknown".into(),
             risk_amount: Some(normalized.risk_amount),
@@ -1538,7 +1543,8 @@ impl Bridge {
                     return;
                 }
                 if !hb.connected {
-                    let reason = "terminal reports it is not connected to the trade server".into();
+                    let reason =
+                        "terminal reports it is not connected to the trade server".to_string();
                     warn!("{reason}");
                     self.halt_internal(&reason, false).await;
                     return;

@@ -175,6 +175,49 @@ fn env_pairs(key: &str) -> (Vec<(String, String)>, Vec<String>) {
     (pairs, errors)
 }
 
+impl Default for Config {
+    /// Test/dev defaults: **no venue credentials at all** (`ExecutionVenue::None`),
+    /// XAUUSD requested, and the same numeric fallbacks `from_env()` uses when a
+    /// variable is absent. Production code must go through `from_env()` so the
+    /// environment stays the single source of truth; this exists so tests can
+    /// write `Config { deriv_demo_api: Some(..), ..Default::default() }` and not
+    /// break every time a venue gains a field.
+    fn default() -> Self {
+        Self {
+            node1_ws_url: "wss://engine-southeastasia-sng-main.onrender.com/ws".into(),
+            port: 10_000,
+            mcp_chelsea_url: None,
+            deriv_demo_api: None,
+            deriv_app_id: None,
+            deriv_api_url: "https://api.derivws.com".into(),
+            deriv_min_stake: DEFAULT_DERIV_MIN_STAKE,
+
+            mt5_bridge_token: None,
+            mt5_control_token: None,
+            mt5_symbol: "XAUUSD".into(),
+            mt5_symbol_map: Vec::new(),
+            mt5_volume_lots: DEFAULT_MT5_VOLUME_LOTS,
+            mt5_order_timeout_ms: 15_000,
+            mt5_history_page_size: 100,
+            mt5_max_risk_per_trade: None,
+            mt5_allow_other_symbol: false,
+            execution_venue_override: None,
+            venue: ExecutionVenue::None,
+            venue_error: None,
+            symbol_map_errors: Vec::new(),
+
+            volume_threshold: 10_500.0,
+            sl_min_pips: 200.0,
+            sl_max_pips: 300.0,
+            tp_min_pips: 600.0,
+            tp_max_pips: 800.0,
+            rr_min: 2.0,
+            rr_max: 3.0,
+            order_size: 0.01,
+        }
+    }
+}
+
 impl Config {
     pub fn from_env() -> Self {
         let (mt5_symbol_map, symbol_map_errors) = env_pairs("MT5_SYMBOL_MAP");

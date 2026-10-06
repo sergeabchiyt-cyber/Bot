@@ -243,6 +243,10 @@ impl Mt5BridgeLink {
         if previous.is_some() {
             warn!("a new MT5 bridge session replaced the previous one");
         }
+        // Read what the log line needs before the fields move into the state.
+        let protocol = info.protocol;
+        let venue = info.venue.clone();
+        let capability_count = info.capabilities.len();
         {
             let mut info_guard = self.inner.info.write().await;
             *info_guard = BridgeSessionInfo {
@@ -257,10 +261,7 @@ impl Mt5BridgeLink {
             };
         }
         info!(
-            "MT5 bridge connected (protocol {}, venue {}, {} capabilities)",
-            info.protocol,
-            info.venue,
-            info.capabilities.len()
+            "MT5 bridge connected (protocol {protocol}, venue {venue}, {capability_count} capabilities)"
         );
         (generation, rx)
     }
@@ -967,32 +968,13 @@ mod tests {
 
     fn config() -> Config {
         Config {
-            node1_ws_url: "wss://example.invalid/ws".into(),
-            port: 10_000,
-            mcp_chelsea_url: None,
-            deriv_demo_api: None,
-            deriv_app_id: None,
-            deriv_api_url: "https://api.derivws.com".into(),
-            deriv_min_stake: 0.5,
             mt5_bridge_token: Some("bridge-token".into()),
             mt5_control_token: Some("control-token".into()),
-            mt5_symbol: "XAUUSD".into(),
             mt5_symbol_map: vec![("XAUUSD".into(), "XAUUSD.a".into())],
-            mt5_volume_lots: 0.01,
-            mt5_order_timeout_ms: 15_000,
-            mt5_history_page_size: 100,
             mt5_max_risk_per_trade: Some(5.0),
-            mt5_allow_other_symbol: false,
             execution_venue_override: Some("deriv_mt5_demo".into()),
-            symbol_map_errors: Vec::new(),
-            volume_threshold: 10_500.0,
-            sl_min_pips: 200.0,
-            sl_max_pips: 300.0,
-            tp_min_pips: 600.0,
-            tp_max_pips: 800.0,
-            rr_min: 2.0,
-            rr_max: 3.0,
-            order_size: 0.50,
+            venue: crate::config::ExecutionVenue::DerivMt5Demo,
+            ..Default::default()
         }
     }
 

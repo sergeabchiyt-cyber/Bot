@@ -15,9 +15,9 @@ use tokio::sync::Mutex;
 
 use crate::bridge::{LinkStatusProvider, LinkStatusView};
 use crate::proto::method;
+use crate::snapshot::{Mt5Deal, Mt5Position};
 use crate::terminal::{
-    now_ms, AccountType, BoxFut, EaResponse, Mt5Deal, Mt5Position, SymbolSpec, TerminalError,
-    TerminalTransport,
+    now_ms, AccountType, BoxFut, EaResponse, SymbolSpec, TerminalError, TerminalTransport,
 };
 
 pub const UNKNOWN_SYMBOL_CODE: i64 = 43_001;
@@ -127,6 +127,9 @@ struct FakeInner {
     quote_age_ms: i64,
     order_mode: OrderMode,
     latency_ms: u64,
+    /// When set, every write method is refused with this message (models a
+    /// read-only EA link, i.e. a missing `MT5_EA_TOKEN`).
+    refuse_writes: Option<String>,
     symbols: HashMap<String, SymbolSpec>,
     positions: Vec<Mt5Position>,
     deals: Vec<Mt5Deal>,
@@ -151,6 +154,7 @@ impl FakeTerminal {
             quote_age_ms: config.quote_age_ms,
             order_mode: config.order_mode,
             latency_ms: config.latency_ms,
+            refuse_writes: config.refuse_writes,
             symbols: config.symbols,
             positions: Vec::new(),
             deals: Vec::new(),

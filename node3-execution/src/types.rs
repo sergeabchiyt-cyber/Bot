@@ -585,7 +585,7 @@ pub struct Mt5AccountSnapshot {
     pub setup_hint: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Mt5Position {
     pub ticket: i64,
     pub symbol: String,

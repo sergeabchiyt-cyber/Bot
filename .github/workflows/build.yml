@@ -37,7 +37,7 @@ jobs:
           git config user.name ci
           git fetch origin ${{ github.ref_name }}
           git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
-          tail -c 60000 /tmp/check.log > build-errors.log
+          tail -c 400000 /tmp/check.log > build-errors.log
           git add -f build-errors.log
           git commit -m "ci: build error log [skip ci]"
           git push origin ${{ github.ref_name }}
@@ -85,7 +85,7 @@ jobs:
           git config user.name ci
           git fetch origin ${{ github.ref_name }}
           git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
-          tail -c 60000 /tmp/bridge-check.log > mt5-bridge-errors.log
+          tail -c 400000 /tmp/bridge-check.log > mt5-bridge-errors.log
           git add -f mt5-bridge-errors.log
           git commit -m "ci: mt5-bridge build error log [skip ci]"
           git push origin ${{ github.ref_name }}

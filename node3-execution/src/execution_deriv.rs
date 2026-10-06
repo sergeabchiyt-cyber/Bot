@@ -1689,21 +1689,11 @@ mod tests {
 
     fn test_executor(api_url: &str, app_id: Option<&str>) -> DerivExecution {
         let config = Config {
-            node1_ws_url: "wss://example.invalid/ws".into(),
-            port: 10_000,
-            mcp_chelsea_url: None,
             deriv_demo_api: Some("a1-test-token".into()),
             deriv_app_id: app_id.map(String::from),
             deriv_api_url: api_url.into(),
-            deriv_min_stake: crate::config::DEFAULT_DERIV_MIN_STAKE,
-            volume_threshold: 10_500.0,
-            sl_min_pips: 200.0,
-            sl_max_pips: 300.0,
-            tp_min_pips: 600.0,
-            tp_max_pips: 800.0,
-            rr_min: 2.0,
-            rr_max: 3.0,
             order_size: 0.01,
+            ..Default::default()
         };
         DerivExecution::new(&config)
     }
@@ -1773,21 +1763,10 @@ mod tests {
 
     fn test_config_with_token(token: &str, app_id: Option<&str>) -> Config {
         Config {
-            node1_ws_url: "wss://example.invalid/ws".into(),
-            port: 10_000,
-            mcp_chelsea_url: None,
             deriv_demo_api: Some(token.into()),
             deriv_app_id: app_id.map(String::from),
-            deriv_api_url: "https://api.derivws.com".into(),
-            deriv_min_stake: crate::config::DEFAULT_DERIV_MIN_STAKE,
-            volume_threshold: 10_500.0,
-            sl_min_pips: 200.0,
-            sl_max_pips: 300.0,
-            tp_min_pips: 600.0,
-            tp_max_pips: 800.0,
-            rr_min: 2.0,
-            rr_max: 3.0,
             order_size: 0.01,
+            ..Default::default()
         }
     }
 

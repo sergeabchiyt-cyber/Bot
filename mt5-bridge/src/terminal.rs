@@ -1214,7 +1214,7 @@ pub fn intent_comment(intent_id: &str) -> String {
 mod tests {
     use super::*;
 
-    fn spec() -> SymbolSpec {
+    fn xauusd_spec() -> SymbolSpec {
         SymbolSpec {
             name: "XAUUSD".into(),
             digits: 2,
@@ -1294,7 +1294,7 @@ mod tests {
 
     #[test]
     fn volume_is_floored_onto_the_step_grid_and_bounds_are_enforced() {
-        let spec = spec();
+        let spec = xauusd_spec();
         assert_eq!(normalize_volume(0.01, &spec).unwrap(), 0.01);
         assert_eq!(normalize_volume(0.03, &spec).unwrap(), 0.03);
         // 0.014 -> 0.01 (floored, never rounded up to a bigger size).
@@ -1316,7 +1316,7 @@ mod tests {
         // A coarser step rejects an indistinguishable request.
         let coarse = SymbolSpec {
             volume_step: 0.1,
-            ..spec()
+            ..xauusd_spec()
         };
         assert_eq!(normalize_volume(0.5, &coarse).unwrap(), 0.5);
         assert!(matches!(
@@ -1327,7 +1327,7 @@ mod tests {
 
     #[test]
     fn stops_must_be_on_the_correct_side_and_respect_the_stops_level() {
-        let spec = spec();
+        let spec = xauusd_spec();
         let now = spec.quote_ts_ms;
 
         // Buy: SL 2.00 below, TP 6.00 above -> valid, risk = $2.00/oz * 0.01 lots.
@@ -1408,7 +1408,7 @@ mod tests {
 
     #[test]
     fn stale_quotes_and_closed_markets_are_refused() {
-        let spec = spec();
+        let spec = xauusd_spec();
         assert!(matches!(
             validate_order(
                 Side::Buy,
@@ -1427,14 +1427,14 @@ mod tests {
         // A quote without a timestamp is never considered fresh.
         let no_ts = SymbolSpec {
             quote_ts_ms: 0,
-            ..spec()
+            ..xauusd_spec()
         };
         assert!(check_quote_fresh(no_ts.quote_ts_ms, 1_700_000_000_000, 3_000).is_err());
 
         for trade_mode in [0, 1, 2, 3] {
             let restricted = SymbolSpec {
                 trade_mode,
-                ..spec()
+                ..xauusd_spec()
             };
             assert!(validate_order(
                 Side::Buy,

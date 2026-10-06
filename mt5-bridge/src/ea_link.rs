@@ -29,6 +29,16 @@ use crate::config::BridgeConfig;
 use crate::proto::{self, EaKind, EaMessage};
 use crate::terminal::{now_ms, BoxFut, EaResponse, TerminalError, TerminalTransport};
 
+/// Aborts a task when the value is dropped, so early returns from a session
+/// still tear its reader down.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Methods that change broker state. Refused when the link has no write token.
 pub const WRITE_METHODS: &[&str] = &[
     proto::method::ORDER_SEND,
@@ -213,21 +223,51 @@ impl EaLink {
     /// One EA connection: greeting, then the request/response pump.
     async fn run_session(self: Arc<Self>, stream: TcpStream) {
         let (read_half, mut write_half) = tokio::io::split(stream);
-        let mut reader = BufReader::new(read_half);
+
+        // Reads happen in their own task. tokio's `AsyncBufReadExt` has
+        // `read_line` (borrowing) rather than a futures-style owned
+        // `next_line`, and a dedicated reader keeps the pump loop below free of
+        // borrow juggling. The task ends when the socket closes or when this
+        // session drops the receiver, and the guard aborts it on early returns.
+        let (line_tx, mut line_rx) = mpsc::channel::<Result<String, String>>(64);
+        let reader_task = tokio::spawn(async move {
+            let mut reader = BufReader::new(read_half);
+            let mut buffer = String::new();
+            loop {
+                buffer.clear();
+                match reader.read_line(&mut buffer).await {
+                    Ok(0) => {
+                        let _ = line_tx.send(Err("EA closed the connection".into())).await;
+                        break;
+                    }
+                    Ok(_) => {
+                        let line = buffer.trim_end().to_string();
+                        if line_tx.send(Ok(line)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        let _ = line_tx.send(Err(format!("EA read error: {err}"))).await;
+                        break;
+                    }
+                }
+            }
+        });
+        let _reader_guard = AbortOnDrop(reader_task);
 
         // ---- 1. Greeting ---------------------------------------------------
         let greeting = match tokio::time::timeout(
             Duration::from_millis(self.cfg.request_timeout_ms.max(1_000)),
-            reader.next_line(),
+            line_rx.recv(),
         )
         .await
         {
-            Ok(Ok(Some(line))) => line,
-            Ok(Ok(None)) => return,
-            Ok(Err(err)) => {
-                debug!("EA greeting read error: {err}");
+            Ok(Some(Ok(line))) => line,
+            Ok(Some(Err(err))) => {
+                debug!("EA greeting failed: {err}");
                 return;
             }
+            Ok(None) => return,
             Err(_) => {
                 debug!("EA connection did not send HELLO in time");
                 return;
@@ -325,15 +365,15 @@ impl EaLink {
                 _ = shutdown_rx.recv() => {
                     break "replaced by a newer EA session".to_string();
                 }
-                line = reader.next_line() => {
+                line = line_rx.recv() => {
                     match line {
-                        Ok(Some(text)) => {
+                        Some(Ok(text)) => {
                             if let Some(msg) = proto::parse_line(&text) {
                                 self.handle_ea_message(msg, &mut pending).await;
                             }
                         }
-                        Ok(None) => break "EA closed the connection".to_string(),
-                        Err(err) => break format!("EA read error: {err}"),
+                        Some(Err(reason)) => break reason,
+                        None => break "EA reader stopped".to_string(),
                     }
                 }
                 request = out_rx.recv() => {
