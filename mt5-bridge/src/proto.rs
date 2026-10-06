@@ -18,7 +18,7 @@
 //! ```text
 //! EA     -> bridge : HELLO token=.. build=.. login=.. server=.. mode=demo company=.. currency=USD ea=1.0.0
 //! bridge -> EA     : HELLOOK proto=1
-//! bridge -> EA     : REQ 7 ORDER_SEND intent=N3-1 symbol=XAUUSD side=buy volume=0.01 sl=2647.5 tp=2656.0 deviation=20 magic=330033 comment=N3-1
+//! bridge -> EA     : REQ 7 ORDER_SEND intent=N4-1 symbol=XAUUSD side=buy volume=0.01 sl=2647.5 tp=2656.0 deviation=20 magic=330033 comment=N4-1
 //! EA     -> bridge : RESP 7 OK status=filled retcode=10009 order=123 deal=456 position=789 price=2650.12 volume=0.01
 //! EA     -> bridge : ITEM 7 ticket=789 symbol=XAUUSD side=buy volume=0.01
 //! EA     -> bridge : END 7 count=1
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn percent_codec_round_trips_spaces_and_separators() {
-        let raw = "N3 order 42=50% done";
+        let raw = "N4 order 42=50% done";
         let encoded = enc(raw);
         assert!(!encoded.contains(' '));
         assert!(!encoded.contains('='));
@@ -285,7 +285,7 @@ mod tests {
             7,
             method::ORDER_SEND,
             &[
-                ("intent", "N3-1".into()),
+                ("intent", "N4-1".into()),
                 ("comment", "PW PoC retest".into()),
                 ("volume", "0.01".into()),
             ],

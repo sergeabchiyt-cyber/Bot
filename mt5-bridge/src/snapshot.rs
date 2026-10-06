@@ -1,7 +1,7 @@
-//! Snapshot + frame schema shared with Node 3.
+//! Snapshot + frame schema shared with Node 4.
 //!
-//! These structs are the wire contract between the bridge and Node 3, and Node 3
-//! mirrors them field-for-field in `node3-execution/src/types.rs`
+//! These structs are the wire contract between the bridge and Node 4, and Node 4
+//! mirrors them field-for-field in `node4-execution/src/types.rs`
 //! (`Mt5AccountSnapshot`, `Mt5PositionsSnapshot`, `Mt5HistorySnapshot`,
 //! `Mt5BridgeStatus`). `ci/mt5/protocol_lint.py` fails the build if the two
 //! copies drift apart, which is why the names must stay identical.
@@ -193,7 +193,7 @@ pub struct Mt5BridgeStatus {
     pub authorized: bool,
     pub protocol: u32,
     pub bridge_version: String,
-    pub node3_url: String,
+    pub node4_url: String,
     pub ea_connected: bool,
     pub ea_write_enabled: bool,
     pub ea_mode: Option<String>,
@@ -222,7 +222,7 @@ impl Default for Mt5BridgeStatus {
             authorized: false,
             protocol: BRIDGE_PROTOCOL_VERSION,
             bridge_version: BRIDGE_VERSION.to_string(),
-            node3_url: String::new(),
+            node4_url: String::new(),
             ea_connected: false,
             ea_write_enabled: false,
             ea_mode: None,
@@ -245,9 +245,9 @@ impl Default for Mt5BridgeStatus {
     }
 }
 
-/// Outcome of one order intent, returned to Node 3 inside `bridge_ack.data`.
+/// Outcome of one order intent, returned to Node 4 inside `bridge_ack.data`.
 ///
-/// Node 3 marks a trade opened **only** when `status` is `filled` or `partial`
+/// Node 4 marks a trade opened **only** when `status` is `filled` or `partial`
 /// (the latter carrying a broker-confirmed `filled_volume`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrderOutcome {
@@ -339,11 +339,11 @@ impl BridgeErrorPayload {
     }
 }
 
-/// Bridge → Node 3 frames.
+/// Bridge → Node 4 frames.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum BridgeToNode3 {
-    /// First frame on every (re)connection; Node 3 validates `token`.
+pub enum BridgeToNode4 {
+    /// First frame on every (re)connection; Node 4 validates `token`.
     BridgeHello {
         token: String,
         protocol: u32,
@@ -379,11 +379,11 @@ pub enum BridgeToNode3 {
     Heartbeat,
 }
 
-/// Node 3 → bridge frames.
+/// Node 4 → bridge frames.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum Node3ToBridge {
-    /// Node 3's answer to `bridge_hello`.
+pub enum Node4ToBridge {
+    /// Node 4's answer to `bridge_hello`.
     BridgeHelloAck {
         ok: bool,
         #[serde(default)]
@@ -473,7 +473,7 @@ mod tests {
 
     #[test]
     fn hello_frame_serialises_with_a_type_tag() {
-        let frame = BridgeToNode3::BridgeHello {
+        let frame = BridgeToNode4::BridgeHello {
             token: "secret".into(),
             protocol: BRIDGE_PROTOCOL_VERSION,
             bridge: format!("mt5-bridge/{BRIDGE_VERSION}"),
@@ -489,11 +489,11 @@ mod tests {
     }
 
     #[test]
-    fn node3_commands_round_trip_through_the_tagged_enum() {
+    fn node4_commands_round_trip_through_the_tagged_enum() {
         let raw = r#"{"type":"mt5_order","req_id":"r1","idempotency_key":"k1","side":"buy","volume":0.01,"sl":2647.5,"tp":2656.0}"#;
-        let parsed: Node3ToBridge = serde_json::from_str(raw).unwrap();
+        let parsed: Node4ToBridge = serde_json::from_str(raw).unwrap();
         match parsed {
-            Node3ToBridge::Mt5Order {
+            Node4ToBridge::Mt5Order {
                 req_id,
                 idempotency_key,
                 side,
@@ -509,9 +509,9 @@ mod tests {
         }
 
         // Unknown/forward-compatible frames must not break the loop.
-        let unknown: Node3ToBridge =
+        let unknown: Node4ToBridge =
             serde_json::from_str(r#"{"type":"mt5_something_new","req_id":"r9"}"#).unwrap();
-        assert_eq!(unknown, Node3ToBridge::Unknown);
+        assert_eq!(unknown, Node4ToBridge::Unknown);
     }
 
     #[test]
