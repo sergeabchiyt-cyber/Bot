@@ -43,9 +43,23 @@ jobs:
           git push origin ${{ github.ref_name }}
 
       - name: Unit tests
+        id: tests
         run: |
           set -o pipefail
           cargo test --all-targets -- --nocapture 2>&1 | tee /tmp/unit.log
+
+      - name: Save test log to branch
+        if: failure() && steps.tests.outcome == 'failure'
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          tail -c 400000 /tmp/unit.log > build-test-errors.log
+          git add -f build-test-errors.log
+          git commit -m "ci: build test log [skip ci]"
+          git push origin ${{ github.ref_name }}
 
       - name: Build release
         run: cargo build --release
@@ -91,9 +105,23 @@ jobs:
           git push origin ${{ github.ref_name }}
 
       - name: Contract + unit tests
+        id: tests
         run: |
           set -o pipefail
           cargo test --all-targets -- --nocapture 2>&1 | tee /tmp/bridge-tests.log
+
+      - name: Save test log to branch
+        if: failure() && steps.tests.outcome == 'failure'
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          tail -c 400000 /tmp/bridge-tests.log > mt5-bridge-test-errors.log
+          git add -f mt5-bridge-test-errors.log
+          git commit -m "ci: mt5-bridge test log [skip ci]"
+          git push origin ${{ github.ref_name }}
 
       - name: Build release
         run: cargo build --release

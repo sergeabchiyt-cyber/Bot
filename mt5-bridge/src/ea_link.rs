@@ -15,7 +15,7 @@
 //! * EA heartbeats are surfaced so the demo guard can be re-checked continuously
 //!   instead of only at startup.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -109,7 +109,7 @@ pub enum LinkEvent {
     Connected(Box<HelloInfo>),
     Disconnected(String),
     Heartbeat(Box<HeartbeatInfo>),
-    TradeEvent(HashMap<String, String>),
+    TradeEvent(BTreeMap<String, String>),
 }
 
 struct Outbound {
@@ -672,12 +672,15 @@ mod tests {
     fn list_responses_accumulate_items_until_end() {
         // Mirrors the dispatch logic without needing a socket.
         let mut accumulated = EaResponse::default();
-        let mut expecting_items = false;
         let resp_fields: BTreeMap<String, String> =
             [("count".to_string(), "2".to_string())].into_iter().collect();
         accumulated.fields = resp_fields;
-        expecting_items = 2 > 0;
-        assert!(expecting_items);
+        let expected: usize = accumulated
+            .fields
+            .get("count")
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
+        assert_eq!(expected, 2);
         accumulated.items.push(
             [("ticket".to_string(), "1".to_string())]
                 .into_iter()
@@ -688,7 +691,6 @@ mod tests {
                 .into_iter()
                 .collect(),
         );
-        expecting_items = false;
-        assert_eq!(accumulated.items.len(), 2);
+        assert_eq!(accumulated.items.len(), expected);
     }
 }

@@ -7,3 +7,5 @@ __pycache__/
 mt5-bridge/target/
 mt5-bridge/data/
 mt5-bridge-errors.log
+build-test-errors.log
+mt5-bridge-test-errors.log

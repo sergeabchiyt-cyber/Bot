@@ -17,7 +17,7 @@
 //! 5. **Halt is fail-closed.** When halted (manual, risk, link loss, account
 //!    mode change) no new order leaves the bridge.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -101,7 +101,7 @@ pub enum BridgeEvent {
     },
     Resumed,
     LinkDisconnected(String),
-    BrokerTrade(HashMap<String, String>),
+    BrokerTrade(BTreeMap<String, String>),
 }
 
 /// Request payload from Node 3 (mirrors `Node3ToBridge::Mt5Order`).
@@ -1467,7 +1467,6 @@ impl Bridge {
         let link = self.link.status().await;
         let control = self.control.snapshot().await;
         let (sent, filled, rejected, unknown, _, _) = self.stats.snapshot();
-        let account = self.cached_account().await;
         let positions_open = match read_retry!(self.terminal.positions(None), 1) {
             Ok(positions) => positions
                 .into_iter()
@@ -1591,6 +1590,10 @@ pub fn outcome_from_reconcile(
     }
 
     let mut outcome = recorded.clone();
+    // The intent is authoritative for identity: `recorded` may have been built
+    // from a failed send whose fields were only partially known.
+    outcome.idempotency_key = intent.idempotency_key.clone();
+    outcome.intent_id = intent.intent_id.clone();
     outcome.reconciled = true;
     outcome.error = None;
 
