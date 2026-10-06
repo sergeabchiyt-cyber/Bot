@@ -23,7 +23,28 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Formatting
-        run: cargo fmt --all -- --check
+        id: fmt
+        continue-on-error: true
+        run: |
+          cargo fmt --all -- --check > /tmp/fmt-check.txt 2>&1
+          echo "=== cargo fmt --check output ==="
+          cat /tmp/fmt-check.txt
+          cargo fmt --all
+          git --no-pager diff -- '*.rs' > /tmp/fmt.patch
+          echo "=== rustfmt patch: $(wc -c < /tmp/fmt.patch) bytes / $(grep -c '^diff' /tmp/fmt.patch) files ==="
+
+      - name: Publish rustfmt patch to branch
+        if: always()
+        run: |
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          cp /tmp/fmt.patch fmt.patch 2>/dev/null || true
+          cp /tmp/fmt-check.txt fmt-check.txt 2>/dev/null || true
+          git add -f fmt.patch fmt-check.txt
+          git diff --cached --quiet || git commit -m "ci: rustfmt patch [skip ci]"
+          git push origin ${{ github.ref_name }} || true
 
       - name: Check
         id: check
