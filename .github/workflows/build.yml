@@ -25,20 +25,6 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
 
-      # One-off normalisation: this crate has never been run through rustfmt,
-      # so `cargo fmt --all -- --check` below would fail on pre-existing style
-      # in files this branch does not otherwise touch. Apply it once here and
-      # let the check below hold the line from now on.
-      - name: Apply rustfmt
-        run: |
-          cargo fmt --all
-          git config user.email ci@example.invalid
-          git config user.name ci
-          git add -A -- '*.rs'
-          git diff --cached --quiet || git commit -m "style: apply rustfmt to the Node1 market service [skip ci]"
-          git push origin ${{ github.ref_name }} || true
-          git --no-pager diff --stat
-
       - name: Formatting
         run: cargo fmt --all -- --check
 
@@ -113,6 +99,9 @@ jobs:
             echo
             echo '## Runtime smoke test'
             cat /tmp/proof.log 2>/dev/null || echo "(missing)"
+            echo
+            echo '## Clippy'
+            cat /tmp/clippy.log 2>/dev/null || echo "(missing)"
             echo
           } | sed -r 's/\x1b\[[0-9;]*m//g' > ci/PROOF.md
           git add ci/PROOF.md
