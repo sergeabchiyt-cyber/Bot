@@ -1,6 +1,6 @@
 target/
-node3-execution/target/
+node3-strategy/target/
 .env
-node3-execution/.env
+node3-strategy/.env
 build-errors.log
 __pycache__/

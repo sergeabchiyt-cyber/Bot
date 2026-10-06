@@ -1,14 +1,13 @@
+use crate::risk::RiskProjector;
+use crate::types::{ScannedLevelSetup, ScanningSnapshot, VpCandle, VpLevels};
 use std::collections::{HashMap, VecDeque};
 use tracing::{debug, info};
-use crate::execution::ExecutionManager;
-use crate::types::{ScannedLevelSetup, ScanningSnapshot, VpCandle, VpLevels};
 
 pub const PROXIMITY_DOLLARS: f64 = 0.50;
 pub const INVALIDATION_DOLLARS: f64 = 2.00;
 
 #[derive(Debug, Clone)]
 pub struct LevelTarget {
-    pub id: String,
     pub name: String,
     pub window: String,
     pub price: f64,
@@ -64,7 +63,6 @@ impl StrategyEngine {
         self.levels.insert(
             id.to_string(),
             LevelTarget {
-                id: id.to_string(),
                 name: name.to_string(),
                 window: window.to_string(),
                 price,
@@ -135,15 +133,6 @@ impl StrategyEngine {
         }
     }
 
-    pub fn evaluate_candle(
-        &mut self,
-        candle: &VpCandle,
-        volume_threshold: f64,
-    ) -> Option<(&'static str, f64, String)> {
-        self.evaluate_candle_with_diagnostics(candle, volume_threshold)
-            .triggered
-    }
-
     pub fn evaluate_candle_with_diagnostics(
         &mut self,
         candle: &VpCandle,
@@ -187,7 +176,8 @@ impl StrategyEngine {
                             "Level {} broken ABOVE by candle at {:.2}",
                             target.name, candle.close
                         );
-                        self.break_states.insert(id.clone(), BreakState::BrokenAbove);
+                        self.break_states
+                            .insert(id.clone(), BreakState::BrokenAbove);
                         let note = format!(
                             "Broken ABOVE @ {:.2} — awaiting bullish retest of {:.2} (±${:.2})",
                             candle.close, lvl_price, PROXIMITY_DOLLARS
@@ -209,7 +199,8 @@ impl StrategyEngine {
                             "Level {} broken BELOW by candle at {:.2}",
                             target.name, candle.close
                         );
-                        self.break_states.insert(id.clone(), BreakState::BrokenBelow);
+                        self.break_states
+                            .insert(id.clone(), BreakState::BrokenBelow);
                         let note = format!(
                             "Broken BELOW @ {:.2} — awaiting bearish retest of {:.2} (±${:.2})",
                             candle.close, lvl_price, PROXIMITY_DOLLARS
@@ -370,7 +361,7 @@ impl StrategyEngine {
 
     pub fn build_scanning_snapshot(
         &self,
-        exec_mgr: &ExecutionManager,
+        risk: &RiskProjector,
         volume_threshold: f64,
     ) -> ScanningSnapshot {
         let last_candle = self.candle_history.back();
@@ -421,7 +412,7 @@ impl StrategyEngine {
             };
 
             let ref_entry = last_price.unwrap_or(target.price);
-            let projected_buy = exec_mgr.projected_order(
+            let projected_buy = risk.projected_order(
                 if break_state == BreakState::BrokenAbove {
                     ref_entry
                 } else {
@@ -429,7 +420,7 @@ impl StrategyEngine {
                 },
                 "buy",
             );
-            let projected_sell = exec_mgr.projected_order(
+            let projected_sell = risk.projected_order(
                 if break_state == BreakState::BrokenBelow {
                     ref_entry
                 } else {
@@ -438,7 +429,7 @@ impl StrategyEngine {
                 "sell",
             );
 
-            let active_order = match break_state {
+            let active_projection = match break_state {
                 BreakState::BrokenAbove => Some(projected_buy.clone()),
                 BreakState::BrokenBelow => Some(projected_sell.clone()),
                 BreakState::None => None,
@@ -476,7 +467,7 @@ impl StrategyEngine {
                 volume_confirmed,
                 projected_buy,
                 projected_sell,
-                active_order,
+                active_projection,
                 broken_at: meta.and_then(|m| m.broken_at),
                 broken_price: meta.and_then(|m| m.broken_price),
                 last_note,
@@ -520,11 +511,12 @@ impl StrategyEngine {
 mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::risk::RiskProjector;
 
     #[test]
     fn break_and_retest_populates_scanning_diagnostics_and_triggers_signal() {
         let cfg = Config::from_env();
-        let exec = ExecutionManager::new(cfg.clone());
+        let risk = RiskProjector::new(cfg.clone());
         let mut engine = StrategyEngine::new();
 
         engine.update_levels(&VpLevels {
@@ -555,7 +547,7 @@ mod tests {
         assert!(r1.triggered.is_none());
         assert_eq!(r1.breaks_detected, 1);
 
-        let snap1 = engine.build_scanning_snapshot(&exec, 10_500.0);
+        let snap1 = engine.build_scanning_snapshot(&risk, 10_500.0);
         assert_eq!(snap1.active_setups_count, 1);
         assert_eq!(snap1.setups[0].id, "PW_POC");
         assert_eq!(snap1.setups[0].state, "broken_above");
