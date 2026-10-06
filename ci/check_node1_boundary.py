@@ -101,6 +101,12 @@ GENERATED = {
     Path("ci") / "check_node1_boundary.py",  # this file quotes every pattern
 }
 
+# Directories of *recorded* output from whatever build is currently deployed
+# (`ci/live-probe.sh` snapshots the live service). They describe the
+# deployment, not this branch, so a stale field from a build that predates
+# this cleanup must not fail CI — redeploying refreshes them.
+RECORDED_DIRS = {"live"}
+
 # Sites where a forbidden pattern is intentional, mapped to the finding names
 # allowed there. Every entry needs a reason: this is the audit trail for
 # "the remaining matches are deliberate".
@@ -131,6 +137,9 @@ def iter_files():
         if any(part in SKIP_DIRS for part in rel.parts):
             continue
         if rel in GENERATED:
+            continue
+        # ci/live/** is recorded output from the deployed build.
+        if len(rel.parts) > 2 and rel.parts[0] == "ci" and rel.parts[1] in RECORDED_DIRS:
             continue
         if rel.suffix not in CHECK_SUFFIXES:
             continue
