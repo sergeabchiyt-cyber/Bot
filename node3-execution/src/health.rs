@@ -1179,28 +1179,31 @@ mod tests {
         let (http_reply, bridge_frame) = tokio::join!(
             control,
             async {
-                next_command_frame(&mut bridge_ws, Duration::from_secs(5))
+                let frame = next_command_frame(&mut bridge_ws, Duration::from_secs(5))
                     .await
-                    .expect("bridge never received the halt command")
+                    .expect("bridge never received the halt command");
+                // Ack like the real bridge does: as soon as the command is
+                // processed. The HTTP response above waits for exactly this, so
+                // acking after the join would deadlock the test.
+                let req_id = frame["req_id"].as_str().unwrap_or_default().to_string();
+                bridge_ws
+                    .send(Message::Text(
+                        serde_json::json!({
+                            "type": "bridge_ack",
+                            "req_id": req_id,
+                            "ok": true,
+                            "data": { "halted": true, "halt_reason": "test" },
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .await
+                    .unwrap();
+                frame
             }
         );
         assert_eq!(bridge_frame["type"], "mt5_halt");
         assert_eq!(bridge_frame["reason"], "test");
-        let req_id = bridge_frame["req_id"].as_str().unwrap().to_string();
-
-        bridge_ws
-            .send(Message::Text(
-                serde_json::json!({
-                    "type": "bridge_ack",
-                    "req_id": req_id,
-                    "ok": true,
-                    "data": { "halted": true, "halt_reason": "test" },
-                })
-                .to_string()
-                .into(),
-            ))
-            .await
-            .unwrap();
 
         let body: serde_json::Value = http_reply.json().await.unwrap();
         assert_eq!(body["ok"], true);

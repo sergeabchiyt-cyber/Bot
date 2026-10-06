@@ -450,7 +450,16 @@ impl Bridge {
             let cached = self.account_cache.read().await.clone();
             if let Some((account, fetched_at)) = cached {
                 if now_ms() - fetched_at <= self.cfg.account_max_age_ms as i64 {
-                    return Ok(account);
+                    // The guard is re-checked even on a cache hit: a cached
+                    // account must never become tradable by going stale, and a
+                    // terminal that switched to a real login keeps failing.
+                    return match terminal::demo_guard(&account, self.cfg.expected_login) {
+                        Ok(()) => Ok(account),
+                        Err(err) => {
+                            self.refuse_account(&err).await;
+                            Err(err)
+                        }
+                    };
                 }
             }
         }
@@ -465,17 +474,26 @@ impl Bridge {
             }
         };
 
+        // Cache before the guard decides: when the guard refuses a real account
+        // the snapshot must still report *what the terminal is* ("real"), with
+        // `authorized` false and the halt reason attached. The guard is what
+        // blocks trading, never the cache.
+        *self.account_cache.write().await = Some((account.clone(), now_ms()));
         if let Err(err) = terminal::demo_guard(&account, self.cfg.expected_login) {
-            let reason = err.to_string();
-            error!("demo guard refused the terminal: {reason}");
-            self.set_last_error(Some(reason.clone())).await;
-            self.halt_internal(&reason, false).await;
+            self.refuse_account(&err).await;
             return Err(err);
         }
 
-        *self.account_cache.write().await = Some((account.clone(), now_ms()));
         self.set_last_error(None).await;
         Ok(account)
+    }
+
+    /// Record a guard refusal and halt trading (used by every account check).
+    async fn refuse_account(&self, err: &TerminalError) {
+        let reason = err.to_string();
+        error!("demo guard refused the terminal: {reason}");
+        self.set_last_error(Some(reason.clone())).await;
+        self.halt_internal(&reason, false).await;
     }
 
     async fn cached_account(&self) -> Option<AccountInfo> {

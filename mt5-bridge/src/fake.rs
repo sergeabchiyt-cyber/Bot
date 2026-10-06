@@ -139,6 +139,18 @@ struct FakeInner {
     orders_sent: Vec<BTreeMap<String, String>>,
 }
 
+/// `FakeConfig::trade_mode` is the terminal-wide trade-mode knob tests use; it
+/// is applied to every symbol so `SYMBOL` answers with it.
+fn with_trade_mode(
+    mut symbols: HashMap<String, SymbolSpec>,
+    trade_mode: i64,
+) -> HashMap<String, SymbolSpec> {
+    for spec in symbols.values_mut() {
+        spec.trade_mode = trade_mode;
+    }
+    symbols
+}
+
 pub struct FakeTerminal {
     inner: Mutex<FakeInner>,
     calls: AtomicU64,
@@ -155,7 +167,7 @@ impl FakeTerminal {
             order_mode: config.order_mode,
             latency_ms: config.latency_ms,
             refuse_writes: config.refuse_writes,
-            symbols: config.symbols,
+            symbols: with_trade_mode(config.symbols, config.trade_mode),
             positions: Vec::new(),
             deals: Vec::new(),
             next_ticket: 1_000,
@@ -192,7 +204,11 @@ impl FakeTerminal {
     }
 
     pub async fn set_trade_mode(&self, trade_mode: i64) {
-        self.inner.lock().await.trade_mode = trade_mode;
+        let mut inner = self.inner.lock().await;
+        inner.trade_mode = trade_mode;
+        for spec in inner.symbols.values_mut() {
+            spec.trade_mode = trade_mode;
+        }
     }
 
     pub async fn add_position(&self, position: Mt5Position) {
