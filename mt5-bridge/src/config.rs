@@ -175,10 +175,7 @@ impl BridgeConfig {
             request_timeout_ms: env_u64("MT5_REQUEST_TIMEOUT_MS", 5_000),
             account_max_age_ms: env_u64("MT5_ACCOUNT_MAX_AGE_MS", 5_000),
             max_quote_age_ms: env_u64("MT5_MAX_QUOTE_AGE_MS", 3_000),
-            history_file: PathBuf::from(env_str(
-                "MT5_HISTORY_FILE",
-                "data/mt5_history.jsonl",
-            )),
+            history_file: PathBuf::from(env_str("MT5_HISTORY_FILE", "data/mt5_history.jsonl")),
             history_page_size: env_u64("MT5_HISTORY_PAGE_SIZE", 100) as usize,
             push_interval_ms: env_u64("MT5_PUSH_INTERVAL_MS", 2_000),
             max_deviation_points: env_u64("MT5_MAX_DEVIATION_POINTS", 20) as u32,
@@ -308,7 +305,8 @@ impl BridgeConfig {
             ));
         }
         if let Ok(expected) = env::var("MT5_EXPECT_ACCOUNT_TYPE") {
-            if !expected.trim().is_empty() && expected.trim().to_ascii_lowercase() != EXPECTED_ACCOUNT_TYPE
+            if !expected.trim().is_empty()
+                && expected.trim().to_ascii_lowercase() != EXPECTED_ACCOUNT_TYPE
             {
                 errors.push(format!(
                     "MT5_EXPECT_ACCOUNT_TYPE='{}' is not supported: this bridge executes on \
@@ -413,9 +411,7 @@ mod tests {
         assert!(err.contains("MT5_SYMBOL_MAP"));
 
         let mut mapped = base();
-        mapped
-            .symbol_map
-            .insert("XAUUSD".into(), "XAUUSD.a".into());
+        mapped.symbol_map.insert("XAUUSD".into(), "XAUUSD.a".into());
         assert_eq!(
             mapped.resolve_symbol("XAUUSD", &available).unwrap(),
             "XAUUSD.a"

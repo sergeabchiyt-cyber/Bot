@@ -27,8 +27,8 @@ use tracing::{info, warn};
 use crate::config::Config;
 use crate::intent::{ExecutionStatus, ReconciliationOutcome, TradeIntent};
 use crate::types::{
-    BridgeErrorPayload, Mt5AccountSnapshot, Mt5BridgeStatus, Mt5OrderOutcome, Mt5PositionsSnapshot,
-    Mt5RecentEvent, Mt5SnapshotState, WsFrame,
+    BridgeErrorPayload, Mt5AccountSnapshot, Mt5BridgeStatus, Mt5OrderOutcome, Mt5Position,
+    Mt5PositionsSnapshot, Mt5RecentEvent, Mt5SnapshotState, WsFrame,
 };
 
 pub const BRIDGE_PROTOCOL_VERSION: u32 = 1;
@@ -224,10 +224,7 @@ impl Mt5BridgeLink {
 
     /// Register a freshly authenticated bridge session. A newer session
     /// replaces an older one (the bridge reconnects after a restart).
-    pub async fn register_session(
-        &self,
-        info: BridgeSessionInfo,
-    ) -> (u64, mpsc::Receiver<String>) {
+    pub async fn register_session(&self, info: BridgeSessionInfo) -> (u64, mpsc::Receiver<String>) {
         let generation = self.inner.next_generation.fetch_add(1, Ordering::SeqCst) + 1;
         let (tx, rx) = mpsc::channel::<String>(PENDING_CAPACITY);
         let previous = {
@@ -399,7 +396,11 @@ impl Mt5BridgeLink {
                 // Only events that describe broker state are worth rebroadcasting
                 // on their own; the bridge also pushes authoritative snapshots.
                 match event.as_str() {
-                    "halted" | "resumed" | "order_filled" | "order_rejected" | "order_unknown"
+                    "halted"
+                    | "resumed"
+                    | "order_filled"
+                    | "order_rejected"
+                    | "order_unknown"
                     | "ea_link_disconnected" => Some(WsFrame::BridgeEvent { event, data }),
                     _ => None,
                 }
@@ -667,9 +668,7 @@ pub fn reconcile_from_snapshot(
                     source: "mt5_positions".into(),
                     detail: format!(
                         "broker position {} carries the intent comment",
-                        ticket
-                            .map(|t| t.to_string())
-                            .unwrap_or_else(|| "?".into())
+                        ticket.map(|t| t.to_string()).unwrap_or_else(|| "?".into())
                     ),
                     execution_id: ticket.map(|t| format!("mt5-{t}")),
                     filled_price: position.get("price_open").and_then(|v| v.as_f64()),
@@ -761,12 +760,7 @@ pub fn outcome_status(outcome: &Mt5OrderOutcome) -> ExecutionStatus {
 /// Estimated money risk of an order in account currency, using the broker's
 /// contract size. `None` when the contract size is unknown, which is itself a
 /// reason to refuse (the bridge validates it authoritatively as well).
-pub fn estimated_risk(
-    entry: f64,
-    sl: f64,
-    volume: f64,
-    contract_size: Option<f64>,
-) -> Option<f64> {
+pub fn estimated_risk(entry: f64, sl: f64, volume: f64, contract_size: Option<f64>) -> Option<f64> {
     let contract_size = contract_size?;
     if !entry.is_finite() || !sl.is_finite() || !volume.is_finite() || contract_size <= 0.0 {
         return None;
@@ -1085,7 +1079,10 @@ mod tests {
             .authorize_hello(Some("wrong"), Some("bridge-token"))
             .await
             .is_err());
-        assert!(link.authorize_hello(None, Some("bridge-token")).await.is_err());
+        assert!(link
+            .authorize_hello(None, Some("bridge-token"))
+            .await
+            .is_err());
         // No server-side token configured: nothing can authenticate.
         assert!(link.authorize_hello(Some("anything"), None).await.is_err());
     }
@@ -1209,7 +1206,12 @@ mod tests {
         let link_clone = link.clone();
         let caller = tokio::spawn(async move {
             link_clone
-                .request(WsFrame::Mt5Ping { req_id: "ping-1".into() }, 2_000)
+                .request(
+                    WsFrame::Mt5Ping {
+                        req_id: "ping-1".into(),
+                    },
+                    2_000,
+                )
                 .await
         });
 
@@ -1249,7 +1251,12 @@ mod tests {
             })
             .await;
         let err = link
-            .request(WsFrame::Mt5Ping { req_id: "ping-2".into() }, 150)
+            .request(
+                WsFrame::Mt5Ping {
+                    req_id: "ping-2".into(),
+                },
+                150,
+            )
             .await
             .unwrap_err();
         assert!(matches!(err, Mt5LinkError::Timeout { .. }));

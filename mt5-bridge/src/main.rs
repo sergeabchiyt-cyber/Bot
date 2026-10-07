@@ -66,16 +66,12 @@ async fn main() -> anyhow::Result<()> {
         warn!("MT5_TRADING_ENABLED=0 — the bridge starts halted");
     }
 
-    let history = Arc::new(
-        HistoryStore::open(&cfg.history_file)
-            .await
-            .map_err(|err| {
-                anyhow::anyhow!(
-                    "cannot open the history store {}: {err}",
-                    cfg.history_file.display()
-                )
-            })?,
-    );
+    let history = Arc::new(HistoryStore::open(&cfg.history_file).await.map_err(|err| {
+        anyhow::anyhow!(
+            "cannot open the history store {}: {err}",
+            cfg.history_file.display()
+        )
+    })?);
     info!(
         "history store: {} ({} deals persisted)",
         history.path().display(),

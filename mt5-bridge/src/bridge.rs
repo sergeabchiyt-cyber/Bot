@@ -232,9 +232,17 @@ pub struct OrderAudit {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HistoryRecord {
-    Deal { deal: Mt5Deal },
-    Order { audit: OrderAudit },
-    Control { ts: i64, action: String, reason: Option<String> },
+    Deal {
+        deal: Mt5Deal,
+    },
+    Order {
+        audit: OrderAudit,
+    },
+    Control {
+        ts: i64,
+        action: String,
+        reason: Option<String>,
+    },
 }
 
 /// Append-only JSONL store: closed deals plus an order/control audit trail.
@@ -936,11 +944,7 @@ impl Bridge {
             reconciled: outcome.reconciled,
             error: outcome.error.clone(),
         };
-        if let Err(err) = self
-            .history
-            .append(&HistoryRecord::Order { audit })
-            .await
-        {
+        if let Err(err) = self.history.append(&HistoryRecord::Order { audit }).await {
             warn!("failed to persist order audit: {err}");
         }
     }
@@ -1216,7 +1220,8 @@ impl Bridge {
     }
 
     /// Close a single position, refusing tickets this bridge does not own.
-    pub async fn close_position(        &self,
+    pub async fn close_position(
+        &self,
         position_ticket: i64,
         volume: Option<f64>,
     ) -> Result<OrderOutcome, TerminalError> {
@@ -1243,7 +1248,12 @@ impl Bridge {
             intent_id: position.comment.clone(),
             requested_symbol: self.cfg.requested_symbol.clone(),
             broker_symbol: position.symbol.clone(),
-            side: if position.side == "buy" { "sell" } else { "buy" }.into(),
+            side: if position.side == "buy" {
+                "sell"
+            } else {
+                "buy"
+            }
+            .into(),
             requested_volume: volume,
             filled_volume: result.volume_filled,
             price: result.price,
@@ -1528,8 +1538,10 @@ impl Bridge {
         match event {
             LinkEvent::Connected(hello) => {
                 if AccountType::from_wire(&hello.mode) != AccountType::Demo {
-                    let reason =
-                        format!("EA connected with account mode '{}' — demo only", hello.mode);
+                    let reason = format!(
+                        "EA connected with account mode '{}' — demo only",
+                        hello.mode
+                    );
                     error!("{reason}");
                     self.halt_internal(&reason, false).await;
                 } else {
@@ -1600,7 +1612,8 @@ pub fn outcome_from_reconcile(
     let deal = report.deals.iter().find(|deal| {
         deal.comment == comment
             || deal.comment.contains(comment)
-            || (recorded.order_ticket.is_some() && deal.order_ticket == recorded.order_ticket.unwrap_or_default())
+            || (recorded.order_ticket.is_some()
+                && deal.order_ticket == recorded.order_ticket.unwrap_or_default())
     });
 
     if position.is_none() && deal.is_none() {

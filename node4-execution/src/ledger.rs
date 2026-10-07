@@ -207,7 +207,9 @@ impl ExecutionLedger {
                 "execution ledger is UNAVAILABLE ({}): {} — a real execution venue must refuse to \
                  trade until this is fixed",
                 ledger.path.display(),
-                ledger.open_error().unwrap_or_else(|| "unknown error".into())
+                ledger
+                    .open_error()
+                    .unwrap_or_else(|| "unknown error".into())
             );
         }
         ledger
@@ -218,7 +220,8 @@ impl ExecutionLedger {
     }
 
     pub fn available(&self) -> bool {
-        self.available.load(Ordering::SeqCst) && self.file.lock().map(|f| f.is_some()).unwrap_or(false)
+        self.available.load(Ordering::SeqCst)
+            && self.file.lock().map(|f| f.is_some()).unwrap_or(false)
     }
 
     pub fn open_error(&self) -> Option<String> {
@@ -310,7 +313,9 @@ fn open_for_append(path: &Path) -> Result<File, String> {
 }
 
 fn apply_record(state: &mut HashMap<String, IntentLedgerState>, record: &LedgerRecord) {
-    let Some(intent_id) = record.intent_id() else { return };
+    let Some(intent_id) = record.intent_id() else {
+        return;
+    };
     let entry = state
         .entry(intent_id.to_string())
         .or_insert_with(|| IntentLedgerState {
@@ -416,12 +421,8 @@ mod tests {
 
         // Later lifecycle records also persist.
         let filled = {
-            let mut report = ExecutionReport::new(
-                &intent,
-                ExecutionStatus::Filled,
-                "deriv_mt5_demo",
-                2,
-            );
+            let mut report =
+                ExecutionReport::new(&intent, ExecutionStatus::Filled, "deriv_mt5_demo", 2);
             report.execution_id = Some("mt5-1".into());
             report
         };
@@ -488,17 +489,12 @@ mod tests {
         let broken = ExecutionLedger::open(file_path.join("child/ledger.jsonl"));
         assert!(!broken.available());
         assert!(broken.open_error().is_some());
-        let intent = intent("n3-xauusd-3-buy-pw-poc");
+        let refused = intent("n3-xauusd-3-buy-pw-poc");
         let err = broken
             .append(&LedgerRecord::IntentReceived {
                 ts: 1,
-                intent,
-                report: ExecutionReport::new(
-                    &intent("n3-xauusd-3-buy-pw-poc"),
-                    ExecutionStatus::Accepted,
-                    "none",
-                    1,
-                ),
+                report: ExecutionReport::new(&refused, ExecutionStatus::Accepted, "none", 1),
+                intent: refused,
             })
             .await
             .unwrap_err();

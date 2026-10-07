@@ -144,10 +144,7 @@ async fn connect_once(shared: &LinkShared) -> Result<(), String> {
         return Err("NODE4_SHARED_TOKEN is not set".into());
     };
 
-    shared
-        .hub
-        .set_node3_state(false, false, "connecting")
-        .await;
+    shared.hub.set_node3_state(false, false, "connecting").await;
 
     let (ws, _) = tokio_tungstenite::connect_async(url.as_str())
         .await
@@ -365,10 +362,7 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
     // 1. Static validation. Node 4 may refuse an unsafe intent, but never
     //    rewrites the strategy's stop/target.
     if let Err(rejection) = intent.validate(&shared.config, received_at) {
-        shared
-            .hub
-            .record_intent_rejected(&intent, &rejection)
-            .await;
+        shared.hub.record_intent_rejected(&intent, &rejection).await;
         publish_report(
             &shared,
             &outbox,
@@ -388,10 +382,7 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
     //    configuration is refused rather than resolved by guessing.
     if let Some(err) = shared.config.venue_selection_error() {
         let rejection = IntentRejection::new("venue_configuration_error", err);
-        shared
-            .hub
-            .record_intent_rejected(&intent, &rejection)
-            .await;
+        shared.hub.record_intent_rejected(&intent, &rejection).await;
         publish_report(
             &shared,
             &outbox,
@@ -429,10 +420,7 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
                     .unwrap_or_else(|| shared.config.execution_ledger_file.clone())
             ),
         );
-        shared
-            .hub
-            .record_intent_rejected(&intent, &rejection)
-            .await;
+        shared.hub.record_intent_rejected(&intent, &rejection).await;
         publish_report(
             &shared,
             &outbox,
@@ -465,10 +453,7 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
     if let Err(err) = shared.ledger.append(&record).await {
         // Nothing was written to a broker, so this is a clean refusal.
         let rejection = IntentRejection::new("ledger_unavailable", err);
-        shared
-            .hub
-            .record_intent_rejected(&intent, &rejection)
-            .await;
+        shared.hub.record_intent_rejected(&intent, &rejection).await;
         publish_report(
             &shared,
             &outbox,
@@ -498,10 +483,7 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
         Ok(symbol) => symbol,
         Err(err) => {
             let rejection = IntentRejection::new("unsupported_symbol", err);
-            shared
-                .hub
-                .record_intent_rejected(&intent, &rejection)
-                .await;
+            shared.hub.record_intent_rejected(&intent, &rejection).await;
             publish_report(
                 &shared,
                 &outbox,
@@ -527,14 +509,16 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
             "node3_link_stale",
             "the Node 3 link went stale before the order could be placed",
         );
-        shared
-            .hub
-            .record_intent_rejected(&intent, &rejection)
-            .await;
+        shared.hub.record_intent_rejected(&intent, &rejection).await;
         publish_report(
             &shared,
             &outbox,
-            refusal_report(&intent, shared.venue_label(), &rejection.code, &rejection.message),
+            refusal_report(
+                &intent,
+                shared.venue_label(),
+                &rejection.code,
+                &rejection.message,
+            ),
             true,
         )
         .await;
@@ -555,14 +539,16 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
     };
     if let Err(err) = shared.ledger.append(&command).await {
         let rejection = IntentRejection::new("ledger_unavailable", err);
-        shared
-            .hub
-            .record_intent_rejected(&intent, &rejection)
-            .await;
+        shared.hub.record_intent_rejected(&intent, &rejection).await;
         publish_report(
             &shared,
             &outbox,
-            refusal_report(&intent, shared.venue_label(), &rejection.code, &rejection.message),
+            refusal_report(
+                &intent,
+                shared.venue_label(),
+                &rejection.code,
+                &rejection.message,
+            ),
             true,
         )
         .await;
@@ -571,12 +557,8 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
 
     match shared.manager.execute(&intent, &broker_symbol).await {
         Ok(outcome) => {
-            let mut report = ExecutionReport::new(
-                &intent,
-                outcome.status,
-                shared.venue_label(),
-                now_ms(),
-            );
+            let mut report =
+                ExecutionReport::new(&intent, outcome.status, shared.venue_label(), now_ms());
             report.execution_id = outcome.execution_id.clone();
             report.filled_price = outcome.filled_price;
             report.quantity = outcome.quantity;
@@ -744,12 +726,7 @@ async fn reconcile_unknown(
 ///
 /// Anything that failed *before* a broker write is safe to report as rejected:
 /// nothing unknown reached the broker, so nothing needs reconciling.
-fn refusal_report(
-    intent: &TradeIntent,
-    venue: &str,
-    code: &str,
-    message: &str,
-) -> ExecutionReport {
+fn refusal_report(intent: &TradeIntent, venue: &str, code: &str, message: &str) -> ExecutionReport {
     ExecutionReport::rejected(intent, venue, now_ms(), code, message)
 }
 
@@ -869,16 +846,8 @@ mod tests {
             attempts: 1,
             last_sent_ms: now_ms() - REPORT_ACK_TIMEOUT_MS - 1,
         };
-        shared
-            .pending
-            .lock()
-            .unwrap()
-            .insert("fresh".into(), fresh);
-        shared
-            .pending
-            .lock()
-            .unwrap()
-            .insert("stale".into(), stale);
+        shared.pending.lock().unwrap().insert("fresh".into(), fresh);
+        shared.pending.lock().unwrap().insert("stale".into(), stale);
 
         let retried = take_retryable(&shared, false);
         assert_eq!(retried.len(), 1);
@@ -924,7 +893,8 @@ mod tests {
             last_status: Some(ExecutionStatus::Filled),
             ..Default::default()
         };
-        let mut filled = ExecutionReport::new(&intent, ExecutionStatus::Filled, "deriv_mt5_demo", 5);
+        let mut filled =
+            ExecutionReport::new(&intent, ExecutionStatus::Filled, "deriv_mt5_demo", 5);
         filled.filled_price = Some(2_650.5);
         state.last_report = Some(filled.clone());
 

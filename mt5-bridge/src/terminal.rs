@@ -41,9 +41,9 @@ impl EaResponse {
     }
 
     pub fn require_str(&self, key: &str, method: &str) -> Result<String, TerminalError> {
-        self.get(key).map(|s| s.to_string()).ok_or_else(|| {
-            TerminalError::Protocol(format!("{method} response is missing '{key}'"))
-        })
+        self.get(key)
+            .map(|s| s.to_string())
+            .ok_or_else(|| TerminalError::Protocol(format!("{method} response is missing '{key}'")))
     }
 
     pub fn require_f64(&self, key: &str, method: &str) -> Result<f64, TerminalError> {
@@ -70,12 +70,8 @@ impl EaResponse {
     }
 
     pub fn opt_bool(&self, key: &str) -> Option<bool> {
-        self.get(key).map(|v| {
-            matches!(
-                v.to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "ok"
-            )
-        })
+        self.get(key)
+            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "ok"))
     }
 
     fn item_f64(item: &BTreeMap<String, String>, key: &str) -> f64 {
@@ -86,7 +82,9 @@ impl EaResponse {
     }
 
     fn item_i64(item: &BTreeMap<String, String>, key: &str) -> i64 {
-        item.get(key).and_then(|v| v.parse::<i64>().ok()).unwrap_or(0)
+        item.get(key)
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(0)
     }
 
     fn item_str(item: &BTreeMap<String, String>, key: &str) -> String {
@@ -98,11 +96,17 @@ impl EaResponse {
 pub enum TerminalError {
     /// No authenticated EA is connected — every order path must fail closed.
     NotConnected(String),
-    Timeout { method: String, timeout_ms: u64 },
+    Timeout {
+        method: String,
+        timeout_ms: u64,
+    },
     Transport(String),
     Protocol(String),
     /// The EA answered `ERR`; `code` is the MT5 error/retcode when present.
-    Ea { code: i64, message: String },
+    Ea {
+        code: i64,
+        message: String,
+    },
     /// A safety guard (demo-only, login match, write permission) refused.
     Guard(String),
     Validation(ValidationError),
@@ -511,7 +515,11 @@ impl TerminalClient {
         self.transport.call(method, &params, timeout_ms).await
     }
 
-    async fn read(&self, method: &str, params: Vec<(&str, String)>) -> Result<EaResponse, TerminalError> {
+    async fn read(
+        &self,
+        method: &str,
+        params: Vec<(&str, String)>,
+    ) -> Result<EaResponse, TerminalError> {
         self.call(method, params, self.read_timeout_ms).await
     }
 
@@ -884,10 +892,7 @@ pub fn deal_from_item(item: &BTreeMap<String, String>) -> Mt5Deal {
         comment: EaResponse::item_str(item, "comment"),
         magic: EaResponse::item_i64(item, "magic"),
         time_ms: EaResponse::item_i64(item, "time"),
-        entry: item
-            .get("entry_name")
-            .cloned()
-            .unwrap_or(entry),
+        entry: item.get("entry_name").cloned().unwrap_or(entry),
         reason: EaResponse::item_str(item, "reason"),
     }
 }
@@ -919,10 +924,7 @@ pub fn order_result_from_response(resp: &EaResponse) -> OrderSendResult {
 
 /// Demo-only guard. Refuses every non-demo account, a mismatched login, and a
 /// terminal that is not connected to a trade server.
-pub fn demo_guard(
-    account: &AccountInfo,
-    expected_login: Option<i64>,
-) -> Result<(), TerminalError> {
+pub fn demo_guard(account: &AccountInfo, expected_login: Option<i64>) -> Result<(), TerminalError> {
     if !account.account_type.is_demo() {
         return Err(TerminalError::Guard(format!(
             "account {} on {} reports mode '{}' — this bridge executes Deriv MT5 *demo* \
@@ -1279,7 +1281,11 @@ mod tests {
     fn demo_guard_rejects_real_contest_unknown_and_mismatched_logins() {
         assert!(demo_guard(&demo_account(), Some(123_456)).is_ok());
 
-        for account_type in [AccountType::Real, AccountType::Contest, AccountType::Unknown] {
+        for account_type in [
+            AccountType::Real,
+            AccountType::Contest,
+            AccountType::Unknown,
+        ] {
             let account = AccountInfo {
                 account_type,
                 ..demo_account()
@@ -1409,8 +1415,17 @@ mod tests {
 
         // A missing stop loss is refused (this venue always requires one).
         assert_eq!(
-            validate_order(Side::Buy, 0.01, None, Some(2660.0), 2650.10, &spec, now, 3_000)
-                .unwrap_err(),
+            validate_order(
+                Side::Buy,
+                0.01,
+                None,
+                Some(2660.0),
+                2650.10,
+                &spec,
+                now,
+                3_000
+            )
+            .unwrap_err(),
             ValidationError::MissingStopLoss
         );
     }
@@ -1475,7 +1490,10 @@ mod tests {
 
     #[test]
     fn intent_comments_are_space_free_broker_safe_tokens() {
-        assert_eq!(intent_comment("N3-1759700000000-PW PoC"), "N3-1759700000000-PWPoC");
+        assert_eq!(
+            intent_comment("N3-1759700000000-PW PoC"),
+            "N3-1759700000000-PWPoC"
+        );
         let long = intent_comment(&"a".repeat(80));
         assert!(long.len() <= 31);
         assert_eq!(intent_comment("!!! ???"), "N3");

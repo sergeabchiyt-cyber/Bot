@@ -53,6 +53,44 @@ def strip_rust_tests(source: str) -> str:
     return source if marker < 0 else source[:marker]
 
 
+def rust_string_literals(source: str) -> set[str]:
+    """Every string literal in a Rust source, comments ignored.
+
+    The bridge writes its event names as plain string literals, and ``rustfmt``
+    is free to reflow the surrounding code (a name may end up on its own line,
+    inside a tuple, or behind `.into()`). Match the literals themselves rather
+    than any particular layout.
+    """
+    literals: set[str] = set()
+    i = 0
+    n = len(source)
+    while i < n:
+        ch = source[i]
+        if ch == "/" and i + 1 < n and source[i + 1] == "/":
+            newline = source.find("\n", i)
+            if newline < 0:
+                break
+            i = newline
+        elif ch == "/" and i + 1 < n and source[i + 1] == "*":
+            end = source.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+        elif ch == '"':
+            i += 1
+            buf: list[str] = []
+            while i < n and source[i] != '"':
+                if source[i] == "\\" and i + 1 < n:
+                    buf.append(source[i + 1])
+                    i += 2
+                    continue
+                buf.append(source[i])
+                i += 1
+            i += 1
+            literals.add("".join(buf))
+        else:
+            i += 1
+    return literals
+
+
 # ---------------------------------------------------------------------------
 # 1. EA method parity
 # ---------------------------------------------------------------------------
@@ -218,9 +256,12 @@ def documented_bridge_events(bridge_dir, docs_dir) -> int:
     renamed, the dashboard would silently never see that event again. The doc is
     the only place they are written down outside the Rust source.
     """
-    node4_src = read(Path(bridge_dir) / "src/node4.rs")
-    emitted = set(re.findall(r'"(\w+)"\.into\(\)', node4_src))
-    emitted |= set(re.findall(r'\n\s*"([a-z_]+)",\n', node4_src))
+    node4_src = strip_rust_tests(read(Path(bridge_dir) / "src/node4.rs"))
+    emitted = {
+        name
+        for name in rust_string_literals(node4_src)
+        if re.fullmatch(r"[a-z_][a-z_0-9]*", name)
+    }
 
     doc = read(Path(docs_dir) / "mt5" / "FRONTEND_RESOURCES.md")
     paragraph = ""

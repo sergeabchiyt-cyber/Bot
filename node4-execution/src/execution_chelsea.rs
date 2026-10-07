@@ -1,7 +1,7 @@
-use anyhow::Result;
-use serde_json::json;
 use crate::config::Config;
 use crate::types::TradeEvent;
+use anyhow::Result;
+use serde_json::json;
 
 pub struct ChelseaExecution {
     pub url: String,
@@ -21,6 +21,7 @@ impl ChelseaExecution {
 
     pub async fn place_order(
         &self,
+        symbol: &str,
         side: &str,
         size: f64,
         sl: f64,
@@ -31,7 +32,7 @@ impl ChelseaExecution {
             "params": {
                 "name": "place_order",
                 "arguments": {
-                    "symbol": "XAUUSD",
+                    "symbol": symbol,
                     "side": side,
                     "size": size,
                     "stop_loss": sl,
@@ -48,11 +49,13 @@ impl ChelseaExecution {
         }
 
         let trade_id = v["result"]["content"][0]["text"]
-            .as_str().unwrap_or("unknown").to_string();
+            .as_str()
+            .unwrap_or("unknown")
+            .to_string();
 
         Ok(TradeEvent {
             trade_id,
-            symbol: "XAUUSD".into(),
+            symbol: symbol.into(),
             side: side.into(),
             size,
             entry: 0.0,

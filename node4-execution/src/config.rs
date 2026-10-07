@@ -169,7 +169,10 @@ fn env_opt(key: &str) -> Option<String> {
 }
 
 fn env_f64(key: &str, default: f64) -> f64 {
-    env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
 fn env_u64(key: &str, default: u64) -> u64 {
@@ -278,10 +281,7 @@ impl Config {
             node3_reconnect_max_ms: env_u64("NODE3_RECONNECT_MAX_MS", 30_000),
             node3_stale_ms: env_u64("NODE3_STALE_MS", 45_000) as i64,
 
-            execution_ledger_file: env_str(
-                "EXECUTION_LEDGER_FILE",
-                DEFAULT_EXECUTION_LEDGER_FILE,
-            ),
+            execution_ledger_file: env_str("EXECUTION_LEDGER_FILE", DEFAULT_EXECUTION_LEDGER_FILE),
 
             mcp_chelsea_url: env_opt("MCP_CHELSEA_URL"),
             deriv_demo_api: env_opt("DERIV_DEMO_API"),
@@ -299,7 +299,11 @@ impl Config {
             execution_stake: env::var("EXECUTION_STAKE")
                 .ok()
                 .and_then(|v| v.trim().parse::<f64>().ok())
-                .or_else(|| env::var("ORDER_SIZE").ok().and_then(|v| v.trim().parse().ok()))
+                .or_else(|| {
+                    env::var("ORDER_SIZE")
+                        .ok()
+                        .and_then(|v| v.trim().parse().ok())
+                })
                 .unwrap_or(DEFAULT_DERIV_MIN_STAKE),
 
             mt5_bridge_token: env_opt("MT5_BRIDGE_TOKEN"),
@@ -606,10 +610,7 @@ mod tests {
         // Legacy wss base is also returned untouched when no app id is set.
         let mut legacy = base();
         legacy.deriv_api_url = "wss://ws.derivws.com/websockets/v3".into();
-        assert_eq!(
-            legacy.deriv_ws_url(),
-            "wss://ws.derivws.com/websockets/v3"
-        );
+        assert_eq!(legacy.deriv_ws_url(), "wss://ws.derivws.com/websockets/v3");
     }
 
     #[test]
@@ -624,8 +625,7 @@ mod tests {
 
         // An app id already embedded in the URL wins (no duplication).
         let mut embedded = base();
-        embedded.deriv_api_url =
-            "wss://ws.derivws.com/websockets/v3?app_id=999".into();
+        embedded.deriv_api_url = "wss://ws.derivws.com/websockets/v3?app_id=999".into();
         embedded.deriv_app_id = Some("12345".into());
         assert_eq!(
             embedded.deriv_ws_url(),
@@ -658,7 +658,10 @@ mod tests {
         ] {
             assert_eq!(ExecutionVenue::parse(venue.label()), Some(venue));
         }
-        assert_eq!(ExecutionVenue::parse("MT5"), Some(ExecutionVenue::DerivMt5Demo));
+        assert_eq!(
+            ExecutionVenue::parse("MT5"),
+            Some(ExecutionVenue::DerivMt5Demo)
+        );
         assert_eq!(ExecutionVenue::parse("nonsense"), None);
         assert!(ExecutionVenue::DerivDemo.is_real());
         assert!(!ExecutionVenue::None.is_real());
@@ -675,7 +678,10 @@ mod tests {
         let mut config = base();
         config.deriv_demo_api = None;
         config.mt5_bridge_token = Some("bridge-token".into());
-        assert_eq!(config.venue_decision().unwrap(), ExecutionVenue::DerivMt5Demo);
+        assert_eq!(
+            config.venue_decision().unwrap(),
+            ExecutionVenue::DerivMt5Demo
+        );
     }
 
     #[test]
@@ -696,7 +702,10 @@ mod tests {
 
         // With the other venue's credential gone, the explicit choice resolves.
         config.deriv_demo_api = None;
-        assert_eq!(config.venue_decision().unwrap(), ExecutionVenue::DerivMt5Demo);
+        assert_eq!(
+            config.venue_decision().unwrap(),
+            ExecutionVenue::DerivMt5Demo
+        );
 
         // Selecting a venue without its credentials is refused.
         let mut missing = base();

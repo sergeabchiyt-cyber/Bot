@@ -257,10 +257,7 @@ impl ExecutionManager {
                 }
             }
             ExecutionVenue::DerivDemo => {
-                let deriv = self
-                    .deriv
-                    .as_ref()
-                    .expect("Deriv demo executor missing");
+                let deriv = self.deriv.as_ref().expect("Deriv demo executor missing");
                 match deriv
                     .place_order(
                         &intent.side,
@@ -274,7 +271,11 @@ impl ExecutionManager {
                     Ok(trade) => Ok(VenueOutcome {
                         status: ExecutionStatus::Filled,
                         execution_id: Some(trade.trade_id.clone()),
-                        filled_price: if trade.entry > 0.0 { Some(trade.entry) } else { None },
+                        filled_price: if trade.entry > 0.0 {
+                            Some(trade.entry)
+                        } else {
+                            None
+                        },
                         quantity: Some(trade.size),
                         quantity_unit: Some("stake_usd".into()),
                         order_ticket: None,
@@ -296,6 +297,7 @@ impl ExecutionManager {
                     .expect("Chelsea live executor missing");
                 match chelsea
                     .place_order(
+                        broker_symbol,
                         &intent.side,
                         self.config.execution_stake,
                         intent.stop_loss,
@@ -306,7 +308,11 @@ impl ExecutionManager {
                     Ok(trade) => Ok(VenueOutcome {
                         status: ExecutionStatus::Filled,
                         execution_id: Some(trade.trade_id.clone()),
-                        filled_price: if trade.entry > 0.0 { Some(trade.entry) } else { None },
+                        filled_price: if trade.entry > 0.0 {
+                            Some(trade.entry)
+                        } else {
+                            None
+                        },
                         quantity: Some(trade.size),
                         quantity_unit: Some("stake_usd".into()),
                         order_ticket: None,

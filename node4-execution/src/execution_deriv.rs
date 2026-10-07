@@ -160,7 +160,10 @@ fn account_id_of(item: &serde_json::Value) -> Option<String> {
 }
 
 fn is_demo_account(item: &serde_json::Value) -> bool {
-    let ty = item["account_type"].as_str().unwrap_or("").to_ascii_lowercase();
+    let ty = item["account_type"]
+        .as_str()
+        .unwrap_or("")
+        .to_ascii_lowercase();
     let group = item["group"].as_str().unwrap_or("").to_ascii_lowercase();
     if ty == "demo" || group == "demo" {
         return true;
@@ -200,7 +203,10 @@ fn select_demo_account(data: &serde_json::Value) -> Option<DemoAccount> {
 }
 
 fn found_account_ids(data: &serde_json::Value) -> Vec<String> {
-    collect_items(data).into_iter().filter_map(account_id_of).collect()
+    collect_items(data)
+        .into_iter()
+        .filter_map(account_id_of)
+        .collect()
 }
 
 /// Render Deriv's REST error shape (`{"errors": [{code, message}]}`) as text.
@@ -423,7 +429,10 @@ fn relative_barrier(side: &str, distance: f64) -> Option<String> {
     let min_step = 10f64.powi(-(DERIV_BARRIER_DECIMALS as i32));
     let magnitude = distance.abs().max(min_step);
     let sign = if side == "sell" { '-' } else { '+' };
-    Some(format!("{sign}{magnitude:.prec$}", prec = DERIV_BARRIER_DECIMALS))
+    Some(format!(
+        "{sign}{magnitude:.prec$}",
+        prec = DERIV_BARRIER_DECIMALS
+    ))
 }
 
 /// What Deriv said about a request it rejected.
@@ -500,11 +509,7 @@ fn describe_offered_specs(specs: &[ContractSpec]) -> String {
 }
 
 /// Fix for a rejected Deriv request, keyed off the code/subcode Deriv returns.
-fn contract_error_hint(
-    code: &str,
-    message: &str,
-    subcode: Option<&str>,
-) -> Option<&'static str> {
+fn contract_error_hint(code: &str, message: &str, subcode: Option<&str>) -> Option<&'static str> {
     let message = message.to_ascii_lowercase();
     let subcode = subcode.unwrap_or("");
     if subcode.eq_ignore_ascii_case("InvalidBarrier") || message.contains("barrier") {
@@ -621,9 +626,9 @@ impl DerivExecution {
         );
         let resp = self.rest(self.http.post(&url)).send().await?;
         let body = Self::into_rest_json(resp, "OTP").await?;
-        let ws_url = body["data"]["url"].as_str().ok_or_else(|| {
-            anyhow::anyhow!("Deriv OTP response missing data.url: {body}")
-        })?;
+        let ws_url = body["data"]["url"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Deriv OTP response missing data.url: {body}"))?;
         if !(ws_url.starts_with("wss://") || ws_url.starts_with("ws://")) {
             anyhow::bail!("Deriv OTP response returned a non-WebSocket URL: {ws_url}");
         }
@@ -727,12 +732,8 @@ impl DerivExecution {
             tokio_tungstenite::connect_async(request),
         )
         .await
-        .map_err(|_| {
-            anyhow::anyhow!("timed out connecting to {}", redact_ws_url(url))
-        })?
-        .map_err(|e| {
-            anyhow::anyhow!("handshake failed for {}: {e}", redact_ws_url(url))
-        })?;
+        .map_err(|_| anyhow::anyhow!("timed out connecting to {}", redact_ws_url(url)))?
+        .map_err(|e| anyhow::anyhow!("handshake failed for {}: {e}", redact_ws_url(url)))?;
         Ok(ws)
     }
 
@@ -827,10 +828,7 @@ impl DerivExecution {
                 }
             };
             if let Some(err) = resp.get("error") {
-                let code = err
-                    .get("code")
-                    .and_then(|c| c.as_str())
-                    .unwrap_or("");
+                let code = err.get("code").and_then(|c| c.as_str()).unwrap_or("");
                 let message = err
                     .get("message")
                     .and_then(|m| m.as_str())
@@ -865,7 +863,10 @@ impl DerivExecution {
                 ws,
                 loginid,
                 balance: authz.get("balance").and_then(|b| b.as_f64()),
-                currency: authz.get("currency").and_then(|c| c.as_str()).map(String::from),
+                currency: authz
+                    .get("currency")
+                    .and_then(|c| c.as_str())
+                    .map(String::from),
             });
         }
         anyhow::bail!(
@@ -933,7 +934,13 @@ impl DerivExecution {
         if prop.get("error").is_some() {
             anyhow::bail!(
                 "{}",
-                Self::contract_rejection("proposal", contract_type, barrier.as_deref(), stake, &prop)
+                Self::contract_rejection(
+                    "proposal",
+                    contract_type,
+                    barrier.as_deref(),
+                    stake,
+                    &prop
+                )
             );
         }
 
@@ -962,7 +969,13 @@ impl DerivExecution {
         if buy_resp.get("error").is_some() {
             anyhow::bail!(
                 "{}",
-                Self::contract_rejection("buy", contract_type, barrier.as_deref(), stake, &buy_resp)
+                Self::contract_rejection(
+                    "buy",
+                    contract_type,
+                    barrier.as_deref(),
+                    stake,
+                    &buy_resp
+                )
             );
         }
 
@@ -1146,13 +1159,23 @@ impl DerivExecution {
     ) -> Result<TradeEvent> {
         // OTP URLs are pre-authenticated: no `authorize` call is sent.
         let mut ws = Self::connect_ws(otp_url).await.map_err(|e| {
-            anyhow::anyhow!("Deriv OTP WebSocket ({}) failed: {e}", redact_ws_url(otp_url))
+            anyhow::anyhow!(
+                "Deriv OTP WebSocket ({}) failed: {e}",
+                redact_ws_url(otp_url)
+            )
         })?;
         let (contract_id, buy_price) = self
             .proposal_buy_flow(&mut ws, side, stake, entry, tp, true)
             .await?;
         let _ = ws.close(None).await;
-        Ok(Self::trade_event(contract_id, buy_price, side, stake, sl, tp))
+        Ok(Self::trade_event(
+            contract_id,
+            buy_price,
+            side,
+            stake,
+            sl,
+            tp,
+        ))
     }
 
     pub async fn place_order(
@@ -1172,9 +1195,14 @@ impl DerivExecution {
                 }
                 Err(e) => {
                     if should_fallback_to_legacy(&self.api_token, &e) {
-                        warn!("Deriv OTP order flow failed ({e:#}); falling back to legacy WS flow");
+                        warn!(
+                            "Deriv OTP order flow failed ({e:#}); falling back to legacy WS flow"
+                        );
                     } else if token_kind(&self.api_token) == TokenKind::Pat {
-                        return Err(anyhow::anyhow!("{}", pat_guidance(&e, self.app_id_configured())));
+                        return Err(anyhow::anyhow!(
+                            "{}",
+                            pat_guidance(&e, self.app_id_configured())
+                        ));
                     } else {
                         return Err(e);
                     }
@@ -1693,7 +1721,7 @@ mod tests {
             deriv_demo_api: Some("a1-test-token".into()),
             deriv_app_id: app_id.map(String::from),
             deriv_api_url: api_url.into(),
-            order_size: 0.01,
+            execution_stake: 0.01,
             ..Default::default()
         };
         DerivExecution::new(&config)
@@ -1759,14 +1787,17 @@ mod tests {
         assert_eq!(token_kind("pat_abc123"), TokenKind::Pat);
         assert_eq!(token_kind("  PAT_xyz "), TokenKind::Pat);
         assert_eq!(token_kind("a1-AbC123xYz"), TokenKind::Other);
-        assert_eq!(token_kind("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig"), TokenKind::Other);
+        assert_eq!(
+            token_kind("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig"),
+            TokenKind::Other
+        );
     }
 
     fn test_config_with_token(token: &str, app_id: Option<&str>) -> Config {
         Config {
             deriv_demo_api: Some(token.into()),
             deriv_app_id: app_id.map(String::from),
-            order_size: 0.01,
+            execution_stake: 0.01,
             ..Default::default()
         }
     }
@@ -1842,10 +1873,7 @@ mod tests {
         // Default REST config, no app id: 1089-based host failover, then bare URLs.
         let exec = test_executor("https://api.derivws.com", None);
         let c = exec.legacy_candidates();
-        assert_eq!(
-            c[0],
-            "wss://ws.derivws.com/websockets/v3?app_id=1089"
-        );
+        assert_eq!(c[0], "wss://ws.derivws.com/websockets/v3?app_id=1089");
         assert!(c.contains(&"wss://ws.binaryws.com/websockets/v3?app_id=1089".to_string()));
         assert!(c.contains(&"wss://wss.derivws.com/websockets/v3?app_id=1089".to_string()));
         assert!(c.contains(&"wss://ws.derivws.com/websockets/v3".to_string()));
@@ -1860,10 +1888,7 @@ mod tests {
     fn legacy_candidates_honor_configured_url_and_app_id() {
         let exec = test_executor("wss://ws.derivws.com/websockets/v3", Some("4242"));
         let c = exec.legacy_candidates();
-        assert_eq!(
-            c[0],
-            "wss://ws.derivws.com/websockets/v3?app_id=4242"
-        );
+        assert_eq!(c[0], "wss://ws.derivws.com/websockets/v3?app_id=4242");
         assert!(c.contains(&"wss://ws.binaryws.com/websockets/v3?app_id=4242".to_string()));
     }
 
@@ -1987,7 +2012,13 @@ mod tests {
         );
     }
 
-    fn spec(contract_type: &str, expiry: &str, barriers: u32, min: &str, max: &str) -> ContractSpec {
+    fn spec(
+        contract_type: &str,
+        expiry: &str,
+        barriers: u32,
+        min: &str,
+        max: &str,
+    ) -> ContractSpec {
         ContractSpec {
             contract_type: contract_type.into(),
             expiry_type: expiry.into(),
@@ -2019,7 +2050,10 @@ mod tests {
         assert_eq!(specs[0].barriers, 0);
         assert_eq!(specs[0].min_duration, Some(DurationSpec::Secs(60)));
         assert_eq!(specs[0].max_duration, Some(DurationSpec::Secs(86_400)));
-        assert_eq!(specs[1].contract_type, "PUT", "contract types are uppercased");
+        assert_eq!(
+            specs[1].contract_type, "PUT",
+            "contract types are uppercased"
+        );
         assert_eq!(specs[2].barriers, 1);
         assert_eq!(specs[2].expiry_type, "daily");
 
@@ -2058,19 +2092,28 @@ mod tests {
             "proposal"
         ));
         // Case-insensitive, and an error for the request must be surfaced too.
-        assert!(answers_request(&json!({"msg_type": "PROPOSAL"}), "proposal"));
+        assert!(answers_request(
+            &json!({"msg_type": "PROPOSAL"}),
+            "proposal"
+        ));
         assert!(answers_request(
             &json!({"msg_type": "proposal", "error": {"code": "InvalidBarrier"}}),
             "proposal"
         ));
-        assert!(answers_request(&json!({"echo_req": {"proposal": 1}}), "proposal"));
+        assert!(answers_request(
+            &json!({"echo_req": {"proposal": 1}}),
+            "proposal"
+        ));
         // An unsolicited update, or the answer to the *other* request on the
         // same socket, must not be mistaken for this response.
         assert!(!answers_request(
             &json!({"msg_type": "contracts_for", "contracts_for": {"available": []}}),
             "proposal"
         ));
-        assert!(!answers_request(&json!({"msg_type": "tick", "tick": {"quote": 1}}), "contracts_for"));
+        assert!(!answers_request(
+            &json!({"msg_type": "tick", "tick": {"quote": 1}}),
+            "contracts_for"
+        ));
     }
 
     #[test]
@@ -2167,7 +2210,8 @@ mod tests {
         assert!(text.contains("Hint:"), "missing hint: {text}");
 
         // A retried shape reports the barrier that was sent.
-        let text = DerivExecution::contract_rejection("buy", "CALL", Some("+6.00"), 0.50, &response);
+        let text =
+            DerivExecution::contract_rejection("buy", "CALL", Some("+6.00"), 0.50, &response);
         assert!(text.contains("barrier +6.00"), "missing barrier: {text}");
         assert!(text.starts_with("Deriv buy error:"));
     }
@@ -2203,11 +2247,15 @@ mod tests {
         assert!(should_fallback_to_legacy("a1-legacy", &auth_err));
         assert!(!should_fallback_to_legacy("pat_abc", &auth_err));
 
-        let no_demo = anyhow::anyhow!("No demo account found for this token (found account(s): CR1).");
+        let no_demo =
+            anyhow::anyhow!("No demo account found for this token (found account(s): CR1).");
         assert!(!should_fallback_to_legacy("a1-legacy", &no_demo));
 
         assert!(is_invalid_token_error("InvalidToken", "whatever"));
         assert!(is_invalid_token_error("", "The token is invalid token xyz"));
-        assert!(!is_invalid_token_error("InputValidationFailed", "app_id is required"));
+        assert!(!is_invalid_token_error(
+            "InputValidationFailed",
+            "app_id is required"
+        ));
     }
 }

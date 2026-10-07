@@ -21,10 +21,9 @@ use crate::execution_mt5::Mt5BridgeLink;
 use crate::intent::{ExecutionReport, ExecutionStatus, IntentRejection, TradeIntent};
 use crate::ledger::ExecutionLedger;
 use crate::types::{
-    ActivityLogEntry, DerivAccountSnapshot, DerivOpenContract, ExecutionSnapshot,
-    ExecutionTrade, ExecutionWorkDiagnostics, Mt5AccountSnapshot, Mt5BridgeStatus,
-    Mt5Diagnostics, Mt5HistorySnapshot, Mt5PositionsSnapshot, Node3LinkStatus,
-    OpenTradesSnapshot, WsFrame,
+    ActivityLogEntry, DerivAccountSnapshot, DerivOpenContract, ExecutionSnapshot, ExecutionTrade,
+    ExecutionWorkDiagnostics, Mt5AccountSnapshot, Mt5BridgeStatus, Mt5Diagnostics,
+    Mt5HistorySnapshot, Mt5PositionsSnapshot, Node3LinkStatus, OpenTradesSnapshot, WsFrame,
 };
 
 const MAX_RECENT_EVENTS: usize = 50;
@@ -247,7 +246,6 @@ impl DiagnosticsHub {
         self.ledger_cache.read().await.clone()
     }
 
-
     fn push_event_locked(
         inner: &mut DiagnosticsInner,
         level: &str,
@@ -347,7 +345,6 @@ impl DiagnosticsHub {
         inner.deriv_account.clone()
     }
 
-
     // ---- Node 3 link health ----------------------------------------------
 
     pub async fn set_node3_state(&self, connected: bool, authenticated: bool, state: &str) {
@@ -369,7 +366,8 @@ impl DiagnosticsHub {
                 "node3",
                 format!("Node 3 intent link: {state}"),
             );
-            (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
+            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
+            (ledger, snap)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -401,7 +399,8 @@ impl DiagnosticsHub {
                     "Node 3 rejected execution_hello".to_string()
                 },
             );
-            (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
+            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
+            (ledger, snap)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -422,7 +421,8 @@ impl DiagnosticsHub {
             if !accepted {
                 inner.node3.last_error = Some("Node 3 rejected an execution_report".into());
             }
-            (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
+            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
+            (ledger, snap)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -435,7 +435,8 @@ impl DiagnosticsHub {
             let mut inner = self.inner.write().await;
             inner.work.intents_received = inner.work.intents_received.saturating_add(1);
             inner.work.last_intent_ts = Some(now_ms());
-            (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
+            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
+            (ledger, snap)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
         let _ = intent;
@@ -455,7 +456,8 @@ impl DiagnosticsHub {
                     intent.intent_id, intent.side, intent.symbol
                 ),
             );
-            (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
+            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
+            (ledger, snap)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -477,7 +479,8 @@ impl DiagnosticsHub {
                     intent.intent_id, rejection.message, rejection.code
                 ),
             );
-            (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
+            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
+            (ledger, snap)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -498,7 +501,8 @@ impl DiagnosticsHub {
                     recorded_status.unwrap_or("accepted")
                 ),
             );
-            (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
+            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
+            (ledger, snap)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -547,7 +551,8 @@ impl DiagnosticsHub {
                         .unwrap_or_default()
                 ),
             );
-            (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
+            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
+            (ledger, snap)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -591,7 +596,8 @@ impl DiagnosticsHub {
                 "execution",
                 format!("Order refused ({code}): {message}"),
             );
-            (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
+            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
+            (ledger, snap)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -843,7 +849,9 @@ impl DiagnosticsHub {
                         &mut inner,
                         "warn",
                         "mt5_bridge",
-                        format!("MT5 bridge event: {event} {detail}").trim().to_string(),
+                        format!("MT5 bridge event: {event} {detail}")
+                            .trim()
+                            .to_string(),
                     );
                 }
                 _ => {}
@@ -869,7 +877,6 @@ impl DiagnosticsHub {
         let _ = self.tx.send(WsFrame::Diagnostics { data: snapshot });
         Some(frame)
     }
-
 }
 
 #[cfg(test)]

@@ -44,12 +44,9 @@ use crate::types::WsFrame;
 
 /// Split halves of an accepted WebSocket, named so the bridge session can be a
 /// separate function instead of a nested block.
-type WsSender = futures_util::stream::SplitSink<
-    tokio_tungstenite::WebSocketStream<TcpStream>,
-    Message,
->;
-type WsReceiver =
-    futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<TcpStream>>;
+type WsSender =
+    futures_util::stream::SplitSink<tokio_tungstenite::WebSocketStream<TcpStream>, Message>;
+type WsReceiver = futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<TcpStream>>;
 
 /// The bridge's private endpoint (the bridge dials out; Node 4 never dials in
 /// to the terminal host).
@@ -162,7 +159,8 @@ fn parse_control_body(body: &str) -> serde_json::Value {
     if body.trim().is_empty() {
         serde_json::json!({})
     } else {
-        serde_json::from_str(body).unwrap_or_else(|_| serde_json::json!({ "action": "__invalid__" }))
+        serde_json::from_str(body)
+            .unwrap_or_else(|_| serde_json::json!({ "action": "__invalid__" }))
     }
 }
 
@@ -207,9 +205,9 @@ pub fn topic_matches(topics: &[String], frame: &WsFrame) -> bool {
         // Bridge-only frames (handshake + command acks) are never forwarded to
         // frontend clients, whatever they subscribe to. Neither is anything
         // belonging to the private /execution link with Node 3.
-        WsFrame::BridgeHello { .. } | WsFrame::BridgeHelloAck { .. } | WsFrame::BridgeAck { .. } => {
-            return false
-        }
+        WsFrame::BridgeHello { .. }
+        | WsFrame::BridgeHelloAck { .. }
+        | WsFrame::BridgeAck { .. } => return false,
         WsFrame::Heartbeat => return true,
         _ => return false,
     };
@@ -294,7 +292,9 @@ async fn handle_bridge_session(
 
     let info = crate::execution_mt5::BridgeSessionInfo {
         token_ok: true,
-        protocol: hello.protocol.unwrap_or(crate::execution_mt5::BRIDGE_PROTOCOL_VERSION),
+        protocol: hello
+            .protocol
+            .unwrap_or(crate::execution_mt5::BRIDGE_PROTOCOL_VERSION),
         bridge_version: hello.bridge.clone().unwrap_or_default(),
         venue: hello.venue.clone().unwrap_or_default(),
         capabilities: hello.capabilities.clone().unwrap_or_default(),
@@ -438,8 +438,11 @@ async fn handle_bridge_ws(stream: TcpStream, hub: DiagnosticsHub, config: Config
                 capabilities,
             },
             Ok(_) => {
-                reject_bridge(&mut sender, "the first frame on /mt5/bridge must be bridge_hello")
-                    .await;
+                reject_bridge(
+                    &mut sender,
+                    "the first frame on /mt5/bridge must be bridge_hello",
+                )
+                .await;
                 return;
             }
             Err(err) => {
@@ -592,7 +595,9 @@ async fn handle_mt5_control(
                 "400 Bad Request",
                 error_json(
                     "unknown_action",
-                    &format!("action '{other}' is not one of halt, resume, close_all, close_position"),
+                    &format!(
+                        "action '{other}' is not one of halt, resume, close_all, close_position"
+                    ),
                 ),
             )
         }
@@ -609,7 +614,10 @@ async fn handle_mt5_control(
             .to_string();
             ("200 OK", body)
         }
-        Err(err) => ("502 Bad Gateway", error_json("bridge_error", &err.to_string())),
+        Err(err) => (
+            "502 Bad Gateway",
+            error_json("bridge_error", &err.to_string()),
+        ),
     }
 }
 
@@ -780,7 +788,11 @@ async fn handle_connection(mut stream: TcpStream, hub: DiagnosticsHub, config: C
     let mut read_buf = [0u8; 8192];
     let mut read = 0usize;
     while read < read_buf.len() {
-        let bytes = match timeout(Duration::from_millis(500), stream.read(&mut read_buf[read..])).await
+        let bytes = match timeout(
+            Duration::from_millis(500),
+            stream.read(&mut read_buf[read..]),
+        )
+        .await
         {
             Ok(Ok(0)) | Err(_) => break,
             Ok(Ok(bytes)) => bytes,
@@ -1243,14 +1255,8 @@ mod tests {
         let url = format!("http://127.0.0.1:{port}/mt5/account");
         let mut served = None;
         for _ in 0..20 {
-            let value: serde_json::Value = client
-                .get(&url)
-                .send()
-                .await
-                .unwrap()
-                .json()
-                .await
-                .unwrap();
+            let value: serde_json::Value =
+                client.get(&url).send().await.unwrap().json().await.unwrap();
             if value["connected"] == true {
                 served = Some(value);
                 break;
@@ -1291,32 +1297,29 @@ mod tests {
                 .await
                 .unwrap()
         };
-        let (http_reply, bridge_frame) = tokio::join!(
-            control,
-            async {
-                let frame = next_command_frame(&mut bridge_ws, Duration::from_secs(5))
-                    .await
-                    .expect("bridge never received the halt command");
-                // Ack like the real bridge does: as soon as the command is
-                // processed. The HTTP response above waits for exactly this, so
-                // acking after the join would deadlock the test.
-                let req_id = frame["req_id"].as_str().unwrap_or_default().to_string();
-                bridge_ws
-                    .send(Message::Text(
-                        serde_json::json!({
-                            "type": "bridge_ack",
-                            "req_id": req_id,
-                            "ok": true,
-                            "data": { "halted": true, "halt_reason": "test" },
-                        })
-                        .to_string()
-                        .into(),
-                    ))
-                    .await
-                    .unwrap();
-                frame
-            }
-        );
+        let (http_reply, bridge_frame) = tokio::join!(control, async {
+            let frame = next_command_frame(&mut bridge_ws, Duration::from_secs(5))
+                .await
+                .expect("bridge never received the halt command");
+            // Ack like the real bridge does: as soon as the command is
+            // processed. The HTTP response above waits for exactly this, so
+            // acking after the join would deadlock the test.
+            let req_id = frame["req_id"].as_str().unwrap_or_default().to_string();
+            bridge_ws
+                .send(Message::Text(
+                    serde_json::json!({
+                        "type": "bridge_ack",
+                        "req_id": req_id,
+                        "ok": true,
+                        "data": { "halted": true, "halt_reason": "test" },
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .await
+                .unwrap();
+            frame
+        });
         assert_eq!(bridge_frame["type"], "mt5_halt");
         assert_eq!(bridge_frame["reason"], "test");
 
@@ -1340,7 +1343,8 @@ mod tests {
             .unwrap();
         let mut pushed_login = None;
         for _ in 0..10 {
-            let Ok(Ok(msg)) = tokio::time::timeout(Duration::from_secs(2), frontend.next()).await
+            let Ok(Some(Ok(msg))) =
+                tokio::time::timeout(Duration::from_secs(2), frontend.next()).await
             else {
                 break;
             };

@@ -14,7 +14,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{Config, ExecutionVenue};
+use crate::config::Config;
 
 /// Intent schema version Node 4 accepts. Unknown versions fail closed.
 pub const INTENT_SCHEMA_VERSION: u32 = 1;
@@ -215,7 +215,10 @@ impl TradeIntent {
                     format!(
                         "declared risk_reward {} does not match the prices ({} implied by \
                          stop {} / target {} around {})",
-                        self.risk_reward, implied, self.stop_loss, self.take_profit,
+                        self.risk_reward,
+                        implied,
+                        self.stop_loss,
+                        self.take_profit,
                         self.reference_price
                     ),
                 ));
@@ -244,8 +247,6 @@ impl TradeIntent {
 
         Ok(())
     }
-
-    /// Normalised order type after validation.
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -578,9 +579,12 @@ mod tests {
             Some(Node3Frame::ExecutionHelloAck { accepted, .. }) => assert!(accepted),
             other => panic!("unexpected: {other:?}"),
         }
-        match Node3Frame::parse(r#"{"type":"execution_hello_ack","accepted":false,"error":"bad token"}"#)
-        {
-            Some(Node3Frame::ExecutionHelloAck { accepted, error, .. }) => {
+        match Node3Frame::parse(
+            r#"{"type":"execution_hello_ack","accepted":false,"error":"bad token"}"#,
+        ) {
+            Some(Node3Frame::ExecutionHelloAck {
+                accepted, error, ..
+            }) => {
                 assert!(!accepted);
                 assert_eq!(error.as_deref(), Some("bad token"));
             }
@@ -608,11 +612,17 @@ mod tests {
 
         let mut bad = intent("buy");
         bad.intent_id = "   ".into();
-        assert_eq!(bad.validate(&cfg, now).unwrap_err().code, "missing_intent_id");
+        assert_eq!(
+            bad.validate(&cfg, now).unwrap_err().code,
+            "missing_intent_id"
+        );
 
         let mut bad = intent("buy");
         bad.intent_id = "n3 intent with spaces".into();
-        assert_eq!(bad.validate(&cfg, now).unwrap_err().code, "invalid_intent_id");
+        assert_eq!(
+            bad.validate(&cfg, now).unwrap_err().code,
+            "invalid_intent_id"
+        );
 
         let mut bad = intent("buy");
         bad.symbol = "GOLD".into();
@@ -623,7 +633,10 @@ mod tests {
 
         let mut bad = intent("buy");
         bad.side = "long".into();
-        assert_eq!(bad.validate(&cfg, now).unwrap_err().code, "unsupported_side");
+        assert_eq!(
+            bad.validate(&cfg, now).unwrap_err().code,
+            "unsupported_side"
+        );
 
         let mut bad = intent("buy");
         bad.order_type = "limit".into();
@@ -634,11 +647,17 @@ mod tests {
 
         let mut bad = intent("buy");
         bad.risk_reward = f64::NAN;
-        assert_eq!(bad.validate(&cfg, now).unwrap_err().code, "non_finite_price");
+        assert_eq!(
+            bad.validate(&cfg, now).unwrap_err().code,
+            "non_finite_price"
+        );
 
         let mut bad = intent("buy");
         bad.reference_price = f64::INFINITY;
-        assert_eq!(bad.validate(&cfg, now).unwrap_err().code, "non_finite_price");
+        assert_eq!(
+            bad.validate(&cfg, now).unwrap_err().code,
+            "non_finite_price"
+        );
 
         let mut bad = intent("buy");
         bad.take_profit = 0.0;
@@ -647,10 +666,16 @@ mod tests {
         // Stop on the wrong side of the entry.
         let mut bad = intent("buy");
         bad.stop_loss = 2_660.0;
-        assert_eq!(bad.validate(&cfg, now).unwrap_err().code, "invalid_stop_loss");
+        assert_eq!(
+            bad.validate(&cfg, now).unwrap_err().code,
+            "invalid_stop_loss"
+        );
         let mut bad = intent("sell");
         bad.stop_loss = 2_640.0;
-        assert_eq!(bad.validate(&cfg, now).unwrap_err().code, "invalid_stop_loss");
+        assert_eq!(
+            bad.validate(&cfg, now).unwrap_err().code,
+            "invalid_stop_loss"
+        );
 
         // Target on the wrong side of the entry.
         let mut bad = intent("buy");
@@ -671,7 +696,10 @@ mod tests {
         // Expiry: `now` at or after `expires_at` is refused.
         let mut expired = intent("buy");
         expired.expires_at = now;
-        assert_eq!(expired.validate(&cfg, now).unwrap_err().code, "intent_expired");
+        assert_eq!(
+            expired.validate(&cfg, now).unwrap_err().code,
+            "intent_expired"
+        );
         let mut backward = intent("buy");
         backward.expires_at = backward.created_at - 1;
         assert_eq!(
@@ -723,7 +751,10 @@ mod tests {
         assert_eq!(json["status"], "filled");
         assert_eq!(json["quantity_unit"], "lots");
         assert_eq!(json["execution_id"], "mt5-deal-456");
-        assert_eq!(ExecutionStatus::parse("filled"), Some(ExecutionStatus::Filled));
+        assert_eq!(
+            ExecutionStatus::parse("filled"),
+            Some(ExecutionStatus::Filled)
+        );
         assert_eq!(ExecutionStatus::parse("nonsense"), None);
         assert!(ExecutionStatus::Filled.is_fill());
         assert!(!ExecutionStatus::Unknown.is_fill());

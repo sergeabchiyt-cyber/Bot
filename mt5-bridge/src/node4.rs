@@ -109,8 +109,8 @@ async fn run_once(cfg: Arc<BridgeConfig>, bridge: Arc<Bridge>) -> anyhow::Result
             .map_err(|_| anyhow::anyhow!("timed out waiting for bridge_hello_ack"))?;
         match msg {
             Some(Ok(Message::Text(text))) => {
-                let parsed: Node4ToBridge = serde_json::from_str(&text)
-                    .unwrap_or(Node4ToBridge::Unknown);
+                let parsed: Node4ToBridge =
+                    serde_json::from_str(&text).unwrap_or(Node4ToBridge::Unknown);
                 match parsed {
                     Node4ToBridge::BridgeHelloAck { ok: true, .. } => {
                         info!("Node 4 accepted the bridge handshake");
@@ -153,7 +153,8 @@ async fn run_once(cfg: Arc<BridgeConfig>, bridge: Arc<Bridge>) -> anyhow::Result
     push_snapshots(&bridge, &tx, true).await?;
 
     let mut events = bridge.subscribe();
-    let mut push_timer = tokio::time::interval(Duration::from_millis(cfg.push_interval_ms.max(250)));
+    let mut push_timer =
+        tokio::time::interval(Duration::from_millis(cfg.push_interval_ms.max(250)));
     push_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut heartbeat_timer = tokio::time::interval(Duration::from_secs(20));
     let mut history_timer = tokio::time::interval(Duration::from_secs(15));
@@ -295,14 +296,8 @@ async fn send_bridge_event(
             push_snapshots(bridge, tx, false).await?;
             return Ok(());
         }
-        BridgeEvent::OrderRejected(outcome) => (
-            "order_rejected",
-            serde_json::to_value(&*outcome)?,
-        ),
-        BridgeEvent::OrderUnknown(outcome) => (
-            "order_unknown",
-            serde_json::to_value(&*outcome)?,
-        ),
+        BridgeEvent::OrderRejected(outcome) => ("order_rejected", serde_json::to_value(&*outcome)?),
+        BridgeEvent::OrderUnknown(outcome) => ("order_unknown", serde_json::to_value(&*outcome)?),
         BridgeEvent::Halted {
             reason,
             auto,
@@ -325,18 +320,14 @@ async fn send_bridge_event(
             push_snapshots(bridge, tx, false).await?;
             return Ok(());
         }
-        BridgeEvent::Resumed => (
-            "resumed",
-            serde_json::json!({ "halted": false }),
-        ),
+        BridgeEvent::Resumed => ("resumed", serde_json::json!({ "halted": false })),
         BridgeEvent::LinkDisconnected(reason) => (
             "ea_link_disconnected",
             serde_json::json!({ "reason": reason }),
         ),
-        BridgeEvent::BrokerTrade(fields) => (
-            "trade_transaction",
-            serde_json::json!({ "fields": fields }),
-        ),
+        BridgeEvent::BrokerTrade(fields) => {
+            ("trade_transaction", serde_json::json!({ "fields": fields }))
+        }
     };
     send_frame(
         tx,
@@ -423,13 +414,11 @@ async fn handle_command(command: Node4ToBridge, bridge: Arc<Bridge>, tx: mpsc::S
             sl,
             tp,
         } => {
-            let result = bridge
-                .modify_position(position_ticket, sl, tp)
-                .await;
+            let result = bridge.modify_position(position_ticket, sl, tp).await;
             match result {
                 Ok(()) => {
-                    let _ = ack_ok(&tx, req_id, Some(serde_json::json!({ "modified": true })))
-                        .await;
+                    let _ =
+                        ack_ok(&tx, req_id, Some(serde_json::json!({ "modified": true }))).await;
                 }
                 Err(err) => {
                     let _ = ack_err(&tx, req_id, "modify_failed", err.to_string()).await;

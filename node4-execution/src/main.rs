@@ -52,7 +52,9 @@ async fn main() -> anyhow::Result<()> {
         for err in &startup_errors {
             error!("startup configuration error: {err}");
         }
-        error!("refusing to start — Node 4 never guesses a venue and never falls back to another one");
+        error!(
+            "refusing to start — Node 4 never guesses a venue and never falls back to another one"
+        );
         std::process::exit(2);
     }
 
