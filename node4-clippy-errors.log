@@ -1,0 +1,34 @@
+[1m[92m    Checking[0m xauusd-node4-execution v1.0.0 (/home/runner/work/Bot/Bot/node4-execution)
+[1m[91merror[0m[1m: methods `positions_snapshot`, `history_snapshot`, and `status_snapshot` are never used[0m
+   [1m[94m--> [0msrc/execution_mt5.rs:238:18
+    [1m[94m|[0m
+[1m[94m124[0m [1m[94m|[0m impl Mt5BridgeLink {
+    [1m[94m|[0m [1m[94m------------------[0m [1m[94mmethods in this implementation[0m
+[1m[94m...[0m
+[1m[94m238[0m [1m[94m|[0m     pub async fn positions_snapshot(&self) -> Mt5PositionsSnapshot {
+    [1m[94m|[0m                  [1m[91m^^^^^^^^^^^^^^^^^^[0m
+[1m[94m...[0m
+[1m[94m243[0m [1m[94m|[0m     pub async fn history_snapshot(&self) -> Mt5HistorySnapshot {
+    [1m[94m|[0m                  [1m[91m^^^^^^^^^^^^^^^^[0m
+[1m[94m...[0m
+[1m[94m247[0m [1m[94m|[0m     pub async fn status_snapshot(&self) -> Mt5BridgeStatus {
+    [1m[94m|[0m                  [1m[91m^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: `-D dead-code` implied by `-D warnings`
+    [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[expect(dead_code)]` or `#[allow(dead_code)]`
+
+[1m[91merror[0m[1m: method `history_snapshot` is never used[0m
+   [1m[94m--> [0msrc/execution_mt5.rs:243:18
+    [1m[94m|[0m
+[1m[94m124[0m [1m[94m|[0m impl Mt5BridgeLink {
+    [1m[94m|[0m [1m[94m------------------[0m [1m[94mmethod in this implementation[0m
+[1m[94m...[0m
+[1m[94m243[0m [1m[94m|[0m     pub async fn history_snapshot(&self) -> Mt5HistorySnapshot {
+    [1m[94m|[0m                  [1m[91m^^^^^^^^^^^^^^^^[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: `-D dead-code` implied by `-D warnings`
+    [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[expect(dead_code)]` or `#[allow(dead_code)]`
+
+[1m[91merror[0m: could not compile `xauusd-node4-execution` (bin "xauusd-node4-execution") due to 1 previous error
+[1m[33mwarning[0m: build failed, waiting for other jobs to finish...
+[1m[91merror[0m: could not compile `xauusd-node4-execution` (bin "xauusd-node4-execution" test) due to 1 previous error
