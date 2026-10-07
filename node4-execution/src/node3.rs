@@ -881,7 +881,6 @@ mod tests {
         let intent = intent();
 
         let mut state = IntentLedgerState {
-            intent_id: intent.intent_id.clone(),
             accepted: true,
             last_status: Some(ExecutionStatus::Filled),
             ..Default::default()

@@ -28,7 +28,7 @@ use crate::config::Config;
 use crate::intent::{ExecutionStatus, ReconciliationOutcome, TradeIntent};
 use crate::types::{
     BridgeErrorPayload, Mt5AccountSnapshot, Mt5BridgeStatus, Mt5HistorySnapshot, Mt5OrderOutcome,
-    Mt5SnapshotState, WsFrame,
+    Mt5PositionsSnapshot, Mt5SnapshotState, WsFrame,
 };
 
 pub const BRIDGE_PROTOCOL_VERSION: u32 = 1;
@@ -908,7 +908,7 @@ impl std::fmt::Display for VenueRefusal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Mt5Position, Mt5PositionsSnapshot};
+    use crate::types::Mt5Position;
 
     fn config() -> Config {
         Config {
