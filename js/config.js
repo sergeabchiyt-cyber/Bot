@@ -1,52 +1,148 @@
 /* ============================================================
- * XAUUSD Terminal — configuration
- * All tunables and endpoint URLs live here.
+ * XAUUSD Terminal — browser-safe endpoint configuration
  *
- * The browser talks to the backend API only. Candles and volume-profile
- * levels are SiftingIO-backed and computed by the backend; Binance is used
- * there for order flow (aggTrade) exclusively and must never be called
- * directly from the frontend. No API keys belong in this file.
+ * Runtime overrides may be supplied before this file is loaded:
+ *   window.XAUUSD_CONFIG = {
+ *     MARKET_HOST: "https://market.example",
+ *     STRATEGY_HOST: "https://strategy.example",
+ *     EXECUTION_HOST: "https://execution.example"
+ *   };
+ *
+ * An explicitly empty host disables that service. Only origins are accepted;
+ * documented public paths are fixed below. No credentials belong here.
  * ============================================================ */
 (function (App) {
   "use strict";
 
-  const BACKEND_HOST = "engine-southeastasia-sng-main.onrender.com";
-  const EXECUTION_HOST = "execution-southeastasia-sng-main.onrender.com";
+  const runtime = window.XAUUSD_CONFIG && typeof window.XAUUSD_CONFIG === "object"
+    ? window.XAUUSD_CONFIG
+    : {};
+  const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+
+  // These hosts are taken from the checked-in Node deployment documentation:
+  // Node 1's market URL, Node 4's NODE3_WS_URL, and Node 4's frontend resource
+  // guide respectively. They can all be replaced at runtime without a build.
+  const DEFAULTS = {
+    MARKET_HOST: "https://engine-southeastasia-sng-main.onrender.com",
+    STRATEGY_HOST: "https://strategy-southeastasia-sng-main.onrender.com",
+    EXECUTION_HOST: "https://execution-southeastasia-sng-main.onrender.com",
+  };
+
+  function normaliseHost(value) {
+    if (value === null || value === false) return "";
+    const raw = String(value == null ? "" : value).trim();
+    if (!raw) return "";
+    const candidate = /^(https?|wss?):\/\//i.test(raw) ? raw : `https://${raw}`;
+    try {
+      const url = new URL(candidate);
+      if (!["http:", "https:", "ws:", "wss:"].includes(url.protocol)) return "";
+      if (url.username || url.password || url.search || url.hash || (url.pathname && url.pathname !== "/")) return "";
+      const protocol = url.protocol === "ws:" ? "http:" : url.protocol === "wss:" ? "https:" : url.protocol;
+      return `${protocol}//${url.host}`;
+    } catch {
+      return "";
+    }
+  }
+
+  function resolveHost(name) {
+    const value = own(runtime, name) ? runtime[name] : DEFAULTS[name];
+    return normaliseHost(value);
+  }
+
+  function websocketBase(host) {
+    if (!host) return "";
+    return host.replace(/^https:/i, "wss:").replace(/^http:/i, "ws:");
+  }
+
+  const MARKET_HOST = resolveHost("MARKET_HOST");
+  const STRATEGY_HOST = resolveHost("STRATEGY_HOST");
+  const EXECUTION_HOST = resolveHost("EXECUTION_HOST");
+
+  function endpoint(host, path, websocket) {
+    if (!host) return "";
+    const base = websocket ? websocketBase(host) : host;
+    return `${base}${path}`;
+  }
+
+  const endpoints = {
+    // Node 1 — market data only.
+    marketWs: endpoint(MARKET_HOST, "/ws", true),
+    candles: endpoint(MARKET_HOST, "/candles", false),
+    tickVolume: endpoint(MARKET_HOST, "/tick-volume", false),
+    levels: endpoint(MARKET_HOST, "/levels", false),
+    calendar: endpoint(MARKET_HOST, "/calendar", false),
+
+    // Node 3 — public strategy diagnostics only; the private intent/report link is not used here.
+    strategyWs: endpoint(STRATEGY_HOST, "/ws", true),
+    strategyDiagnostics: endpoint(STRATEGY_HOST, "/diagnostics", false),
+    strategyScanning: endpoint(STRATEGY_HOST, "/scanning", false),
+    strategySignals: endpoint(STRATEGY_HOST, "/signals", false),
+
+    // Node 4 — public, read-only execution and broker snapshots.
+    executionWs: endpoint(EXECUTION_HOST, "/ws", true),
+    executionDiagnostics: endpoint(EXECUTION_HOST, "/diagnostics", false),
+    executionOpenTrades: endpoint(EXECUTION_HOST, "/open-trades", false),
+    executionAccount: endpoint(EXECUTION_HOST, "/account", false),
+    executionDeriv: endpoint(EXECUTION_HOST, "/deriv", false),
+    mt5Account: endpoint(EXECUTION_HOST, "/mt5/account", false),
+    mt5Positions: endpoint(EXECUTION_HOST, "/mt5/positions", false),
+    mt5History: endpoint(EXECUTION_HOST, "/mt5/history", false),
+    mt5Status: endpoint(EXECUTION_HOST, "/mt5/status", false),
+  };
 
   App.config = {
-    endpoints: {
-      ws: `wss://${BACKEND_HOST}/ws`,
-      candles: `https://${BACKEND_HOST}/candles`,
-      tickVolume: `https://${BACKEND_HOST}/tick-volume`,
-      tick_volume: `https://${BACKEND_HOST}/tick-volume`,
-      levels: `https://${BACKEND_HOST}/levels`,
-      calendar: `https://${BACKEND_HOST}/calendar`,
+    MARKET_HOST,
+    STRATEGY_HOST,
+    EXECUTION_HOST,
+    endpoints,
 
-      // Node 3 execution stream and REST snapshots.
-      executionWs: `wss://${EXECUTION_HOST}/ws`,
-      executionDiagnostics: `https://${EXECUTION_HOST}/diagnostics`,
-      executionScanning: `https://${EXECUTION_HOST}/scanning`,
-      executionOpenTrades: `https://${EXECUTION_HOST}/open-trades`,
-      executionDeriv: `https://${EXECUTION_HOST}/deriv`,
-    },
-
-    ws: {
-      topics: ["levels", "candle", "bubbles", "trades", "calendar", "tick_volume"],
+    market: {
+      topics: ["levels", "candle", "bubbles", "trades", "calendar", "tick_volume", "sentiment"],
       reconnectMinMs: 1000,
       reconnectMaxMs: 30000,
+      staleAfterMs: 90000,
+      heartbeatIntervalMs: 20000,
+      heartbeatTimeoutMs: 75000,
+      snapshotRefreshMs: 60000,
+    },
+
+    strategy: {
+      topics: ["diagnostics", "scanning", "signals", "diagnostic_event"],
+      reconnectMinMs: 1000,
+      reconnectMaxMs: 30000,
+      staleAfterMs: 45000,
+      heartbeatIntervalMs: 20000,
+      heartbeatTimeoutMs: 75000,
+      snapshotRefreshMs: 20000,
+    },
+
+    execution: {
+      // `trades` is the Node 4 subscription topic. Its wire frame type is
+      // `trade` (the exact public WsFrame schema).
+      topics: [
+        "diagnostics", "open_trades", "trades", "deriv_account",
+        "mt5_account", "mt5_positions", "mt5_history", "bridge_status",
+        "bridge_event", "diagnostic_event", "heartbeat",
+      ],
+      reconnectMinMs: 1000,
+      reconnectMaxMs: 30000,
+      staleAfterMs: 45000,
+      heartbeatIntervalMs: 20000,
+      heartbeatTimeoutMs: 75000,
+      snapshotRefreshMs: 30000,
+      brokerFreshMs: 15000,
+      maxRows: 100,
     },
 
     calendar: {
-      currency: "USD",            // only this currency is shown
-      refreshMs: 5 * 60 * 1000,   // REST refresh (WS pushes also update)
-      keepPastMs: 6 * 60 * 60 * 1000, // show events released in the last 6h
+      currency: "USD",
+      refreshMs: 5 * 60 * 1000,
+      keepPastMs: 6 * 60 * 60 * 1000,
       impactRank: { high: 3, medium: 2, low: 1, holiday: 0 },
     },
 
-    // Periodic /levels snapshot reconcile. The backend drops CW at the
-    // Sunday 18:00 NY week boundary without broadcasting a removal frame,
-    // so the UI re-reads the authoritative snapshot to clear stale levels.
     levelsRefreshMs: 60 * 1000,
+    marketSnapshotRefreshMs: 60 * 1000,
 
     bubbles: {
       maxOnChart: 60,
@@ -57,7 +153,6 @@
       decayFactor: 0.95,
     },
 
-    // Colour + label per level window/kind. PS shows PoC only.
     levels: {
       PW: {
         poc: { color: "#F0B90B", title: "PW PoC", cls: "poc", dashed: false },
@@ -72,9 +167,6 @@
         vah: { color: "#F778BA", title: "CW VaH", cls: "cw-vah", dashed: true },
         val: { color: "#22D3EE", title: "CW VaL", cls: "cw-val", dashed: true },
       },
-
-      // Only ONE swing profile is active at a time. The inactive window's
-      // price lines are dropped whenever the backend flips direction.
       SWING_BULL: {
         poc: { color: "#26A69A", title: "Bull Swing PoC", cls: "swing-bull-poc", dashed: false },
         vah: { color: "#22C55E", title: "Bull Swing VaH", cls: "swing-bull-vah", dashed: true },
@@ -87,15 +179,8 @@
       },
     },
     levelWindows: ["PW", "PS", "CW", "SWING_BULL", "SWING_BEAR"],
-
-    // Calendar windows plus the mutually exclusive swing profiles.
     swingWindows: ["SWING_BULL", "SWING_BEAR"],
-
-    // Human labels for the swing anchor row (metadata only).
-    swingLabels: {
-      SWING_BULL: "Bull Swing",
-      SWING_BEAR: "Bear Swing",
-    },
+    swingLabels: { SWING_BULL: "Bull Swing", SWING_BEAR: "Bear Swing" },
     levelKinds: ["poc", "vah", "val"],
   };
 })((window.App = window.App || {}));

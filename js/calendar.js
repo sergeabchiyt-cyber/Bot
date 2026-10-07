@@ -16,18 +16,24 @@
 (function (App) {
   "use strict";
 
-  const { $, escapeHtml, toMs, fmtClock, dayKey, fmtDayLabel, fmtCountdown } = App.utils;
+  const { $, escapeHtml, toMs, fmtClock, dayKey, fmtDayLabel, fmtCountdown, fetchPublicJson } = App.utils;
+  const normalisePayload = App.normalize;
   const cfg = App.config.calendar;
 
   let allEvents = [];            // normalised, USD only, sorted
   let minImpact = "low";         // filter chip: low | medium | high
   let updatedAt = null;
+  let wsRevision = 0;
+  let fetchInProgress = false;
 
   // ---------- Normalisation ----------
   function normalise(raw) {
     const ms = toMs(raw.timestamp) ?? Date.parse(raw.time);
     if (!isFinite(ms)) return null;
-    const impact = String(raw.impact || "low").toLowerCase();
+    const requestedImpact = String(raw.impact || "low").toLowerCase();
+    const impact = Object.prototype.hasOwnProperty.call(cfg.impactRank, requestedImpact)
+      ? requestedImpact
+      : "low";
     return {
       ms,
       name: raw.event || "",
@@ -47,10 +53,12 @@
     return [];
   }
 
-  function ingest(payload) {
-    if (payload && payload.updated) updatedAt = toMs(payload.updated);
-    allEvents = extract(payload)
-      .filter((e) => String(e.currency || "").toUpperCase() === cfg.currency)
+  function ingest(payload, source = "ws") {
+    if (source !== "rest") wsRevision += 1;
+    const data = Array.isArray(payload) ? payload : normalisePayload.unwrapFrame(payload);
+    if (data && data.updated !== undefined && data.updated !== null) updatedAt = toMs(data.updated);
+    allEvents = extract(data)
+      .filter((event) => event && String(event.currency || "").toUpperCase() === cfg.currency)
       .map(normalise)
       .filter(Boolean)
       .sort((a, b) => a.ms - b.ms);
@@ -167,7 +175,11 @@
         minImpact = btn.dataset.impact;
         document
           .querySelectorAll("#calendar-filter .chip")
-          .forEach((b) => b.classList.toggle("active", b === btn));
+          .forEach((b) => {
+            const active = b === btn;
+            b.classList.toggle("active", active);
+            b.setAttribute("aria-pressed", String(active));
+          });
         render();
       });
     });
@@ -175,12 +187,17 @@
 
   // ---------- REST ----------
   async function fetchAll() {
+    const endpoint = App.config.endpoints.calendar;
+    if (fetchInProgress || !endpoint) return;
+    fetchInProgress = true;
+    const requestRevision = wsRevision;
     try {
-      const res = await fetch(App.config.endpoints.calendar);
-      if (!res.ok) throw new Error(`calendar ${res.status}`);
-      ingest(await res.json());
-    } catch (e) {
-      console.error("Calendar fetch failed:", e);
+      const payload = await fetchPublicJson(endpoint);
+      if (wsRevision === requestRevision) ingest(payload, "rest");
+    } catch (error) {
+      console.error("Market calendar snapshot failed:", error);
+    } finally {
+      fetchInProgress = false;
     }
   }
 

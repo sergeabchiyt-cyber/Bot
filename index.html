@@ -4,21 +4,31 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0B0E11" />
+  <meta name="description" content="Read-only XAUUSD market, strategy, and broker execution dashboard." />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>XAUUSD Terminal</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-
   <header class="topbar">
     <div class="brand">
-      <span class="dot-live"></span>
       <span class="brand-name">XAUUSD</span>
-      <span id="status" class="status">—</span>
+      <span id="status" class="sr-only" aria-live="polite">Starting market data</span>
+    </div>
+    <div class="service-statuses" role="group" aria-label="Independent service connections">
+      <span id="market-service-badge" class="service-badge" data-state="reconnecting" title="Node 1 market service status">
+        <span class="service-name">MARKET</span><span class="service-status-value">RECONNECTING</span>
+      </span>
+      <span id="strategy-service-badge" class="service-badge" data-state="reconnecting" title="Node 3 strategy service status">
+        <span class="service-name">STRATEGY</span><span class="service-status-value">RECONNECTING</span>
+      </span>
+      <span id="execution-service-badge" class="service-badge" data-state="reconnecting" title="Node 4 execution service status">
+        <span class="service-name">EXECUTION</span><span class="service-status-value">RECONNECTING</span>
+      </span>
     </div>
     <div class="price-wrap">
-      <span id="last-price">—</span>
+      <span id="last-price" aria-label="Last market price">—</span>
       <span id="tps" class="tps-pill" title="Tick rate (rolling 10s)">
         <span class="tps-label">TPS</span>
         <span id="tps-value" class="tnum"><span id="ticks-per-sec">—</span></span>
@@ -27,94 +37,100 @@
         <span class="sentiment-label">FED</span>
         <span id="sentiment-value">—</span>
       </span>
-      <span id="deriv-pill" class="sentiment-pill deriv-pill" title="Deriv Demo Balance &amp; Node 3 Status" aria-live="polite">
-        <span class="sentiment-label">DERIV</span>
-        <span id="deriv-balance-value" class="tnum">—</span>
-      </span>
     </div>
   </header>
 
-  <!-- Next upcoming USD event (filled by calendar.js) -->
-  <div id="next-event" class="next-event" hidden></div>
+  <div id="next-event" class="next-event" hidden aria-live="polite"></div>
 
-  <nav class="tfbar">
+  <nav class="tfbar" aria-label="Chart timeframe and level legend">
     <div class="tf-tabs" role="tablist" aria-label="Timeframe">
-      <button class="tf active" data-tf="15m">15M</button>
-      <button class="tf" data-tf="1h" disabled title="Coming soon">1H</button>
-      <button class="tf" data-tf="1d" disabled title="Coming soon">1D</button>
+      <button class="tf active" data-tf="15m" role="tab" aria-controls="chart" aria-selected="true" tabindex="0">15M</button>
+      <button class="tf" data-tf="1h" role="tab" aria-controls="chart" aria-selected="false" tabindex="-1" disabled title="Coming soon">1H</button>
+      <button class="tf" data-tf="1d" role="tab" aria-controls="chart" aria-selected="false" tabindex="-1" disabled title="Coming soon">1D</button>
     </div>
-
-    <div class="legend">
+    <div class="legend" aria-label="Chart level legend">
       <span class="legend-item"><i class="swatch poc"></i>PW PoC</span>
       <span class="legend-item"><i class="swatch vah"></i>PW VaH</span>
       <span class="legend-item"><i class="swatch val"></i>PW VaL</span>
       <span class="legend-item"><i class="swatch ps-poc"></i>PS PoC</span>
-      <!-- CW is optional: dimmed while pending the first daily close -->
       <span class="legend-item legend-cw"><i class="swatch cw-poc"></i>CW PoC</span>
       <span class="legend-item legend-cw"><i class="swatch cw-vah"></i>CW VaH</span>
       <span class="legend-item legend-cw"><i class="swatch cw-val"></i>CW VaL</span>
-      <!-- Only one swing profile is active at a time -->
       <span class="legend-item"><i class="swatch swing-bull-poc"></i>Bull Swing</span>
       <span class="legend-item"><i class="swatch swing-bear-poc"></i>Bear Swing</span>
     </div>
   </nav>
 
   <main class="layout">
-    <div id="chart"></div>
+    <div id="chart" role="img" aria-label="XAUUSD candlestick chart with tick volume"></div>
 
-    <aside class="sidebar">
-      <!-- Panel tabs: one panel visible at a time -->
-      <div class="panel-tabs" role="tablist">
-        <button class="panel-tab" data-panel="panel-calendar" role="tab">
-          Calendar <span id="calendar-count" class="panel-count">0</span>
+    <aside class="sidebar" aria-label="Market, strategy, and execution details">
+      <div class="panel-tabs" role="tablist" aria-label="Dashboard sections">
+        <button id="tab-strategy" class="panel-tab" data-panel="panel-strategy" role="tab" aria-controls="panel-strategy" aria-selected="false" tabindex="-1">
+          Strategy <span id="strategy-count" class="panel-count">0</span>
         </button>
-        <button class="panel-tab" data-panel="panel-levels" role="tab">
+        <button id="tab-execution" class="panel-tab" data-panel="panel-execution" role="tab" aria-controls="panel-execution" aria-selected="false" tabindex="-1">
+          Execution <span id="execution-count" class="panel-count">0</span>
+        </button>
+        <button id="tab-mt5" class="panel-tab" data-panel="panel-mt5" role="tab" aria-controls="panel-mt5" aria-selected="false" tabindex="-1">
+          MT5 <span id="mt5-count" class="panel-count">0</span>
+        </button>
+        <button id="tab-levels" class="panel-tab" data-panel="panel-levels" role="tab" aria-controls="panel-levels" aria-selected="false" tabindex="-1">
           Levels <span id="levels-count" class="panel-count">0</span>
         </button>
-        <button class="panel-tab" data-panel="panel-bubbles" role="tab">
+        <button id="tab-bubbles" class="panel-tab" data-panel="panel-bubbles" role="tab" aria-controls="panel-bubbles" aria-selected="false" tabindex="-1">
           Flow <span id="bubbles-count" class="panel-count">0</span>
         </button>
-        <button class="panel-tab" data-panel="panel-execution" role="tab">
-          Exec <span id="execution-count" class="panel-count">0</span>
+        <button id="tab-calendar" class="panel-tab" data-panel="panel-calendar" role="tab" aria-controls="panel-calendar" aria-selected="false" tabindex="-1">
+          Calendar <span id="calendar-count" class="panel-count">0</span>
         </button>
       </div>
 
-      <section id="panel-levels" class="panel panel-levels">
-        <div id="levels-list" class="panel-body">
-          <div class="empty">Awaiting data…</div>
+      <section id="panel-strategy" class="panel" role="tabpanel" aria-labelledby="tab-strategy" tabindex="0">
+        <div id="strategy-body" class="panel-body">
+          <div class="empty">Connecting to Node 3 strategy diagnostics…</div>
         </div>
       </section>
 
-      <section id="panel-calendar" class="panel panel-calendar">
+      <section id="panel-execution" class="panel" role="tabpanel" aria-labelledby="tab-execution" tabindex="0">
+        <div id="execution-body" class="panel-body">
+          <div class="empty">Connecting to Node 4 public execution diagnostics…</div>
+        </div>
+      </section>
+
+      <section id="panel-mt5" class="panel" role="tabpanel" aria-labelledby="tab-mt5" tabindex="0">
+        <div id="mt5-body" class="panel-body">
+          <div class="empty">Waiting for the read-only Node 4 MT5 snapshot…</div>
+        </div>
+      </section>
+
+      <section id="panel-levels" class="panel panel-levels" role="tabpanel" aria-labelledby="tab-levels" tabindex="0">
+        <div id="levels-list" class="panel-body"><div class="empty">Awaiting Node 1 levels…</div></div>
+      </section>
+
+      <section id="panel-bubbles" class="panel panel-bubbles" role="tabpanel" aria-labelledby="tab-bubbles" tabindex="0">
+        <div id="bubbles-list" class="panel-body"><div class="empty">No order-flow events yet.</div></div>
+      </section>
+
+      <section id="panel-calendar" class="panel panel-calendar" role="tabpanel" aria-labelledby="tab-calendar" tabindex="0">
         <header class="panel-head">
           <span class="panel-title">Impact</span>
           <div id="calendar-filter" class="chips" role="group" aria-label="Minimum impact">
-            <button class="chip active" data-impact="low">All</button>
-            <button class="chip" data-impact="medium">Med+</button>
-            <button class="chip" data-impact="high">High</button>
+            <button class="chip active" data-impact="low" aria-pressed="true">All</button>
+            <button class="chip" data-impact="medium" aria-pressed="false">Med+</button>
+            <button class="chip" data-impact="high" aria-pressed="false">High</button>
           </div>
         </header>
-        <div id="calendar-list" class="panel-body">
-          <div class="empty">Loading events…</div>
-        </div>
-      </section>
-
-      <section id="panel-bubbles" class="panel panel-bubbles">
-        <div id="bubbles-list" class="panel-body">
-          <div class="empty">No bubbles detected</div>
-        </div>
-      </section>
-
-      <section id="panel-execution" class="panel panel-execution">
-        <div id="execution-body" class="panel-body">
-          <div class="empty">Connecting to Node 3…</div>
-        </div>
+        <div id="calendar-list" class="panel-body"><div class="empty">Loading calendar events…</div></div>
       </section>
     </aside>
   </main>
 
   <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+  <!-- Optional host-only overrides can be placed before config.js:
+       <script>window.XAUUSD_CONFIG = { EXECUTION_HOST: "https://your-node4-host" };</script> -->
   <script src="js/config.js"></script>
+  <script src="js/normalize.js"></script>
   <script src="js/utils.js"></script>
   <script src="js/bubbles.js"></script>
   <script src="js/axis.js"></script>
@@ -123,7 +139,10 @@
   <script src="js/orderflow.js"></script>
   <script src="js/calendar.js"></script>
   <script src="js/sentiment.js"></script>
+  <script src="js/stream.js"></script>
   <script src="js/socket.js"></script>
+  <script src="js/strategy.js"></script>
+  <script src="js/mt5.js"></script>
   <script src="js/execution.js"></script>
   <script src="js/app.js"></script>
 </body>

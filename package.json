@@ -4,6 +4,7 @@
   "private": true,
   "description": "Node2 static frontend for the XAUUSD terminal (no build step, no runtime dependencies)",
   "scripts": {
-    "lint": "for f in js/*.js; do node --check \"$f\" || exit 1; done"
+    "lint": "for f in js/*.js; do node --check \"$f\" || exit 1; done",
+    "test": "node --test tests/*.test.js"
   }
 }

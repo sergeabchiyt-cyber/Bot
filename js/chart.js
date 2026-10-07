@@ -5,7 +5,7 @@
 (function (App) {
   "use strict";
 
-  const { $, setStatus, fmtPrice, toSec } = App.utils;
+  const { $, setStatus, fmtPrice, toSec, numberOrNull, fetchPublicJson } = App.utils;
   const cfg = App.config;
 
   const el = $("chart");
@@ -155,14 +155,19 @@
   const COLOR_UP = "#26A69A";
   const COLOR_DOWN = "#EF5350";
 
-  // Cache candles by bucket time (sec) for color fallbacks
+  // Cache candles by bucket time (sec) for color fallbacks. REST snapshots
+  // capture these WS revisions and are discarded if newer market data arrived
+  // while the request was in flight.
   const candlesByTime = new Map();
+  let wsCandleRevision = 0;
+  let wsTickVolumeRevision = 0;
+  let historyFetchInProgress = false;
 
   // ---------- Top bar price & TPS ----------
   let lastClose = null;
   function updateLastPrice(close) {
-    const price = Number(close);
-    if (!Number.isFinite(price)) return;
+    const price = numberOrNull(close);
+    if (price === null) return;
     const priceEl = $("last-price");
     if (!priceEl) return;
     priceEl.textContent = fmtPrice(price);
@@ -173,8 +178,8 @@
   }
 
   function updateTps(rate) {
-    const val = Number(rate);
-    if (!Number.isFinite(val)) return;
+    const val = numberOrNull(rate);
+    if (val === null) return;
     const text = val.toFixed(1);
     const tpsSec = $("ticks-per-sec");
     if (tpsSec) tpsSec.textContent = text;
@@ -191,10 +196,11 @@
    *    fall back to the candle's colour (green if close >= open, else red).
    */
   function getBarColor(bar, candle) {
-    const up = bar && bar.up_ticks != null ? Number(bar.up_ticks) : null;
-    const down = bar && bar.down_ticks != null ? Number(bar.down_ticks) : null;
+    const up = bar ? numberOrNull(bar.up_ticks) : null;
+    const down = bar ? numberOrNull(bar.down_ticks) : null;
+    const barClose = bar ? numberOrNull(bar.close) : null;
 
-    if (up != null && down != null && Number.isFinite(up) && Number.isFinite(down) && up !== down) {
+    if (up !== null && down !== null && up !== down) {
       return up > down ? COLOR_UP : COLOR_DOWN;
     }
 
@@ -202,8 +208,8 @@
       return candle.close >= candle.open ? COLOR_UP : COLOR_DOWN;
     }
 
-    if (bar && Number.isFinite(Number(bar.close)) && candle && Number.isFinite(candle.open)) {
-      return Number(bar.close) >= candle.open ? COLOR_UP : COLOR_DOWN;
+    if (barClose !== null && candle && Number.isFinite(candle.open)) {
+      return barClose >= candle.open ? COLOR_UP : COLOR_DOWN;
     }
 
     return COLOR_UP;
@@ -221,21 +227,19 @@
     for (const c of raw) {
       if (!c) continue;
       const time = toSec(c.time);
+      const open = numberOrNull(c.open);
+      const high = numberOrNull(c.high);
+      const low = numberOrNull(c.low);
+      const close = numberOrNull(c.close);
       const candle = {
         time,
-        open: Number(c.open),
-        high: Number(c.high),
-        low: Number(c.low),
-        close: Number(c.close),
-        volume: Number(c.volume) || 0,
+        open,
+        high,
+        low,
+        close,
+        volume: numberOrNull(c.volume) ?? 0,
       };
-      if (
-        time == null ||
-        !Number.isFinite(candle.open) ||
-        !Number.isFinite(candle.high) ||
-        !Number.isFinite(candle.low) ||
-        !Number.isFinite(candle.close)
-      ) {
+      if (time == null || open === null || high === null || low === null || close === null) {
         continue;
       }
       byTime.set(time, candle); // de-dupe: last candle for a bucket wins
@@ -263,58 +267,57 @@
   }
 
   async function loadHistory() {
+    if (historyFetchInProgress || !cfg.endpoints.candles) return;
+    historyFetchInProgress = true;
+    const requestCandleRevision = wsCandleRevision;
+    const requestTickVolumeRevision = wsTickVolumeRevision;
     setStatus("loading", "busy");
     try {
-      const res = await fetch(cfg.endpoints.candles);
-      if (!res.ok) throw new Error(`backend candles ${res.status}`);
-      const raw = await res.json();
+      const raw = await fetchPublicJson(cfg.endpoints.candles);
       const data = parseCandles(raw);
-      if (!data.length) throw new Error("backend candles: empty payload");
+      if (!data.length) throw new Error("market candles: empty payload");
 
-      // Keep the raw payload keyed by real time: live frames arrive on
-      // wall-clock buckets and are matched against it.
-      candlesByTime.clear();
-      for (const c of data) candlesByTime.set(c.time, c);
+      // A newer candle frame makes this whole REST snapshot stale. Do not reset
+      // the series, timeline, or last price with a slower response.
+      if (wsCandleRevision === requestCandleRevision) {
+        candlesByTime.clear();
+        for (const c of data) candlesByTime.set(c.time, c);
 
-      // Draw the compacted view: weekend/daily-break filler runs dropped,
-      // every remaining bar exactly one 15m bucket after the previous one.
-      const view = axis.compact(data);
-      const volumeData = view.bars.map((c) => ({
-        time: c.time,
-        value: c.volume,
-        color: c.close >= c.open ? COLOR_UP : COLOR_DOWN,
-      }));
+        const view = axis.compact(data);
+        const volumeData = view.bars.map((c) => ({
+          time: c.time,
+          value: c.volume,
+          color: c.close >= c.open ? COLOR_UP : COLOR_DOWN,
+        }));
 
-      series.setData(view.bars);
-      volumeSeries.setData(volumeData);
-      chart.timeScale().fitContent();
-      // Show the last *traded* price, not the filler the venue repeats while shut.
-      const newest = view.bars.length ? view.bars[view.bars.length - 1] : data[data.length - 1];
-      updateLastPrice(newest.close);
-      setStatus("ready", "busy"); // WS flips this to "live" on open
+        series.setData(view.bars);
+        if (wsTickVolumeRevision === requestTickVolumeRevision) volumeSeries.setData(volumeData);
+        chart.timeScale().fitContent();
+        const newest = view.bars.length ? view.bars[view.bars.length - 1] : data[data.length - 1];
+        updateLastPrice(newest.close);
 
-      if (view.dropped) {
-        console.info(`chart: dropped ${view.dropped} closed-market filler bars`);
-      }
+        if (view.dropped) {
+          console.info(`chart: dropped ${view.dropped} closed-market filler bars`);
+        }
 
-      if (cfg.endpoints.tickVolume) {
-        try {
-          const tvRes = await fetch(cfg.endpoints.tickVolume);
-          if (tvRes.ok) {
-            const tvBars = await tvRes.json();
-            if (Array.isArray(tvBars)) {
-              for (const bar of tvBars) {
-                updateTickVolume(bar);
-              }
+        if (cfg.endpoints.tickVolume && wsTickVolumeRevision === requestTickVolumeRevision) {
+          try {
+            const tvBars = await fetchPublicJson(cfg.endpoints.tickVolume);
+            if (wsCandleRevision === requestCandleRevision &&
+                wsTickVolumeRevision === requestTickVolumeRevision && Array.isArray(tvBars)) {
+              for (const bar of tvBars) updateTickVolume(bar, "rest");
             }
+          } catch {
+            // Non-fatal: the market WebSocket remains the primary feed.
           }
-        } catch {
-          // Non-fatal: WS tick_volume replay handles live backfill
         }
       }
-    } catch (e) {
-      console.error("History load failed:", e);
+      setStatus("ready", "busy");
+    } catch (error) {
+      console.error("Market history load failed:", error);
       setStatus("history error", "error");
+    } finally {
+      historyFetchInProgress = false;
     }
   }
 
@@ -323,22 +326,22 @@
     if (!c) return;
     const time = toSec(c.time);
     if (time == null) return;
+    const open = numberOrNull(c.open);
+    const high = numberOrNull(c.high);
+    const low = numberOrNull(c.low);
+    const close = numberOrNull(c.close);
     const candle = {
       time,
-      open: Number(c.open),
-      high: Number(c.high),
-      low: Number(c.low),
-      close: Number(c.close),
-      volume: c.volume != null ? Number(c.volume) : 0,
+      open,
+      high,
+      low,
+      close,
+      volume: numberOrNull(c.volume) ?? 0,
     };
-    if (
-      !Number.isFinite(candle.open) ||
-      !Number.isFinite(candle.high) ||
-      !Number.isFinite(candle.low) ||
-      !Number.isFinite(candle.close)
-    ) {
+    if (open === null || high === null || low === null || close === null) {
       return;
     }
+    wsCandleRevision += 1;
     const prev = candlesByTime.get(time);
     if (prev && isClosedMarketBar(prev) && !isClosedMarketBar(candle)) {
       // The market just reopened inside this bucket: its placeholder must not
@@ -360,21 +363,18 @@
     updateLastPrice(candle.close);
   }
 
-  /** Live tick volume bar from the backend WebSocket or /tick-volume. */
-  function updateTickVolume(bar) {
+  /** Live tick volume bar from Node 1, or a guarded /tick-volume snapshot. */
+  function updateTickVolume(bar, source = "ws") {
     if (!bar) return;
     const time = toSec(bar.time);
     if (time == null) return;
 
-    const ticks = bar.ticks != null
-      ? Number(bar.ticks)
-      : (bar.volume != null ? Number(bar.volume) : 0);
-    if (!Number.isFinite(ticks)) return;
+    const ticks = numberOrNull(bar.ticks) ?? numberOrNull(bar.volume) ?? 0;
+    if (source !== "rest") wsTickVolumeRevision += 1;
 
     const candle = candlesByTime.get(time);
-    if (candle && bar.close != null && Number.isFinite(Number(bar.close))) {
-      candle.close = Number(bar.close);
-    }
+    const barClose = numberOrNull(bar.close);
+    if (candle && barClose !== null) candle.close = barClose;
 
     // Volume follows its candle onto the display timeline. A bucket that is
     // not on the chart yet may only extend it when its candle is drawable
