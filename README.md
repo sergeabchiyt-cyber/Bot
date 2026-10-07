@@ -1,11 +1,91 @@
-# XAUUSD OrderFlow Engine
+# XAUUSD Market Data & Volume Profile Engine — **Node 1**
 
-Rust backend for a gold (XAUUSD) order-flow desk: it ingests live trades from
-multiple venues, detects order-flow events (bubbles / absorption), computes
-rolling volume-profile levels, pulls the economic calendar straight from the
-ForexFactory weekly feed (browser MCP optional), and exposes everything over a JSON HTTP API and a WebSocket
-stream. The engine ships no frontend and serves no static files — point any
-external client (dashboard, charting app, script) at the endpoints below.
+Node 1 is the **market-data and volume-profile service** for the XAUUSD desk.
+
+It ingests live trades from multiple venues, counts tick volume, detects
+order-flow events (bubbles / absorption), computes rolling volume-profile
+levels (PW / PS / CW / swing), pulls the economic calendar straight from the
+ForexFactory weekly feed (browser MCP optional), captures economic-news audio,
+and exposes all of it over a JSON HTTP API and a WebSocket stream.
+
+**Node 1 does not trade.** It holds no broker credential, has no execution
+venue, no order path, and no MT5 bridge. It cannot place, modify or close an
+order. There is no fallback or hidden execution path — the capability is not
+present in this branch at all.
+
+The engine ships no frontend and serves no static files — point any external
+client (dashboard, charting app, script, strategy service) at the endpoints
+below.
+
+---
+
+## Service boundary
+
+| Node | What it is | Where it lives |
+|------|------------|----------------|
+| **Node 1** (this branch) | Market data, tick volume, exchange order flow, volume profile (PW/PS/CW/swing), economic calendar, econ-news audio capture. **Read-only market service.** | `Node1` branch |
+| **Node 2** | Read-only browser dashboard (static site). Consumes Node 1's REST API and market WS topics. | `Node2` branch |
+| **Node 3** | External **strategy** service. Subscribes to Node 1's `candle` and `levels`, runs the AI/sentiment models, decides *whether* to trade. | `Node3` branch |
+| **Node 4** | External **execution / MT5** service. Owns broker credentials, the MT5 bridge and the order path. | `Node-4` branch |
+
+Node 1 never depends on Node 3 or Node 4 being available. If either is down,
+Node 1 keeps ingesting feeds, computing profiles and serving market data.
+
+```
+                       ┌──────────────────────────────────────────┐
+  upstream feeds  ───► │                NODE 1                    │
+  SiftingIO            │  market data · tick volume · order flow  │
+  Binance / Bybit      │  volume profile (PW/PS/CW/swing)         │
+  OKX / Bitget / Gate  │  economic calendar · econ-news audio     │
+  Kraken / AllTick     │                                          │
+  iTick                │  no broker credential · no order path    │
+                       └───┬──────────────┬──────────────┬────────┘
+                           │              │              │
+              market WS    │              │ REST         │ audio_chunk
+              candle       │              │ /health      │ learn
+              levels       │              │ /status      │
+              tick_volume  │              │ /levels /vp  │
+              bubbles      │              │ /candles     │
+              calendar     │              │ /tick-volume │
+              status       │              │ /calendar    │
+                           ▼              ▼              ▼
+                     ┌──────────┐   ┌──────────┐   ┌──────────┐
+                     │  NODE 3  │   │  NODE 2  │   │  NODE 3  │
+                     │ strategy │   │ read-only│   │ AI / NLP │
+                     │ (external)│  │ dashboard│   │(external)│
+                     └────┬─────┘   └──────────┘   └────┬─────┘
+                          │  decides to trade           │ transcript
+                          │                             │ sentiment
+                          ▼                             ▼
+                     ┌──────────┐                  (back to Node 1
+                     │  NODE 4  │                   GET /ai cache)
+                     │execution │
+                     │ MT5 bridge│
+                     │ broker    │
+                     └──────────┘
+
+  Node 1 ──► Node 3 : market data only (candle, levels, audio_chunk, learn)
+  Node 3 ──► Node 1 : AI results only (transcript, sentiment, health,
+                      prediction) — cached for GET /ai
+  Node 3 ──► Node 4 : orders (Node 1 is not on this path)
+  Node 1 ⇸  Node 4 : NO dependency, in either direction
+```
+
+### What Node 1 owns — and what it does not
+
+| Node 1 owns | Node 1 does **not** own |
+|---|---|
+| Upstream market / feed adapters | Strategy or signal decisions |
+| Sifting candles and tick volume | Broker execution or fills |
+| Exchange order flow (bubbles) | Account / balance monitoring |
+| Volume-profile calculations | Broker credentials of any kind |
+| PW / PS / CW / swing levels | MT5 bridge or terminal link |
+| Economic calendar + econ-news audio | Execution venues or venue selection |
+| Market REST endpoints | Stake / lot sizing, SL / TP / R:R |
+| Market WebSocket topics | Execution controls (halt, kill switch, …) |
+| Market diagnostics and probes | Order routing, reconciliation |
+
+---
 
 ## Run
 
@@ -15,6 +95,11 @@ cargo run            # or: docker build -t engine . && docker run -p 10000:10000
 
 Then hit **http://localhost:10000/status** for a JSON snapshot of every feed.
 There is no `/` route — the engine is API-only.
+
+Node 1 starts with **no broker or execution environment variable set**. Every
+configuration value below is optional; the only credential it ever reads is
+the SiftingIO market-data API key (and the optional AllTick / iTick market-data
+tokens).
 
 ## HTTP endpoints
 
@@ -27,21 +112,35 @@ There is no `/` route — the engine is API-only.
 | `/candles` | SiftingIO 15m candles used by the chart/swing profile (latest fixed seed + live closes); `volume` = tick count |
 | `/tick-volume` | Live tick-volume bars built since boot (up/down/flat split, tick rate); newest may be in progress |
 | `/calendar`| Latest economic calendar snapshot (`source`, `count`, `events`) |
-| `/ai`      | What the econ news delivered today: Node3's `transcript`/`sentiment` frames (+ last health), filtered to the current UTC day |
-| `/ws`      | WebSocket stream — send `{"type":"subscribe","topics":["candle","tick_volume","levels","bubbles","trades","calendar","status","audio_chunk","learn","transcript","sentiment","health","prediction"]}` |
+| `/ai`      | What the econ news delivered today: Node 3's `transcript`/`sentiment` frames (+ last health), filtered to the current UTC day |
+| `/ws`      | WebSocket stream — send `{"type":"subscribe","topics":["candle","tick_volume","levels","bubbles","calendar","status","audio_chunk","learn","transcript","sentiment","health","prediction"]}` |
 
-WebSocket frames are tagged with `type`: `candle`, `tick_volume`, `levels`,
-`bubbles`, `trades`, `calendar`, `status`, `heartbeat`, plus the Node3 AI
-contract frames `audio_chunk`, `learn`, `transcript`, `sentiment`, `health`,
-`prediction` (see "Node 1 ↔ Node 3" below). The four order-flow colors:
-`BUY_BUBBLE` green, `SELL_BUBBLE` red, `ABS_BUY` blue, `ABS_SELL` orange.
+Every route is **read-only**. There is no `POST`/`PUT`/`PATCH`/`DELETE` route
+anywhere in this service — nothing here accepts an order, a fill or any other
+broker write.
+
+WebSocket frames are tagged with `type`:
+
+| Direction | Frames |
+|---|---|
+| Node 1 → clients (market) | `candle`, `tick_volume`, `levels`, `bubbles`, `calendar`, `status`, `heartbeat` |
+| Node 1 → Node 3 (market/audio) | `audio_chunk`, `learn`, plus the market frames above |
+| Node 3 → Node 1 (AI results) | `transcript`, `sentiment`, `health`, `prediction` |
+| Node 1 → Node 3 (requests) | `sentiment_req`, `predict_req` |
+
+The four order-flow colors: `BUY_BUBBLE` green, `SELL_BUBBLE` red, `ABS_BUY`
+blue, `ABS_SELL` orange.
+
+There is **no `trades` topic**. Node 1 does not accept, parse or forward a
+trade/execution/fill frame — orders are Node 4's job, and Node 4 is not
+reachable from Node 1. Exchange *trade ticks* (`AggTrade`) are unaffected:
+they are inbound market data from the upstream venues and are what the
+order-flow `bubbles` are computed from.
 
 Subscribing to `levels` replays the cached profiles. Subscribing to `candle`
-replays the latest 15 cached 15-minute OHLC bars (enough for Node3 to seed
-ATR(14)); `/candles` remains the full chart-history endpoint. Subscriptions to
-`candle`, `levels`, and `trades` are supported together. The `trades` topic is
-bidirectional: a valid Node3 `TradeEvent` published to `/ws` is fanned out
-unchanged to every connected client subscribed to `trades`.
+replays the latest 15 cached 15-minute OHLC bars (enough for Node 3 to seed
+ATR(14)); `/candles` remains the full chart-history endpoint. Subscribing to
+`tick_volume` replays the live bars built since boot.
 
 ### Tick volume
 
@@ -75,13 +174,14 @@ frame for the same 15m bucket:
 
 ### CORS (browser clients)
 
-The dashboard (Node2, `https://static-dash-frontend.onrender.com`) is a static
+The dashboard (Node 2, `https://static-dash-frontend.onrender.com`) is a static
 site on its own origin, so it reads these routes cross-origin. `CorsLayer` is
 applied to the whole router and allows **exactly one origin**, `CORS_ALLOWED_ORIGIN`:
 
-* `GET /health|/levels|/candles|/tick-volume|/calendar|/status` from that origin get
-  `access-control-allow-origin: <origin>`, plus `vary: origin, ...` so a shared
-  cache can never hand our grant to a different requester.
+* `GET /health|/levels|/vp|/candles|/tick-volume|/calendar|/status|/ai` from
+  that origin get `access-control-allow-origin: <origin>`, plus
+  `vary: origin, ...` so a shared cache can never hand our grant to a different
+  requester.
 * Any other `Origin` (and requests with no `Origin`, e.g. curl or another
   server) gets the payload with **no** CORS grant, so no other page can read it.
 * Preflight is limited to `GET, OPTIONS` and `content-type, accept, origin`,
@@ -115,24 +215,44 @@ the layer simply never matches.
 Every feed auto-reconnects with status broadcasting; feeds without taker-side
 data count toward volume but never toward delta.
 
+All of these are **market data** feeds. None of them is a broker, an execution
+venue or an order route.
+
 ## Environment variables (all optional)
 
+Every variable below is owned by Node 1. There is no Deriv, Chelsea, MT5,
+execution-venue, stake, lot-size or SL/TP/R:R variable in this service — those
+live on Node 4 and are not read here.
+
 ```
+# ---- Server ----
 PORT=3000
-BINANCE_SYMBOL=XAUUSDT
-SIFTING_API_KEY=            SIFTING_SYMBOL=XAUUSD
-SIFTING_WS_URL=             SIFTING_HIST_URL=https://api.sifting.io
-# Sifting REST chart/swing seed is exactly 2,000 15m candles; no Binance price fallback.
-FEED_BINANCE=on|off|auto    FEED_BYBIT=on|off|auto      FEED_OKX=on|off|auto
-FEED_BITGET=on|off|auto     FEED_GATE=on|off|auto       FEED_KRAKEN=on|off|auto
-FEED_ALLTICK=on|off|auto    FEED_ITICK=on|off|auto      FEED_SIFTING=on|off|auto
+
+# ---- Market data / feeds ----
+BINANCE_SYMBOL=XAUUSDT                      # builds BINANCE_WS_URL
+BINANCE_WS_URL=                             # default wss://fstream.binance.com/ws/<symbol>@aggTrade
+SIFTING_API_KEY=                            SIFTING_SYMBOL=XAUUSD
+SIFTING_WS_URL=wss://stream.sifting.io/ws/v1
+SIFTING_HIST_URL=https://api.sifting.io
+
+# Feed switches: on | off | auto   (auto = on for keyless public feeds, and for
+# tokened feeds only when the token exists)
+FEED_BINANCE=auto     FEED_BYBIT=auto      FEED_OKX=auto
+FEED_BITGET=auto      FEED_GATE=auto       FEED_KRAKEN=auto
+FEED_ALLTICK=auto     FEED_ITICK=auto      FEED_SIFTING=auto
+
 BITGET_SYMBOL=XAUTUSDT      GATE_SYMBOL=XAUT_USDT       KRAKEN_PRODUCT=PF_XAUTUSD
 ALLTICK_TOKEN=              ALLTICK_WS_URL=             ALLTICK_CODE=XAUUSD
 ITICK_TOKEN=                ITICK_WS_URL=               ITICK_SYMBOL=XAUUSD
+
+# ---- Browser MCP (calendar fallback + econ coverage discovery) ----
 MCP_BROWSER_URL=http://localhost:3001     MCP_BROWSER_TOKEN=
 MCP_BROWSER_TOOL_NAVIGATE=  MCP_BROWSER_TOOL_READ=      MCP_SCRAPE_SECS=900
+
+# ---- Economic calendar ----
 CALENDAR_URL=               CALENDAR_USE_MCP=true
-# Econ-news audio monitor: streams live event coverage to Node3 as audio_chunk frames
+
+# ---- Econ-news audio monitor: streams live event coverage to Node 3 as audio_chunk ----
 ECON_MONITOR=true           ECON_SCAN_SECS=60
 ECON_WINDOW_BEFORE_SECS=900 ECON_WINDOW_AFTER_SECS=3600
 ECON_MIN_IMPACT=High        ECON_CURRENCIES=USD
@@ -140,8 +260,11 @@ ECON_STREAM_SOURCES=        # comma list of live pages/media (e.g. https://www.y
 ECON_CHUNK_MS=1000          ECON_USE_MCP=true
 ECON_MAX_STREAM_SECS=7200   ECON_YTDLP=yt-dlp   ECON_FFMPEG=ffmpeg
 ECON_TEST_TONE=1            # CI/offline plumbing test: synthetic 16kHz tone instead of live audio
-LEVEL_PROXIMITY_PIPS=5      SL_MIN_PIPS=10  SL_MAX_PIPS=50  TP_MIN_PIPS=15  TP_MAX_PIPS=100
-# Volume-profile histogram model (TradingView parity; see README section)
+
+# ---- CI / air-gapped only: synthetic candle seed when no upstream history ----
+SEED_SYNTHETIC_CANDLES=0
+
+# ---- Volume-profile histogram model (TradingView parity) ----
 VP_ROW_MODE=rows            # rows = TV "Number Of Rows" layout | price = fixed-height rows
 VP_ROWS=128                 # TV "Row Size" when VP_ROW_MODE=rows
 VP_BIN_SIZE=0.50            # row height when VP_ROW_MODE=price
@@ -149,9 +272,9 @@ VP_TICK_SIZE=0.01           # XAUUSD tick: row height is rounded to whole ticks
 VP_VA_PCT=70                # TV "Value Area Volume"
 VP_LOWER_TF=tv              # tv = TradingView's 5,000-bar ladder per window | 1m/5m/15m/...
 VP_FALLBACK_INTERVAL=5m     # second try when 1m history cannot cover PW
-CORS_ALLOWED_ORIGIN=https://static-dash-frontend.onrender.com   # only origin allowed to call the REST API from a browser
-RR_MIN=1 RR_MAX=3           DERIV_DEMO_API=  DERIV_APP_ID=  DERIV_API_URL=
-MCP_CHELSEA_URL=            (set to route orders through the ChelseaAI MCP tool)
+
+# ---- Browser CORS (the Node 2 static site) ----
+CORS_ALLOWED_ORIGIN=https://static-dash-frontend.onrender.com
 ```
 
 `auto` (default) = on for keyless public feeds, on for tokened feeds only when
@@ -331,43 +454,32 @@ and it retries on the `MCP_SCRAPE_SECS` interval. The latest snapshot is cached,
 served at `/calendar`, and replayed to WebSocket clients that subscribe to the
 `calendar` topic.
 
-## Node 1 ↔ Node 3
+## Node 1 → Node 3 (market data out, AI results back)
 
-### Market state and trade fan-out
+### Market state
 
-Node3 (`node3-ai/ws_client.py`) subscribes to `candle`, `levels`, and
-`trades` in addition to the audio/learner topics. On each subscribe (including
-reconnect), Node1 first replays its cached level frames and last 15 candles.
-Node3 stores `PW` / `PS` / `CW` levels and seeds Wilder ATR(14) from those 15
-bars; duplicate updates for the current 15-minute candle replace that bar.
-`PW.sunday_open` carries the open price of the exact Sunday 18:00 New York
-start candle when that candle exists in the history (`PW.start` remains the
-boundary timestamp).
+Node 3 subscribes to `candle` and `levels` (plus the audio/learner topics) on
+`/ws`. On each subscribe (including reconnect), Node 1 first replays its cached
+level frames and last 15 candles. Node 3 stores `PW` / `PS` / `CW` levels and
+seeds Wilder ATR(14) from those 15 bars; duplicate updates for the current
+15-minute candle replace that bar. `PW.sunday_open` carries the open price of
+the exact Sunday 18:00 New York start candle when that candle exists in the
+history (`PW.start` remains the boundary timestamp).
 
-When Node3 emits an execution or trade signal, publish the standard event on
-the same connection:
+That is the whole market-data contract. Node 3 decides what to do with it;
+Node 1 does not evaluate a strategy, and Node 3 cannot publish an order back
+through Node 1 (there is no `trades` topic and no order route — orders go to
+Node 4).
 
-```json
-{"type":"trades","data":{"trade_id":"n3-1","symbol":"XAUUSD","side":"buy","size":0.01,"entry":2340.0,"sl":2335.0,"tp":2350.0,"status":"signal","timestamp":1700000000000}}
-```
-
-Node1 rebroadcasts this unchanged to every `/ws` client subscribed to
-`trades`, including Node2 dashboards. Node3's helper is
-`Node3Client.send_trade_event(...)`; this only broadcasts the event and does
-not itself place an order.
-
-For lowest latency in a Singapore deployment, set Node3's `NODE1_WS_URL` to
-Node1's direct secure WebSocket endpoint (`wss://<node1-sg-host>/ws`), using
-provider-private networking/internal DNS when available. The existing
-`engine-southeastasia-sng-main.onrender.com` WSS address is the public fallback;
-keep Node3 and Node1 in the same region and avoid routing execution traffic via
-Node2 or another proxy. Network RTT depends on the hosting provider, so the
-sub-millisecond target must be verified from the deployed services.
+For lowest latency, point Node 3's `NODE1_WS_URL` at Node 1's direct secure
+WebSocket endpoint (`wss://<node1-host>/ws`), using provider-private
+networking / internal DNS when available, and keep Node 3 and Node 1 in the
+same region.
 
 ### Econ news audio
 
-The engine also turns economic events into live audio, streams it to Node3 over
-the same `/ws` connection Node3 already holds, and reports what the news delivered.
+The engine also turns economic events into live audio, streams it to Node 3 over
+the same `/ws` connection Node 3 already holds, and reports what the news delivered.
 
 ```
 calendar event window opens (NFP, CPI, FOMC, Powell, ...)
@@ -379,25 +491,25 @@ calendar event window opens (NFP, CPI, FOMC, Powell, ...)
 yt-dlp resolves the stream ──► ffmpeg decodes ──► 16kHz mono f32le PCM
    │
    ▼
-/ws topic `audio_chunk`  ──►  Node3 ws_client.py  (also candle/levels/trades)
+/ws topic `audio_chunk`  ──►  Node 3 ws_client.py  (also candle + levels)
                                  ├─ Moonshine → transcript
                                  └─ FinBERT / FOMC-RoBERTa → sentiment
    ▼                                        │
 GET /ai  ◄── engine caches those frames ────┘   (today's UTC day)
 ```
 
-**Wire contract** (exactly what `node3-ai/ws_client.py` consumes):
+**Wire contract** (what Node 3's `ws_client.py` consumes):
 
 - `{"type":"audio_chunk","data":{"data":"<b64 f32le 16kHz mono>","ts":…,"source":…,"event":…,"sample_rate":16000,"format":"f32le","duration_ms":1000}}`
   — one PCM chunk per `ECON_CHUNK_MS` of captured audio
-- `{"type":"learn","data":{"features":[…],"target":0|1}}` — forwarded to Node3's
+- `{"type":"learn","data":{"features":[…],"target":0|1}}` — forwarded to Node 3's
   online learner; any WS client or script may publish `learn`/`audio_chunk`
   frames to `/ws` and the engine rebroadcasts them on the bus
-- Node3's replies (`transcript`, `sentiment`, `health`, `prediction`) are
+- Node 3's replies (`transcript`, `sentiment`, `health`, `prediction`) are
   fanned out on their topics and cached for `GET /ai`
-- `sentiment_req` / `predict_req` requests are forwarded to Node3 regardless
-  of topic subscription; Node3 subscribes to `audio_chunk`, `learn`, `candle`,
-  `levels`, and `trades`
+- `sentiment_req` / `predict_req` requests are forwarded to Node 3 regardless
+  of topic subscription; Node 3 subscribes to `audio_chunk`, `learn`,
+  `candle` and `levels`
 
 The monitor arms on calendar events matching `ECON_MIN_IMPACT` (default
 `High`) and `ECON_CURRENCIES` (default `USD`) inside the window
@@ -412,97 +524,30 @@ prove the whole pipeline offline.
 ## Verifying
 
 ```bash
-cargo test                         # session-rollover, calendar parsing, CORS policy, AI cache
+cargo fmt --all -- --check
+cargo check --all-targets
+cargo test --all-targets -- --nocapture
+cargo clippy --all-targets -- -D warnings
+cargo build --release
+
 cargo test -- --ignored --nocapture  # hits the live ForexFactory feed
-bash ci/smoke.sh                   # boots the binary and asserts:
-                                   #   /levels window bounds, /calendar contents,
-                                   #   /vp histogram (contiguous rows, volume conservation,
-                                   #   POC = heaviest row, VAL <= POC <= VAH),
-                                   #   /candles + /tick-volume payload shape, the CORS allow-list,
-                                   #   the econ audio pipeline (audio_chunk/learn on /ws, /ai digest)
-                                   #   (allowed / preflight / foreign origin) and
-                                   #   that /ws replays levels/15 candles and fans out Node3 trades
+python3 ci/check_node1_boundary.py . # Node1 owns market data only
+bash ci/smoke.sh                     # boots the release binary and asserts:
+                                     #   /levels window bounds, /calendar contents,
+                                     #   /vp histogram (contiguous rows, volume conservation,
+                                     #   POC = heaviest row, VAL <= POC <= VAH),
+                                     #   /candles + /tick-volume payload shape, the CORS allow-list,
+                                     #   the econ audio pipeline (audio_chunk/learn on /ws, /ai digest)
+                                     #   and that /ws replays levels/15 candles and accepts no
+                                     #   execution/fill frame
 ```
 
-CI runs all three on every push. The CORS probes in `ci/smoke.sh` are the
+CI runs all of these on every push. The CORS probes in `ci/smoke.sh` are the
 authoritative proof of the allow-list, since they run against the real release
 binary; `ci/verify_ws.py` does the WebSocket handshake on a raw socket so no
-websocket client library is needed.
+websocket client library is needed. `ci/check_node1_boundary.py` is the guard
+that keeps execution, broker credentials and MT5 from creeping back in.
 
----
-
-# XAUUSD Node 3 — AI Speech & Sentiment Services (UPGRADED 16GB tier)
-
-This repository branch (`Node3`) hosts the Python AI services for the XAUUSD trading system. Originally tuned for Lightning AI Always-On, it now ships an **upgraded tier for 16GB RAM / 4 vCPU / 400GB disk** (better accuracy → better trades).
-
-- **Analysis & upgraded specs:** see [`node3-ai/README.md`](node3-ai/README.md) (repo walk-through + model tables + tier comparison)
-- **Copy-paste launch:** see [`node3-ai/LAUNCH.md`](node3-ai/LAUNCH.md) (systemd / Docker / bare, 30-sec to boot)
-- **Upgrades in this branch:** `FOMC-RoBERTa 355M` (93% FOMC), `Moonshine Medium 245M + Silero VAD`, `Adam+Welford learner v2`
-
-## Quick Start (legacy small — still works)
-
-```bash
-cd node3-ai
-pip install --no-cache-dir -r requirements.txt
-python3 download_models.py --tier small
-python3 -u ws_client.py
-```
-
-## Upgraded for 16GB (recommended — your hardware)
-
-```bash
-cd node3-ai
-pip install --no-cache-dir -r requirements.txt
-python3 download_models.py --tier upgraded   # FOMC-RoBERTa + VAD + medium optional
-cp .env.example .env
-python3 -u ws_client.py                      # ~1.8GB RSS, FOMC-RoBERTa tier
-# or: python3 -m uvicorn main:app --host 0.0.0.0 --port 8000  # HTTP health/test
-```
-
----
-
-## Node 3 execution service (`node3-execution/`)
-
-The same repository also carries the automated execution service that consumes
-this engine's `/ws` stream (candles, levels, trades) and executes the Volume
-Profile break-and-retest strategy on exactly one venue:
-
-* **Deriv MT5 demo** via `mt5-bridge/` — a separate Rust service that runs next
-  to the MT5 terminal, dials *out* to Node 3, and gives it full control (place /
-  modify / close / close-all, halt-resume kill switch, account / positions /
-  closed-deal history, restart-safe history, reconciliation). Demo-only,
-  broker-confirmed fills only, no fallback to live or to another venue.
-* **Deriv options demo** (`DERIV_DEMO_API`), **Chelsea Live MCP**
-  (`MCP_CHELSEA_URL`), or **signal mode** (no venue credential).
-
-Venues are mutually exclusive and fail closed: two configured credential sets
-are a startup error even with `EXECUTION_VENUE` set (unset the credential you
-are leaving behind), and a configured-but-unavailable venue refuses trades
-instead of falling back.
-
-```bash
-cd node3-execution
-cp .env.example .env
-cargo run --release
-# or: docker build -f Dockerfile -t node3-execution . && docker run --env-file .env -p 10000:10000 node3-execution
-
-curl -s localhost:10000/health
-curl -s localhost:10000/diagnostics
-curl -s localhost:10000/mt5/account    # configured/connected/authorized/account_type
-curl -s localhost:10000/mt5/positions  # broker positions (SL/TP, unrealized PnL)
-curl -s localhost:10000/mt5/status     # bridge / EA link counters
-
-# operator kill switch (403 unless MT5_CONTROL_TOKEN is set and sent)
-curl -sX POST localhost:10000/mt5/control \
-     -H "X-Control-Token: $MT5_CONTROL_TOKEN" \
-     -d '{"action":"halt","reason":"operator"}'
-```
-
-`MT5_LOGIN` / `MT5_PASSWORD` are read **only** by `mt5-bridge`, on the MT5 host;
-Node 3 holds nothing but the shared `MT5_BRIDGE_TOKEN`.
-
-Read next: [`node3-execution/README.md`](node3-execution/README.md) (strategy,
-wire schema, full configuration), [`docs/mt5/EXECUTION_ARCHITECTURE.md`](docs/mt5/EXECUTION_ARCHITECTURE.md)
-(topology, venue rules, order path, integration gate, runbook),
-[`docs/mt5/FRONTEND_RESOURCES.md`](docs/mt5/FRONTEND_RESOURCES.md) (dashboard
-contract) and [`mt5-bridge/README.md`](mt5-bridge/README.md).
+Live market probes live in `ci/live-probe.sh` (REST payloads + a WebSocket
+sample recorded into `ci/live/`, digested into `ci/LIVE.md`) and run from the
+Actions tab against the deployed engine.
