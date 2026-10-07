@@ -3,7 +3,7 @@
 //! Deployment shape (see `docs/mt5/EXECUTION_ARCHITECTURE.md`):
 //!
 //! ```text
-//!   Node 3 (Render, strategy + risk)
+//!   Node 4 (Render, strategy + risk)
 //!        ^  WSS — the bridge dials out, token authenticated
 //!        |
 //!   mt5-bridge  ── listens on 127.0.0.1:5055 ──> Mt5BridgeEA.mq5 in the terminal
@@ -27,7 +27,7 @@ use mt5_bridge::bridge::{Bridge, ControlState, HistoryStore, LinkStatusProvider}
 use mt5_bridge::config::BridgeConfig;
 use mt5_bridge::ea_link::{EaLink, LinkEvent};
 use mt5_bridge::terminal::TerminalClient;
-use mt5_bridge::{fake, node3, snapshot};
+use mt5_bridge::{fake, node4, snapshot};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -66,16 +66,12 @@ async fn main() -> anyhow::Result<()> {
         warn!("MT5_TRADING_ENABLED=0 — the bridge starts halted");
     }
 
-    let history = Arc::new(
-        HistoryStore::open(&cfg.history_file)
-            .await
-            .map_err(|err| {
-                anyhow::anyhow!(
-                    "cannot open the history store {}: {err}",
-                    cfg.history_file.display()
-                )
-            })?,
-    );
+    let history = Arc::new(HistoryStore::open(&cfg.history_file).await.map_err(|err| {
+        anyhow::anyhow!(
+            "cannot open the history store {}: {err}",
+            cfg.history_file.display()
+        )
+    })?);
     info!(
         "history store: {} ({} deals persisted)",
         history.path().display(),
@@ -155,11 +151,11 @@ async fn main() -> anyhow::Result<()> {
     let mirrored = bridge.fill_history_from_broker().await;
     info!("mirrored {mirrored} closed deal(s) into the history store");
 
-    // 5. Node 3 link (outbound only) plus a graceful halt on shutdown.
-    let node3_bridge = bridge.clone();
-    let node3_cfg = cfg.clone();
+    // 5. Node 4 link (outbound only) plus a graceful halt on shutdown.
+    let node4_bridge = bridge.clone();
+    let node4_cfg = cfg.clone();
     tokio::spawn(async move {
-        node3::run(node3_cfg, node3_bridge).await;
+        node4::run(node4_cfg, node4_bridge).await;
     });
 
     if let Ok(()) = tokio::signal::ctrl_c().await {

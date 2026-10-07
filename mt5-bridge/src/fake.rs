@@ -264,12 +264,12 @@ fn position_fields(position: &Mt5Position) -> BTreeMap<String, String> {
         ("time", position.time_ms.to_string()),
         (
             "current_price",
-            format!("{:.8}", position.current_price.unwrap_or(position.price_open)),
+            format!(
+                "{:.8}",
+                position.current_price.unwrap_or(position.price_open)
+            ),
         ),
-        (
-            "unrealized_pnl",
-            format!("{:.8}", position.unrealized_pnl),
-        ),
+        ("unrealized_pnl", format!("{:.8}", position.unrealized_pnl)),
     ])
 }
 
@@ -379,10 +379,7 @@ impl FakeTerminal {
                             ("bid", format!("{:.8}", spec.bid)),
                             ("ask", format!("{:.8}", spec.ask)),
                             ("spread_points", format!("{:.8}", spec.spread_points)),
-                            (
-                                "ts",
-                                (now_ms() - inner.quote_age_ms).to_string(),
-                            ),
+                            ("ts", (now_ms() - inner.quote_age_ms).to_string()),
                         ]),
                         items: Vec::new(),
                     }),
@@ -429,7 +426,9 @@ impl FakeTerminal {
                 items: Vec::new(),
             }),
             method::HISTORY => {
-                let from = param("from").and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
+                let from = param("from")
+                    .and_then(|v| v.parse::<i64>().ok())
+                    .unwrap_or(0);
                 let to = param("to")
                     .and_then(|v| v.parse::<i64>().ok())
                     .unwrap_or(i64::MAX);
@@ -488,9 +487,7 @@ impl FakeTerminal {
                 let mut inner = self.inner.lock().await;
                 let symbol = param("symbol").unwrap_or_default();
                 let side = param("side").unwrap_or_default();
-                let volume: f64 = param("volume")
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(0.0);
+                let volume: f64 = param("volume").and_then(|v| v.parse().ok()).unwrap_or(0.0);
                 let sl: f64 = param("sl").and_then(|v| v.parse().ok()).unwrap_or(0.0);
                 let tp: f64 = param("tp").and_then(|v| v.parse().ok()).unwrap_or(0.0);
                 let magic = param("magic")
@@ -631,8 +628,7 @@ impl FakeTerminal {
                 let sl: f64 = param("sl").and_then(|v| v.parse().ok()).unwrap_or(0.0);
                 let tp: f64 = param("tp").and_then(|v| v.parse().ok()).unwrap_or(0.0);
                 let mut inner = self.inner.lock().await;
-                let Some(position) = inner.positions.iter_mut().find(|p| p.ticket == ticket)
-                else {
+                let Some(position) = inner.positions.iter_mut().find(|p| p.ticket == ticket) else {
                     return Ok(EaResponse {
                         fields: map(&[
                             ("retcode", "10013".to_string()),
@@ -652,9 +648,7 @@ impl FakeTerminal {
                 let ticket = param("ticket")
                     .and_then(|v| v.parse::<i64>().ok())
                     .unwrap_or(0);
-                let requested: f64 = param("volume")
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(0.0);
+                let requested: f64 = param("volume").and_then(|v| v.parse().ok()).unwrap_or(0.0);
                 let mut inner = self.inner.lock().await;
                 let Some(index) = inner.positions.iter().position(|p| p.ticket == ticket) else {
                     return Ok(EaResponse {
@@ -695,7 +689,12 @@ impl FakeTerminal {
                     order_ticket: deal_ticket - 1,
                     position_ticket: position.ticket,
                     symbol: position.symbol.clone(),
-                    side: if position.side == "buy" { "sell" } else { "buy" }.into(),
+                    side: if position.side == "buy" {
+                        "sell"
+                    } else {
+                        "buy"
+                    }
+                    .into(),
                     volume,
                     price: close_price,
                     profit,
@@ -747,7 +746,12 @@ impl FakeTerminal {
                         order_ticket: deal_ticket - 1,
                         position_ticket: position.ticket,
                         symbol: position.symbol.clone(),
-                        side: if position.side == "buy" { "sell" } else { "buy" }.into(),
+                        side: if position.side == "buy" {
+                            "sell"
+                        } else {
+                            "buy"
+                        }
+                        .into(),
                         volume: position.volume,
                         price: close_price,
                         profit: 0.0,

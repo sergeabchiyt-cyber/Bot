@@ -325,7 +325,11 @@ impl EaLink {
             hello_info.mode,
             hello_info.build,
             hello_info.ea_version,
-            if write_enabled { "enabled" } else { "read-only" }
+            if write_enabled {
+                "enabled"
+            } else {
+                "read-only"
+            }
         );
 
         // ---- 2. Register (replacing any previous session) ------------------
@@ -507,9 +511,7 @@ impl EaLink {
             EaKind::Hb => {
                 let hb = HeartbeatInfo {
                     login: message.get_i64("login").unwrap_or(0),
-                    mode: message
-                        .get_str("mode")
-                        .unwrap_or_else(|| "unknown".into()),
+                    mode: message.get_str("mode").unwrap_or_else(|| "unknown".into()),
                     connected: message.get_bool("connected").unwrap_or(false),
                     trade_allowed: message.get_bool("trade_allowed").unwrap_or(false),
                     ea_ts: message.get_i64("ts").unwrap_or(0),
@@ -694,8 +696,9 @@ mod tests {
     fn list_responses_accumulate_items_until_end() {
         // Mirrors the dispatch logic without needing a socket.
         let mut accumulated = EaResponse::default();
-        let resp_fields: BTreeMap<String, String> =
-            [("count".to_string(), "2".to_string())].into_iter().collect();
+        let resp_fields: BTreeMap<String, String> = [("count".to_string(), "2".to_string())]
+            .into_iter()
+            .collect();
         accumulated.fields = resp_fields;
         let expected: usize = accumulated
             .fields

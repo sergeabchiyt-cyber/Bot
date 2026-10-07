@@ -1,6 +1,6 @@
-# Rust (engine + Node 3 + bridge)
+# Rust (Node 4 execution service + MT5 bridge)
 target/
-node3-execution/target/
+node4-execution/target/
 mt5-bridge/target/
 
 # Python (tooling)
@@ -16,26 +16,23 @@ __pycache__/
 # Environment
 .env
 .env.local
-node3-execution/.env
+node4-execution/.env
 
 # Logs and runtime artifacts
 *.log
 *.err
 build-errors.log
 build-test-errors.log
-node3-errors.log
-node3-test-errors.log
+node4-errors.log
+node4-test-errors.log
+node4-clippy-errors.log
+node4-fmt-errors.log
 mt5-bridge-errors.log
 mt5-bridge-test-errors.log
-node3.log
-node3.err
-learner_state.json
+node4.log
+node4.err
 mt5-bridge/data/
 
-# Model checkpoints and weights (downloaded on the VM, persisted there)
-models/
-node3-ai/models/
-*.onnx
 
 # Testing & coverage
 .pytest_cache/

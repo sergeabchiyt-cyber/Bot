@@ -1,12 +1,9 @@
 [package]
-name = "mt5-bridge"
-version = "0.1.0"
+name = "xauusd-node4-execution"
+version = "1.0.0"
+description = "Node 4 execution service: authenticated Node 3 intent consumer with durable idempotency, venue policy, and the Deriv / Chelsea / MT5 execution paths"
 edition = "2021"
-description = "Deriv MT5 demo execution bridge: terminal-side order routing for Node 4 (demo-only)"
-publish = false
 
-# Same dependency set as `node4-execution` so both crates build in the same CI
-# image and share one dependency cache.
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = { version = "0.26", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
@@ -14,10 +11,13 @@ futures-util = "0.3"
 http = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 
 [dev-dependencies]
+# `tokio::time::pause` for the expiry tests; the default-feature set already
+# includes everything the service itself uses.
 tokio = { version = "1", features = ["full", "test-util"] }

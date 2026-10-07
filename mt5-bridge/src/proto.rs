@@ -145,7 +145,10 @@ impl EaMessage {
     pub fn get_i64(&self, key: &str) -> Option<i64> {
         self.get(key)
             .and_then(|v| v.parse::<i64>().ok())
-            .or_else(|| self.get(key).and_then(|v| v.parse::<f64>().ok().map(|f| f as i64)))
+            .or_else(|| {
+                self.get(key)
+                    .and_then(|v| v.parse::<f64>().ok().map(|f| f as i64))
+            })
     }
 
     pub fn get_u64(&self, key: &str) -> Option<u64> {
@@ -153,12 +156,8 @@ impl EaMessage {
     }
 
     pub fn get_bool(&self, key: &str) -> Option<bool> {
-        self.get(key).map(|v| {
-            matches!(
-                v.to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "ok"
-            )
-        })
+        self.get(key)
+            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "ok"))
     }
 }
 
@@ -305,7 +304,8 @@ mod tests {
         assert_eq!(hello.get("mode"), Some("demo"));
         assert_eq!(hello.get_i64("login"), Some(123_456));
 
-        let hb = parse_line("HB mode=demo connected=1 trade_allowed=1 login=123456 ts=1700").unwrap();
+        let hb =
+            parse_line("HB mode=demo connected=1 trade_allowed=1 login=123456 ts=1700").unwrap();
         assert_eq!(hb.kind, EaKind::Hb);
         assert_eq!(hb.get_bool("connected"), Some(true));
         assert_eq!(hb.get_bool("trade_allowed"), Some(true));

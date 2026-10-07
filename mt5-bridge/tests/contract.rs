@@ -2,7 +2,7 @@
 //! end-to-end against a fake MT5 terminal.
 //!
 //! ```text
-//!   Node 3 command ──> Bridge ──> TerminalTransport ──> fake terminal
+//!   Node 4 command ──> Bridge ──> TerminalTransport ──> fake terminal
 //!                       │                                  │
 //!                       └────────── OrderOutcome <──────────┘
 //! ```
@@ -31,8 +31,8 @@ fn base_config(history_path: &str) -> BridgeConfig {
     let mut symbol_map = std::collections::BTreeMap::new();
     symbol_map.insert("XAUUSD".to_string(), "XAUUSD.a".to_string());
     BridgeConfig {
-        node3_ws_url: "ws://127.0.0.1:9/ws".into(),
-        node3_token: Some("test-bridge-token".into()),
+        node4_ws_url: "ws://127.0.0.1:9/ws".into(),
+        node4_token: Some("test-bridge-token".into()),
         ea_bind_addr: "127.0.0.1".into(),
         ea_port: 0,
         ea_token: Some("test-ea-token".into()),
@@ -310,7 +310,11 @@ async fn real_account_is_refused_and_halts_the_bridge() {
 #[tokio::test]
 async fn account_mode_change_mid_session_halts_trading() {
     let h = harness("modechange").await;
-    assert!(h.bridge.place_order(intent("m1", "buy")).await.is_confirmed_fill());
+    assert!(h
+        .bridge
+        .place_order(intent("m1", "buy"))
+        .await
+        .is_confirmed_fill());
     assert!(!h.bridge.control().is_halted().await);
 
     // Terminal flips to a real account: the heartbeat handler must halt.
@@ -331,7 +335,11 @@ async fn account_mode_change_mid_session_halts_trading() {
 
     let outcome = h.bridge.place_order(intent("m2", "buy")).await;
     assert_eq!(outcome.status, "rejected");
-    assert_eq!(h.fake.order_send_count().await, 1, "the second order must not send");
+    assert_eq!(
+        h.fake.order_send_count().await,
+        1,
+        "the second order must not send"
+    );
 
     h.cleanup();
 }
@@ -381,7 +389,11 @@ async fn missing_or_read_only_ea_link_fails_closed() {
 #[tokio::test]
 async fn halt_refuses_new_orders_and_flatten_closes_positions() {
     let h = harness("halt").await;
-    assert!(h.bridge.place_order(intent("h1", "buy")).await.is_confirmed_fill());
+    assert!(h
+        .bridge
+        .place_order(intent("h1", "buy"))
+        .await
+        .is_confirmed_fill());
     assert_eq!(h.fake.positions().await.len(), 1);
 
     // Soft halt: no orders, positions stay.
@@ -400,7 +412,11 @@ async fn halt_refuses_new_orders_and_flatten_closes_positions() {
     // Resume re-verifies (demo + connected + writable) and clears the halt.
     h.bridge.resume().await.expect("resume should succeed");
     assert!(!h.bridge.control().is_halted().await);
-    assert!(h.bridge.place_order(intent("h3", "buy")).await.is_confirmed_fill());
+    assert!(h
+        .bridge
+        .place_order(intent("h3", "buy"))
+        .await
+        .is_confirmed_fill());
 
     h.cleanup();
 }
@@ -496,7 +512,8 @@ async fn symbol_mapping_is_explicit_and_suffixes_are_never_guessed() {
 #[tokio::test]
 async fn partial_fill_reports_the_broker_reported_volume() {
     let fake = FakeTerminal::demo();
-    fake.set_order_mode(OrderMode::Partial { volume: 0.01 }).await;
+    fake.set_order_mode(OrderMode::Partial { volume: 0.01 })
+        .await;
     let h = harness_with(fake, FakeLink::connected_demo(), "partial").await;
 
     // The strategy asks for 0.05; the broker only fills 0.01 of it.
@@ -594,7 +611,7 @@ async fn closed_deals_persist_and_history_pages_by_cursor() {
     assert_eq!(next.count, 0);
     assert!(next.complete);
 
-    // A Node 3 restart is simulated by re-reading the same file.
+    // A Node 4 restart is simulated by re-reading the same file.
     let reopened = HistoryStore::open(&h.history_path).await.unwrap();
     assert_eq!(reopened.deal_count().await, first.count);
 

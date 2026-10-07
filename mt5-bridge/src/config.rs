@@ -9,10 +9,10 @@
 //! * `MT5_LOGIN` / `MT5_PASSWORD` — the **broker account** credential. The
 //!   terminal is already logged in; the bridge uses `MT5_LOGIN` only to assert
 //!   that the terminal it is talking to is the expected account. `MT5_PASSWORD`
-//!   is never transmitted to Node 3, the browser, or the EA link; it is only
+//!   is never transmitted to Node 4, the browser, or the EA link; it is only
 //!   validated for presence so a half-configured deployment fails at startup.
 //! * `MT5_BRIDGE_TOKEN` / `MT5_EA_TOKEN` — **service** credentials for the
-//!   bridge's two links (Node 3 ⇄ bridge over WSS, EA ⇄ bridge over loopback
+//!   bridge's two links (Node 4 ⇄ bridge over WSS, EA ⇄ bridge over loopback
 //!   TCP). They are not the MT5 account password.
 
 use std::collections::BTreeMap;
@@ -76,11 +76,11 @@ pub fn env_truthy(key: &str) -> bool {
 /// An EA method that is only reachable when the EA link is authenticated.
 #[derive(Clone, Debug)]
 pub struct BridgeConfig {
-    /// Node 3 WebSocket endpoint the bridge dials **out** to, e.g.
+    /// Node 4 WebSocket endpoint the bridge dials **out** to, e.g.
     /// `wss://execution-southeastasia-sng-main.onrender.com/ws`.
-    pub node3_ws_url: String,
-    /// `MT5_BRIDGE_TOKEN`: shared secret Node 3 validates on `bridge_hello`.
-    pub node3_token: Option<String>,
+    pub node4_ws_url: String,
+    /// `MT5_BRIDGE_TOKEN`: shared secret Node 4 validates on `bridge_hello`.
+    pub node4_token: Option<String>,
     /// Loopback address the bridge listens on for the EA (`MQL5` sockets are
     /// client-only, so the EA dials in).
     pub ea_bind_addr: String,
@@ -92,13 +92,13 @@ pub struct BridgeConfig {
     pub expected_login: Option<i64>,
     /// True when `MT5_PASSWORD` is present (informational/validation only).
     pub account_password_set: bool,
-    /// `MT5_SYMBOL`: the instrument Node 3 asks for (strategy symbol).
+    /// `MT5_SYMBOL`: the instrument Node 4 asks for (strategy symbol).
     pub requested_symbol: String,
     /// `MT5_SYMBOL_MAP`: explicit requested→broker symbol mapping only
     /// (`XAUUSD=XAUUSD.a`). No suffix guessing happens anywhere.
     pub symbol_map: BTreeMap<String, String>,
-    /// `MT5_VOLUME_LOTS`: fallback volume when Node 3 does not send one.
-    /// Node 3's `ORDER_SIZE` is a **USD options stake** and is never used as an
+    /// `MT5_VOLUME_LOTS`: fallback volume when Node 4 does not send one.
+    /// Node 4's `ORDER_SIZE` is a **USD options stake** and is never used as an
     /// MT5 lot size.
     pub default_volume_lots: f64,
     /// `MT5_ORDER_TIMEOUT_MS`: how long to wait for a broker fill before the
@@ -114,12 +114,12 @@ pub struct BridgeConfig {
     pub history_file: PathBuf,
     /// `MT5_HISTORY_PAGE_SIZE`: deals per history page.
     pub history_page_size: usize,
-    /// `MT5_PUSH_INTERVAL_MS`: snapshot push cadence to Node 3.
+    /// `MT5_PUSH_INTERVAL_MS`: snapshot push cadence to Node 4.
     pub push_interval_ms: u64,
     /// `MT5_MAX_DEVIATION_POINTS`: slippage the EA may accept.
     pub max_deviation_points: u32,
-    /// `MT5_MAGIC`: magic number stamped on every Node 3 order; used to
-    /// reconcile broker positions against Node 3's own trades.
+    /// `MT5_MAGIC`: magic number stamped on every Node 4 order; used to
+    /// reconcile broker positions against Node 4's own trades.
     pub magic: i64,
     /// `MT5_TRADING_ENABLED` (default true): set to `0` to start halted.
     pub trading_enabled_on_start: bool,
@@ -156,11 +156,11 @@ impl BridgeConfig {
         }
 
         Self {
-            node3_ws_url: env_str(
-                "NODE3_WS_URL",
-                "wss://execution-southeastasia-sng-main.onrender.com/ws",
+            node4_ws_url: env_str(
+                "NODE4_WS_URL",
+                "wss://execution-southeastasia-sng-main.onrender.com/mt5/bridge",
             ),
-            node3_token: env_opt("MT5_BRIDGE_TOKEN"),
+            node4_token: env_opt("MT5_BRIDGE_TOKEN"),
             ea_bind_addr: env_str("MT5_EA_BIND_ADDR", "127.0.0.1"),
             ea_port: env_u16("MT5_EA_PORT", 5055),
             ea_token: env_opt("MT5_EA_TOKEN"),
@@ -175,10 +175,7 @@ impl BridgeConfig {
             request_timeout_ms: env_u64("MT5_REQUEST_TIMEOUT_MS", 5_000),
             account_max_age_ms: env_u64("MT5_ACCOUNT_MAX_AGE_MS", 5_000),
             max_quote_age_ms: env_u64("MT5_MAX_QUOTE_AGE_MS", 3_000),
-            history_file: PathBuf::from(env_str(
-                "MT5_HISTORY_FILE",
-                "data/mt5_history.jsonl",
-            )),
+            history_file: PathBuf::from(env_str("MT5_HISTORY_FILE", "data/mt5_history.jsonl")),
             history_page_size: env_u64("MT5_HISTORY_PAGE_SIZE", 100) as usize,
             push_interval_ms: env_u64("MT5_PUSH_INTERVAL_MS", 2_000),
             max_deviation_points: env_u64("MT5_MAX_DEVIATION_POINTS", 20) as u32,
@@ -251,16 +248,16 @@ impl BridgeConfig {
     pub fn validate(&self) -> Vec<String> {
         let mut errors = Vec::new();
 
-        let url = self.node3_ws_url.trim();
+        let url = self.node4_ws_url.trim();
         if !(url.starts_with("wss://") || url.starts_with("ws://")) {
             errors.push(format!(
-                "NODE3_WS_URL must be a ws:// or wss:// URL, got '{url}'"
+                "NODE4_WS_URL must be a ws:// or wss:// URL, got '{url}'"
             ));
         }
-        if self.node3_token.is_none() {
+        if self.node4_token.is_none() {
             errors.push(
-                "MT5_BRIDGE_TOKEN is not set — Node 3 would reject the bridge handshake; \
-                 set the same value in Node 3's MT5_BRIDGE_TOKEN"
+                "MT5_BRIDGE_TOKEN is not set — Node 4 would reject the bridge handshake; \
+                 set the same value in Node 4's MT5_BRIDGE_TOKEN"
                     .into(),
             );
         }
@@ -308,7 +305,8 @@ impl BridgeConfig {
             ));
         }
         if let Ok(expected) = env::var("MT5_EXPECT_ACCOUNT_TYPE") {
-            if !expected.trim().is_empty() && expected.trim().to_ascii_lowercase() != EXPECTED_ACCOUNT_TYPE
+            if !expected.trim().is_empty()
+                && expected.trim().to_ascii_lowercase() != EXPECTED_ACCOUNT_TYPE
             {
                 errors.push(format!(
                     "MT5_EXPECT_ACCOUNT_TYPE='{}' is not supported: this bridge executes on \
@@ -327,8 +325,8 @@ mod tests {
 
     fn base() -> BridgeConfig {
         BridgeConfig {
-            node3_ws_url: "wss://example.invalid/ws".into(),
-            node3_token: Some("bridge-token".into()),
+            node4_ws_url: "wss://example.invalid/ws".into(),
+            node4_token: Some("bridge-token".into()),
             ea_bind_addr: "127.0.0.1".into(),
             ea_port: 5055,
             ea_token: Some("ea-token".into()),
@@ -359,9 +357,9 @@ mod tests {
     }
 
     #[test]
-    fn missing_node3_token_is_a_hard_error() {
+    fn missing_node4_token_is_a_hard_error() {
         let mut cfg = base();
-        cfg.node3_token = None;
+        cfg.node4_token = None;
         let errors = cfg.validate();
         assert!(errors.iter().any(|e| e.contains("MT5_BRIDGE_TOKEN")));
     }
@@ -413,9 +411,7 @@ mod tests {
         assert!(err.contains("MT5_SYMBOL_MAP"));
 
         let mut mapped = base();
-        mapped
-            .symbol_map
-            .insert("XAUUSD".into(), "XAUUSD.a".into());
+        mapped.symbol_map.insert("XAUUSD".into(), "XAUUSD.a".into());
         assert_eq!(
             mapped.resolve_symbol("XAUUSD", &available).unwrap(),
             "XAUUSD.a"

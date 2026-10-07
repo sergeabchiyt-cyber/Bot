@@ -1,5 +1,14 @@
 name: build
 
+# Node 4 is the only application in this repository: the execution service
+# (`node4-execution`) plus its MT5 demo bridge (`mt5-bridge`), which runs next to
+# the terminal and dials out to Node 4. There is no market-data engine or
+# strategy crate here, so this workflow builds and tests exactly those two
+# crates and lints the bridge's EA ⇄ bridge ⇄ Node 4 protocol.
+#
+# On failure the relevant log is pushed back to the branch so the error is
+# readable without the Actions tab.
+
 on:
   push:
     branches: ["**"]
@@ -9,96 +18,21 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.94.0"
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Check
-        id: check
-        run: |
-          set -o pipefail
-          cargo check --all-targets 2>&1 | tee /tmp/check.log
-
-      - name: Save error log to branch
-        if: failure() && steps.check.outcome == 'failure'
-        run: |
-          git config user.email ci@example.invalid
-          git config user.name ci
-          git fetch origin ${{ github.ref_name }}
-          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
-          tail -c 60000 /tmp/check.log > build-errors.log
-          git add -f build-errors.log
-          git commit -m "ci: build error log [skip ci]"
-          git push origin ${{ github.ref_name }}
-
-      # Proof 1 — PS rolls at every 18:00 NY session close (deterministic tests).
-      # Proof 2 — calendar parsing is correct (fixture tests).
-      - name: Unit tests
-        run: |
-          set -o pipefail
-          cargo test --all-targets -- --nocapture 2>&1 | tee /tmp/unit.log
-
-      # Proof 2 (live) — the real ForexFactory feed returns parseable events.
-      - name: Live calendar feed test
-        run: |
-          set -o pipefail
-          cargo test --all-targets -- --ignored --nocapture 2>&1 | tee /tmp/live.log
-
-      - name: Build
-        run: cargo build --release
-
-      - name: Smoke test (boot + /levels + /calendar against the live process)
-        id: smoke
-        run: |
-          set -o pipefail
-          bash ci/smoke.sh 2>&1 | tee /tmp/proof.log
-
-      - name: Publish proof log to branch
-        if: always()
-        run: |
-          git config user.email ci@example.invalid
-          git config user.name ci
-          git fetch origin ${{ github.ref_name }}
-          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
-          mkdir -p ci
-          {
-            echo "# CI proof — run ${{ github.run_id }}"
-            echo "commit: ${{ github.sha }}"
-            echo "generated: $(date -u +%FT%TZ)"
-            echo
-            echo '## Unit tests'
-            cat /tmp/unit.log 2>/dev/null || echo "(missing)"
-            echo
-            echo '## Live calendar feed test'
-            cat /tmp/live.log 2>/dev/null || echo "(missing)"
-            echo
-            echo '## Runtime smoke test'
-            cat /tmp/proof.log 2>/dev/null || echo "(missing)"
-          } | sed -r 's/\x1b\[[0-9;]*m//g' > ci/PROOF.md
-          git add ci/PROOF.md
-          git diff --cached --quiet || git commit -m "ci: proof log [skip ci]"
-          git push origin ${{ github.ref_name }}
-
-  # Node 3 is its own crate (node3-execution/), so it gets its own check/test
-  # cycle; the base `build` job above covers the engine crate at the root.
-  node3:
+  # The execution service: check, fmt, clippy (-D warnings), tests, release.
+  node4:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: node3-execution
+        working-directory: node4-execution
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.94.0"
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "node3-execution -> target"
+          workspaces: "node4-execution -> target"
 
       - name: Check
         id: check
@@ -114,9 +48,47 @@ jobs:
           git config user.name ci
           git fetch origin ${{ github.ref_name }}
           git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
-          tail -c 400000 /tmp/check.log > node3-errors.log
-          git add -f node3-errors.log
-          git commit -m "ci: node3 build error log [skip ci]"
+          tail -c 400000 /tmp/check.log > node4-errors.log
+          git add -f node4-errors.log
+          git commit -m "ci: node4 build error log [skip ci]"
+          git push origin ${{ github.ref_name }}
+
+      - name: Format check
+        id: fmt
+        run: |
+          set -o pipefail
+          cargo fmt --all -- --check 2>&1 | tee /tmp/fmt.log
+
+      - name: Save format log to branch
+        if: failure() && steps.fmt.outcome == 'failure'
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          tail -c 400000 /tmp/fmt.log > node4-fmt-errors.log
+          git add -f node4-fmt-errors.log
+          git commit -m "ci: node4 fmt log [skip ci]"
+          git push origin ${{ github.ref_name }}
+
+      - name: Clippy
+        id: clippy
+        run: |
+          set -o pipefail
+          cargo clippy --all-targets -- -D warnings 2>&1 | tee /tmp/clippy.log
+
+      - name: Save clippy log to branch
+        if: failure() && steps.clippy.outcome == 'failure'
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          tail -c 400000 /tmp/clippy.log > node4-clippy-errors.log
+          git add -f node4-clippy-errors.log
+          git commit -m "ci: node4 clippy log [skip ci]"
           git push origin ${{ github.ref_name }}
 
       - name: Unit tests
@@ -133,17 +105,39 @@ jobs:
           git config user.name ci
           git fetch origin ${{ github.ref_name }}
           git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
-          tail -c 400000 /tmp/unit.log > node3-test-errors.log
-          git add -f node3-test-errors.log
-          git commit -m "ci: node3 test log [skip ci]"
+          tail -c 400000 /tmp/unit.log > node4-test-errors.log
+          git add -f node4-test-errors.log
+          git commit -m "ci: node4 test log [skip ci]"
           git push origin ${{ github.ref_name }}
+
+      - name: Clear stale error logs
+        # A green job leaves no error log behind; the writeback steps above only
+        # run on failure, so this removes whatever an earlier red run committed.
+        if: success()
+        continue-on-error: true
+        working-directory: ${{ github.workspace }}
+        run: |
+          removed=0
+          for f in node4-errors.log node4-fmt-errors.log node4-clippy-errors.log node4-test-errors.log; do
+            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+              git rm -q "$f"
+              removed=1
+            fi
+          done
+          if [ "$removed" = "1" ]; then
+            git config user.email ci@example.invalid
+            git config user.name ci
+            git commit -m "ci: clear stale node4 logs [skip ci]"
+            git fetch origin ${{ github.ref_name }}
+            git push origin HEAD:${{ github.ref_name }}
+          fi
 
       - name: Build release
         run: cargo build --release
 
-  # The MT5 demo bridge is a separate crate (it runs next to the MT5 terminal,
-  # not on the Node 3 host), so it gets its own check/test cycle. It is a real
-  # job, not documentation: it must compile and its contract tests must pass.
+  # The MT5 demo bridge runs on the terminal host, not on the Node 4 host, but it
+  # is part of this service's execution surface and must keep compiling, passing
+  # its fake-terminal contract tests, and agreeing with the EA protocol.
   bridge:
     runs-on: ubuntu-latest
     defaults:
@@ -158,7 +152,7 @@ jobs:
         with:
           workspaces: "mt5-bridge -> target"
 
-      - name: Protocol lint (EA ⇄ bridge ⇄ Node 3)
+      - name: Protocol lint (EA ⇄ bridge ⇄ Node 4)
         working-directory: ${{ github.workspace }}
         run: python3 ci/mt5/protocol_lint.py
 
@@ -199,6 +193,28 @@ jobs:
           git add -f mt5-bridge-test-errors.log
           git commit -m "ci: mt5-bridge test log [skip ci]"
           git push origin ${{ github.ref_name }}
+
+      - name: Clear stale error logs
+        # A green job leaves no error log behind; the writeback steps above only
+        # run on failure, so this removes whatever an earlier red run committed.
+        if: success()
+        continue-on-error: true
+        working-directory: ${{ github.workspace }}
+        run: |
+          removed=0
+          for f in mt5-bridge-errors.log mt5-bridge-test-errors.log; do
+            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+              git rm -q "$f"
+              removed=1
+            fi
+          done
+          if [ "$removed" = "1" ]; then
+            git config user.email ci@example.invalid
+            git config user.name ci
+            git commit -m "ci: clear stale mt5-bridge logs [skip ci]"
+            git fetch origin ${{ github.ref_name }}
+            git push origin HEAD:${{ github.ref_name }}
+          fi
 
       - name: Build release
         run: cargo build --release

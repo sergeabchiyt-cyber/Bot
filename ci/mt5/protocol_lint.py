@@ -5,11 +5,11 @@ The bridge protocol exists in three places that drift independently:
 
   1. ``mt5-bridge/src/proto.rs``      — EA ⇄ bridge line protocol (Rust side)
   2. ``mt5-bridge/mql5/Mt5BridgeEA.mq5`` — EA ⇄ bridge line protocol (MQL5 side)
-  3. ``mt5-bridge/src/snapshot.rs``   — bridge ⇄ Node 3 JSON contract
-     ``node3-execution/src/types.rs`` — the Node 3 mirror of that contract
+  3. ``mt5-bridge/src/snapshot.rs``   — bridge ⇄ Node 4 JSON contract
+     ``node4-execution/src/types.rs`` — the execution-side mirror of that contract
 
 A mismatch in any of them is a silent failure at runtime: a parameter the EA
-never reads, a response field nobody sets, a frame Node 3 parses as
+never reads, a response field nobody sets, a frame Node 4 parses as
 ``Unknown``, or a snapshot field that is always ``null``. None of that is
 visible to a compiler, so CI runs this script instead.
 
@@ -51,6 +51,44 @@ def strip_rust_tests(source: str) -> str:
     """
     marker = source.find("#[cfg(test)]")
     return source if marker < 0 else source[:marker]
+
+
+def rust_string_literals(source: str) -> set[str]:
+    """Every string literal in a Rust source, comments ignored.
+
+    The bridge writes its event names as plain string literals, and ``rustfmt``
+    is free to reflow the surrounding code (a name may end up on its own line,
+    inside a tuple, or behind `.into()`). Match the literals themselves rather
+    than any particular layout.
+    """
+    literals: set[str] = set()
+    i = 0
+    n = len(source)
+    while i < n:
+        ch = source[i]
+        if ch == "/" and i + 1 < n and source[i + 1] == "/":
+            newline = source.find("\n", i)
+            if newline < 0:
+                break
+            i = newline
+        elif ch == "/" and i + 1 < n and source[i + 1] == "*":
+            end = source.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+        elif ch == '"':
+            i += 1
+            buf: list[str] = []
+            while i < n and source[i] != '"':
+                if source[i] == "\\" and i + 1 < n:
+                    buf.append(source[i + 1])
+                    i += 2
+                    continue
+                buf.append(source[i])
+                i += 1
+            i += 1
+            literals.add("".join(buf))
+        else:
+            i += 1
+    return literals
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +163,7 @@ def ea_response_fields(ea_src: str) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
-# 4. Bridge ⇄ Node 3 struct field parity
+# 4. Bridge ⇄ Node 4 struct field parity
 # ---------------------------------------------------------------------------
 def struct_fields(source: str, struct_name: str) -> list[str] | None:
     match = re.search(
@@ -205,7 +243,7 @@ def enum_variant_names(source: str, enum_name: str) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
-# 5. Node 3 REST/WS key expectations
+# 5. Node 4 REST/WS key expectations
 # ---------------------------------------------------------------------------
 def ws_frame_renames(source: str) -> set[str]:
     return set(re.findall(r'#\[serde\(rename = "([a-z_0-9]+)"\)\]', source))
@@ -214,13 +252,16 @@ def ws_frame_renames(source: str) -> set[str]:
 def documented_bridge_events(bridge_dir, docs_dir) -> int:
     """Every `bridge_event` name the frontend doc promises must actually exist.
 
-    The bridge writes these names as string literals in node3.rs; if one is
+    The bridge writes these names as string literals in node4.rs; if one is
     renamed, the dashboard would silently never see that event again. The doc is
     the only place they are written down outside the Rust source.
     """
-    node3_src = read(Path(bridge_dir) / "src/node3.rs")
-    emitted = set(re.findall(r'"(\w+)"\.into\(\)', node3_src))
-    emitted |= set(re.findall(r'\n\s*"([a-z_]+)",\n', node3_src))
+    node4_src = strip_rust_tests(read(Path(bridge_dir) / "src/node4.rs"))
+    emitted = {
+        name
+        for name in rust_string_literals(node4_src)
+        if re.fullmatch(r"[a-z_][a-z_0-9]*", name)
+    }
 
     doc = read(Path(docs_dir) / "mt5" / "FRONTEND_RESOURCES.md")
     paragraph = ""
@@ -240,7 +281,7 @@ def documented_bridge_events(bridge_dir, docs_dir) -> int:
         if name not in emitted:
             error(
                 f"FRONTEND_RESOURCES.md documents bridge_event '{name}' but "
-                "mt5-bridge/src/node3.rs never emits it"
+                "mt5-bridge/src/node4.rs never emits it"
             )
     return checked
 
@@ -248,9 +289,9 @@ def documented_bridge_events(bridge_dir, docs_dir) -> int:
 def main() -> int:
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.cwd()
     bridge = root / "mt5-bridge"
-    node3 = root / "node3-execution"
-    if not bridge.exists() or not node3.exists():
-        print(f"error: expected {bridge} and {node3} to exist", file=sys.stderr)
+    node4 = root / "node4-execution"
+    if not bridge.exists() or not node4.exists():
+        print(f"error: expected {bridge} and {node4} to exist", file=sys.stderr)
         return 1
 
     proto_src = read(bridge / "src/proto.rs")
@@ -258,7 +299,7 @@ def main() -> int:
     terminal_src = strip_rust_tests(read(bridge / "src/terminal.rs"))
     bridge_src = strip_rust_tests(read(bridge / "src/bridge.rs"))
     ea_src = read(bridge / "mql5/Mt5BridgeEA.mq5")
-    types_src = read(node3 / "src/types.rs")
+    types_src = read(node4 / "src/types.rs")
 
     # --- 1. methods -------------------------------------------------------
     rust_methods = rust_ea_methods(proto_src)
@@ -314,14 +355,14 @@ def main() -> int:
             error(f"snapshot.rs is missing struct {name}")
             continue
         if node_fields is None:
-            error(f"node3-execution/src/types.rs is missing struct {name}")
+            error(f"node4-execution/src/types.rs is missing struct {name}")
             continue
         for field in sorted(set(bridge_fields) - set(node_fields)):
-            error(f"{name}.{field} exists in snapshot.rs but not in node3 types.rs")
+            error(f"{name}.{field} exists in snapshot.rs but not in node4 types.rs")
         for field in sorted(set(node_fields) - set(bridge_fields)):
-            error(f"{name}.{field} exists in node3 types.rs but not in snapshot.rs")
+            error(f"{name}.{field} exists in node4 types.rs but not in snapshot.rs")
 
-    # Node 3's MT5 order outcome is the bridge's OrderOutcome under a different
+    # Node 4's MT5 order outcome is the bridge's OrderOutcome under a different
     # name (the bridge does not know about TradeEvent).
     bridge_outcome = struct_fields(snapshot_src, "OrderOutcome")
     node_outcome = struct_fields(types_src, "Mt5OrderOutcome")
@@ -334,14 +375,14 @@ def main() -> int:
             error(f"Mt5OrderOutcome.{field} has no counterpart in OrderOutcome")
 
     # --- 5. frames --------------------------------------------------------
-    bridge_frames = enum_frame_names(snapshot_src, "BridgeToNode3") | enum_frame_names(
-        snapshot_src, "Node3ToBridge"
+    bridge_frames = enum_frame_names(snapshot_src, "BridgeToNode4") | enum_frame_names(
+        snapshot_src, "Node4ToBridge"
     )
     node_frames = ws_frame_renames(types_src)
     for frame in sorted(bridge_frames - node_frames):
-        error(f"frame '{frame}' is in the bridge contract but not a WsFrame variant in Node 3")
+        error(f"frame '{frame}' is in the bridge contract but not a WsFrame variant in Node 4")
     for frame in sorted(node_frames - bridge_frames):
-        # Frontend-only resources (levels, candle, trades, ...) are Node 3's own
+        # Frontend-only resources (levels, candle, trades, ...) are Node 4's own
         # vocabulary and are not expected on the bridge link.
         if frame.startswith(("bridge_", "mt5_")):
             warn(
@@ -349,14 +390,14 @@ def main() -> int:
                 f"in the bridge contract"
             )
 
-    # --- 6. every Node 3 command is actually dispatched -------------------
-    node3_src = strip_rust_tests(read(bridge / "src/node3.rs"))
-    commands = enum_variant_names(snapshot_src, "Node3ToBridge")
+    # --- 6. every Node 4 command is actually dispatched -------------------
+    node4_src = strip_rust_tests(read(bridge / "src/node4.rs"))
+    commands = enum_variant_names(snapshot_src, "Node4ToBridge")
     for command in sorted(commands):
-        if f"Node3ToBridge::{command}" not in node3_src:
+        if f"Node4ToBridge::{command}" not in node4_src:
             error(
-                f"Node 3 can send {camel_to_snake(command)} but mt5-bridge/src/node3.rs "
-                f"never matches Node3ToBridge::{command}"
+                f"Node 4 can send {camel_to_snake(command)} but mt5-bridge/src/node4.rs "
+                f"never matches Node4ToBridge::{command}"
             )
 
     # --- 7. documented bridge_event names --------------------------------
