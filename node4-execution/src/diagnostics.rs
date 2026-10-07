@@ -778,24 +778,24 @@ impl DiagnosticsHub {
 
     // ---- MT5 bridge state -------------------------------------------------
 
+    // The bridge link owns the state the bridge pushed; these read through it so
+    // each `/mt5/*` resource has exactly one source. (`DiagnosticsInner` keeps the
+    // copies the synchronous `/diagnostics` payload is built from.)
+
     pub async fn mt5_account_snapshot(&self) -> Mt5AccountSnapshot {
-        let inner = self.inner.read().await;
-        inner.mt5_account.clone()
+        self.mt5.account_snapshot().await
     }
 
     pub async fn mt5_positions_snapshot(&self) -> Mt5PositionsSnapshot {
-        let inner = self.inner.read().await;
-        inner.mt5_positions.clone()
+        self.mt5.positions_snapshot().await
     }
 
     pub async fn mt5_history_snapshot(&self) -> Mt5HistorySnapshot {
-        let inner = self.inner.read().await;
-        inner.mt5_history.clone()
+        self.mt5.history_snapshot().await
     }
 
     pub async fn mt5_status_snapshot(&self) -> Mt5BridgeStatus {
-        let inner = self.inner.read().await;
-        inner.mt5_status.clone()
+        self.mt5.status_snapshot().await
     }
 
     /// Apply a frame pushed by the bridge: update the display copies, then
