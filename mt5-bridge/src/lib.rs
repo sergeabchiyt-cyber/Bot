@@ -13,15 +13,15 @@
 //! | `ea_link` | loopback TCP server the terminal's EA dials into |
 //! | `terminal` | transport trait, typed client, validation/normalization |
 //! | `bridge` | order flow, idempotency, demo guard, halt, reconciliation, history |
-//! | `node3` | outbound WSS session to Node 3 (snapshots + commands) |
-//! | `snapshot` | wire schema shared with Node 3 |
+//! | `node4` | outbound WSS session to Node 4 (snapshots + commands) |
+//! | `snapshot` | wire schema shared with Node 4 |
 //! | `fake` | in-memory terminal for `MT5_SIM_TERMINAL=1` and tests |
 
 pub mod bridge;
 pub mod config;
 pub mod ea_link;
 pub mod fake;
-pub mod node3;
+pub mod node4;
 pub mod proto;
 pub mod snapshot;
 pub mod terminal;

@@ -23,7 +23,7 @@ Recorded by `.github/workflows/deriv-probe.yml` on 2026-10-06 16:54 UTC.
       - UPORDOWN    expiry=daily     barriers=2  duration=7d..365d market=commodities
       - ONETOUCH    expiry=daily     barriers=1  duration=1d..365d market=commodities
       - NOTOUCH     expiry=daily     barriers=1  duration=1d..365d market=commodities
-    raw entries Node 3 can trade intraday (all fields Deriv returns):
+    raw entries Node 4 can trade intraday (all fields Deriv returns):
       {"barrier": "+2.12", "barriers": 1, "contract_category": "callput", "contract_type": "CALL", "default_stake": 2, "expiry_type": "intraday", "market": "commodities", "max_contract_duration": "1d", "min_contract_duration": "5m", "sentiment": "up", "submarket": "metals", "underlying_symbol": "frxXAUUSD"}
       {"barrier": "+2.12", "barriers": 1, "contract_category": "callput", "contract_type": "PUT", "default_stake": 2, "expiry_type": "intraday", "market": "commodities", "max_contract_duration": "1d", "min_contract_duration": "5m", "sentiment": "down", "submarket": "metals", "underlying_symbol": "frxXAUUSD"}
     proposal sweep at stake 0.5 USD, 5m:

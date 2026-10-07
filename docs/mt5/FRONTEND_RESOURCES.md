@@ -4,13 +4,13 @@ Concrete wire contract for the Deriv MT5 **demo** venue, so the dashboard can be
 built without waiting for `FRONTEND_HANDOFF.md` (which is **not** in this
 repository — see the note at the bottom).
 
-Everything here is served by Node 3 (`https://execution-southeastasia-sng-main.onrender.com`,
+Everything here is served by Node 4 (`https://execution-southeastasia-sng-main.onrender.com`,
 `PORT=10000`). Nothing here talks to the bridge or the terminal directly: the
 browser must never be given MT5 credentials, and there is no public bridge port
 by design.
 
 The field names below are the authoritative ones: they are generated from
-`node3-execution/src/types.rs`, which CI
+`node4-execution/src/types.rs`, which CI
 (`ci/mt5/protocol_lint.py`) keeps in sync with `mt5-bridge/src/snapshot.rs`.
 
 ---
@@ -59,8 +59,8 @@ UI rules that the backend already enforces, so the dashboard can mirror them:
 
 | Field state | Meaning for the operator |
 |---|---|
-| `configured=false` | `MT5_BRIDGE_TOKEN` is not set on Node 3 — the MT5 venue is off. `error` names the missing variable. |
-| `configured=true, connected=false` | The bridge has not dialled in. `setup_hint` explains where to look (bridge process, `NODE3_WS_URL`, token). |
+| `configured=false` | `MT5_BRIDGE_TOKEN` is not set on Node 4 — the MT5 venue is off. `error` names the missing variable. |
+| `configured=true, connected=false` | The bridge has not dialled in. `setup_hint` explains where to look (bridge process, `NODE4_WS_URL`, token). |
 | `connected=true, authorized=false` | The bridge is up but must not trade (EA link down, demo guard failed, login mismatch). Show `error`. |
 | `account_type != "demo"` | The terminal is **not** a demo account. Trading is refused everywhere; this must be red. |
 | `halted=true` | Kill switch is engaged; `halt_reason` says why (`operator`, `ea_disconnect`, `demo_guard`, …). |
@@ -102,8 +102,8 @@ UI rules that the backend already enforces, so the dashboard can mirror them:
 
 These are **broker** positions (MT5 tickets), not strategy simulations. On
 `GET /open-trades` they also appear as `mt5_open_positions` / `mt5_open_count`,
-next to `node3_open_trades` and `deriv_open_trades`, so the two must stay visually
-distinct: a Node 3 trade is only real when a matching MT5 ticket exists.
+next to `node4_open_trades` and `deriv_open_trades`, so the two must stay visually
+distinct: a Node 4 trade is only real when a matching MT5 ticket exists.
 
 ### `GET /mt5/history` → `Mt5HistorySnapshot`
 
@@ -141,7 +141,7 @@ distinct: a Node 3 trade is only real when a matching MT5 ticket exists.
 
 `entry` is `in` | `out` | `inout`; `reason` is `client`, `expert`, `sl`, `tp`, … —
 both symbolic, no raw MT5 enums. History is mirrored from the broker into an
-append-only store on the MT5 host, so it survives restarts of Node 3 **and** the
+append-only store on the MT5 host, so it survives restarts of Node 4 **and** the
 bridge.
 
 ### `GET /mt5/status` → `Mt5BridgeStatus`
@@ -153,7 +153,7 @@ bridge.
   "authorized": true,
   "protocol": 1,
   "bridge_version": "0.1.0",
-  "node3_url": "wss://execution-southeastasia-sng-main.onrender.com/ws",
+  "node4_url": "wss://execution-southeastasia-sng-main.onrender.com/ws",
   "ea_connected": true,
   "ea_write_enabled": true,
   "ea_mode": "demo",
@@ -181,7 +181,7 @@ open — surface them, do not hide them.
 
 ### `POST /mt5/control` (operator kill switch)
 
-Header `X-Control-Token: <MT5_CONTROL_TOKEN>`. **403 unless Node 3 has
+Header `X-Control-Token: <MT5_CONTROL_TOKEN>`. **403 unless Node 4 has
 `MT5_CONTROL_TOKEN` set**, so the endpoint is dead by default. There is
 deliberately no unauthenticated way to flatten an account.
 
@@ -209,7 +209,7 @@ connected. Body shape: `{"ok":false,"error":{"code":"...","message":"..."}}`.
 
 ---
 
-## 2. WebSocket (`wss://…/ws`)
+## 2. WebSocket (`wss://…/ws` for frontends)
 
 All MT5 frames use the same envelope as the rest of the stream:
 `{"type": "<name>", "data": { … }}`.
@@ -254,13 +254,13 @@ forwarded to browser clients, whatever they subscribe to.
 
 ## 3. What is *not* exposed
 
-* `MT5_LOGIN`, `MT5_PASSWORD`, `MT5_EA_TOKEN` never reach Node 3, any REST
+* `MT5_LOGIN`, `MT5_PASSWORD`, `MT5_EA_TOKEN` never reach Node 4, any REST
   response or any WebSocket frame.
-* There is no endpoint that places an order. Orders are only placed by the
-  strategy; the operator's lever is halt/resume/close.
-* The bridge has no public port: it dials out to Node 3, so there is nothing to
+* There is no endpoint that places an order. Orders are only placed by Node 4
+  when Node 3 sends an intent; the operator's lever is halt/resume/close.
+* The bridge has no public port: it dials out to Node 4, so there is nothing to
   firewall off except the loopback EA link on the MT5 host.
 
 > If a `FRONTEND_HANDOFF.md` ever lands in this repository with different field
 > names, change `Mt5*` structs in **both** `mt5-bridge/src/snapshot.rs` and
-> `node3-execution/src/types.rs` — CI's protocol lint fails otherwise.
+> `node4-execution/src/types.rs` — CI's protocol lint fails otherwise.

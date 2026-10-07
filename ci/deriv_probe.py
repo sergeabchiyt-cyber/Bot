@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Probe Deriv's Options API for the contract shapes Node 3 can actually trade.
+"""Probe Deriv's Options API for the contract shapes Node 4 can actually trade.
 
 This exists because of a production failure:
 
-    ERROR xauusd_node3_execution: Trade execution failed: Deriv proposal error:
+    ERROR xauusd_node4_execution: Trade execution failed: Deriv proposal error:
     {"code":"ContractBuyValidationError","message":"Invalid barrier.","subcode":"InvalidBarrier"}
 
-Node 3 used to derive a ``barrier`` from ``|tp - sl| / 2`` and send it with every
+Node 4 used to derive a ``barrier`` from ``|tp - sl| / 2`` and send it with every
 proposal. The probe records, straight from Deriv, everything needed to send a
 shape Deriv accepts:
 
@@ -21,9 +21,9 @@ It talks to two endpoints:
 
 * the public WebSocket of the *current* API
   (``wss://api.derivws.com/trading/v1/options/ws/public``) - the same wire
-  schema as the OTP sockets Node 3 trades on, no token required;
+  schema as the OTP sockets Node 4 trades on, no token required;
 * the legacy ``/websockets/v3`` public endpoint with Deriv's official test
-  ``app_id`` (1089), which is the failover flow Node 3 keeps for ``a1-...``
+  ``app_id`` (1089), which is the failover flow Node 4 keeps for ``a1-...``
   tokens (Cloudflare answers 520 for it from many cloud networks - the probe
   records that rather than hiding it).
 
@@ -49,7 +49,7 @@ except ImportError:  # pragma: no cover - the workflow installs it
     print("This probe needs the websockets package: python3 -m pip install websockets")
     raise SystemExit(2)
 
-# Mirrors node3-execution/src/execution_deriv.rs.
+# Mirrors node4-execution/src/execution_deriv.rs.
 SYMBOL = "frxXAUUSD"
 CURRENCY = "USD"
 DURATION = 5
@@ -89,7 +89,7 @@ SWEEP = [
 
 
 def contracts_for_payload(new_api: bool) -> dict:
-    """``contracts_for`` request for the endpoint flavour Node 3 would use."""
+    """``contracts_for`` request for the endpoint flavour Node 4 would use."""
     payload: dict = {"contracts_for": SYMBOL}
     if not new_api:
         # The current API dropped currency / product_type (pricing follows the
@@ -100,7 +100,7 @@ def contracts_for_payload(new_api: bool) -> dict:
 
 
 def proposal_payload(new_api: bool, contract_type: str, barrier: str | None) -> dict:
-    """``proposal`` request exactly as Node 3 builds it."""
+    """``proposal`` request exactly as Node 4 builds it."""
     payload = {
         "proposal": 1,
         "amount": STAKE,
@@ -162,7 +162,7 @@ def print_contracts_for(data: dict) -> None:
         and str(item.get("expiry_type", "")).startswith("intraday")
     ]
     if intraday:
-        print("    raw entries Node 3 can trade intraday (all fields Deriv returns):")
+        print("    raw entries Node 4 can trade intraday (all fields Deriv returns):")
         for item in intraday:
             print(f"      {json.dumps(item, sort_keys=True)}")
     if not available:

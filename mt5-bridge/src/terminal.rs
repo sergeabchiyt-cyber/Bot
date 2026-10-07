@@ -418,7 +418,7 @@ pub struct OrderRequest {
     pub tp: f64,
     pub deviation_points: u32,
     pub magic: i64,
-    /// Broker order/position comment; carries the Node 3 intent id so an
+    /// Broker order/position comment; carries the Node 4 intent id so an
     /// uncertain outcome can be resolved by an idempotent lookup.
     pub comment: String,
 }
@@ -582,7 +582,7 @@ impl TerminalClient {
         self.call_order_send(req, self.write_timeout_ms).await
     }
 
-    /// Send a market order with an explicit timeout (Node 3 may request a
+    /// Send a market order with an explicit timeout (Node 4 may request a
     /// shorter or longer one than the bridge default).
     pub async fn call_order_send(
         &self,
@@ -1196,7 +1196,7 @@ pub fn validate_order(
     })
 }
 
-/// Build the broker comment that carries the Node 3 intent id, so an uncertain
+/// Build the broker comment that carries the Node 4 intent id, so an uncertain
 /// outcome can always be resolved by an idempotent `FIND`.
 ///
 /// MT5 comments are limited (typically 31 characters), so the id is truncated

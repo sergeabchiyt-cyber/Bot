@@ -29,7 +29,7 @@
 //  Install: MQL5/Experts/Mt5BridgeEA.mq5, allow algorithmic trading, set
 //  InpToken to the same value as the bridge's MT5_EA_TOKEN.
 //+------------------------------------------------------------------+
-#property copyright "XAUUSD Node 3"
+#property copyright "XAUUSD Node 4"
 #property version   "1.0.0"
 #property description "Executes Deriv MT5 demo orders requested by mt5-bridge over loopback TCP."
 
