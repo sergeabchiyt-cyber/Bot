@@ -306,19 +306,6 @@ impl ExecutionStatus {
         }
     }
 
-    pub fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "accepted" => Some(ExecutionStatus::Accepted),
-            "filled" => Some(ExecutionStatus::Filled),
-            "partial" => Some(ExecutionStatus::Partial),
-            "rejected" => Some(ExecutionStatus::Rejected),
-            "unknown" => Some(ExecutionStatus::Unknown),
-            "cancelled" => Some(ExecutionStatus::Cancelled),
-            "closed" => Some(ExecutionStatus::Closed),
-            _ => None,
-        }
-    }
-
     /// True when the broker confirmed a (possibly partial) fill.
     pub fn is_fill(&self) -> bool {
         matches!(self, ExecutionStatus::Filled | ExecutionStatus::Partial)
@@ -483,9 +470,6 @@ pub enum Node4Frame<'a> {
         token: &'a str,
         service: &'a str,
         protocol_version: u32,
-    },
-    ExecutionReport {
-        data: &'a ExecutionReport,
     },
     Heartbeat,
 }
@@ -752,10 +736,10 @@ mod tests {
         assert_eq!(json["quantity_unit"], "lots");
         assert_eq!(json["execution_id"], "mt5-deal-456");
         assert_eq!(
-            ExecutionStatus::parse("filled"),
-            Some(ExecutionStatus::Filled)
+            serde_json::from_value::<ExecutionStatus>(serde_json::json!("filled")).unwrap(),
+            ExecutionStatus::Filled
         );
-        assert_eq!(ExecutionStatus::parse("nonsense"), None);
+        assert!(serde_json::from_value::<ExecutionStatus>(serde_json::json!("nonsense")).is_err());
         assert!(ExecutionStatus::Filled.is_fill());
         assert!(!ExecutionStatus::Unknown.is_fill());
     }

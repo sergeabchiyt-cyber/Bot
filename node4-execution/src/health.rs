@@ -14,17 +14,15 @@
 //! - `GET  /mt5/history`     -> `200 OK` JSON `Mt5HistorySnapshot` (closed deals).
 //! - `GET  /mt5/status`      -> `200 OK` JSON `Mt5BridgeStatus` (link + counters).
 //! - `WS   /ws` (or `/`)     -> frontend stream: open trades, Deriv account, MT5
-//!                              resources, diagnostics. Never carries execution
-//!                              (Node 3) frames.
+//!   resources, diagnostics. Never carries Node 3 intent or report frames.
 //!
 //! Private, token-gated:
 //! - `WS   /mt5/bridge`      -> the MT5 bridge dials out here and identifies
-//!                              itself with `bridge_hello { token }`; the token
-//!                              is checked against `MT5_BRIDGE_TOKEN`.
+//!   itself with `bridge_hello { token }`; the token is checked against
+//!   `MT5_BRIDGE_TOKEN`.
 //! - `POST /mt5/control`     -> halt / resume / close_all / close_position,
-//!                              requires `X-Control-Token: $MT5_CONTROL_TOKEN`
-//!                              (403 without it) and intentionally sends **no**
-//!                              permissive browser CORS headers.
+//!   requires `X-Control-Token: $MT5_CONTROL_TOKEN` (403 without it) and
+//!   intentionally sends **no** permissive browser CORS headers.
 //!
 //! Node 4 exposes no strategy or market-data resource: there is no scanning,
 //! candle or level endpoint by design.
@@ -92,6 +90,7 @@ fn clean_path(raw_path: &str) -> &str {
 }
 
 /// Static response helper retained for `/health` vs unknown path checks.
+#[cfg(test)]
 pub fn response_for(path: &str) -> &'static str {
     if clean_path(path) == "/health" {
         OK

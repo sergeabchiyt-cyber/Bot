@@ -78,16 +78,6 @@ pub enum LedgerRecord {
 }
 
 impl LedgerRecord {
-    pub fn kind(&self) -> &'static str {
-        match self {
-            LedgerRecord::IntentReceived { .. } => "intent_received",
-            LedgerRecord::BrokerCommand { .. } => "broker_command",
-            LedgerRecord::Report { .. } => "report",
-            LedgerRecord::Reconciliation { .. } => "reconciliation",
-            LedgerRecord::Duplicate { .. } => "duplicate",
-        }
-    }
-
     fn intent_id(&self) -> Option<&str> {
         match self {
             LedgerRecord::IntentReceived { intent, .. } => Some(&intent.intent_id),
@@ -102,7 +92,6 @@ impl LedgerRecord {
 /// Everything Node 4 recorded about one `intent_id`.
 #[derive(Debug, Clone, Default)]
 pub struct IntentLedgerState {
-    pub intent_id: String,
     /// True when the intent was durably received (or refused) and reported.
     pub accepted: bool,
     pub last_status: Option<ExecutionStatus>,
@@ -121,9 +110,6 @@ pub struct LedgerStats {
     pub available: bool,
     pub records: u64,
     pub intents: usize,
-    pub accepted_intents: usize,
-    pub last_write_ms: Option<i64>,
-    pub open_error: Option<String>,
 }
 
 /// Append-only JSONL ledger plus its in-memory index.
@@ -215,10 +201,6 @@ impl ExecutionLedger {
         ledger
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
     pub fn available(&self) -> bool {
         self.available.load(Ordering::SeqCst)
             && self.file.lock().map(|f| f.is_some()).unwrap_or(false)
@@ -238,16 +220,11 @@ impl ExecutionLedger {
 
     pub async fn stats(&self) -> LedgerStats {
         let state = self.state.read().await;
-        let accepted_intents = state.values().filter(|s| s.accepted).count();
-        let last = self.last_write_ms.load(Ordering::SeqCst);
         LedgerStats {
             path: self.path.display().to_string(),
             available: self.available(),
             records: self.records(),
             intents: state.len(),
-            accepted_intents,
-            last_write_ms: if last == 0 { None } else { Some(last as i64) },
-            open_error: self.open_error(),
         }
     }
 
@@ -319,7 +296,6 @@ fn apply_record(state: &mut HashMap<String, IntentLedgerState>, record: &LedgerR
     let entry = state
         .entry(intent_id.to_string())
         .or_insert_with(|| IntentLedgerState {
-            intent_id: intent_id.to_string(),
             first_seen_ms: now_ms(),
             ..Default::default()
         });
@@ -526,7 +502,10 @@ mod tests {
             .unwrap();
         let body = std::fs::read_to_string(&path).unwrap();
         let record: LedgerRecord = serde_json::from_str(body.trim()).unwrap();
-        assert_eq!(record.kind(), "broker_command");
+        assert_eq!(
+            serde_json::to_value(&record).unwrap()["kind"],
+            "broker_command"
+        );
         for forbidden in ["token", "password", "authorization", "secret"] {
             assert!(
                 !body.to_ascii_lowercase().contains(forbidden),

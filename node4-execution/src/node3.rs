@@ -32,6 +32,7 @@ use crate::diagnostics::DiagnosticsHub;
 use crate::execution::ExecutionManager;
 use crate::intent::{
     ExecutionReport, ExecutionStatus, IntentRejection, Node3Frame, Node4Frame, TradeIntent,
+    SERVICE_NAME,
 };
 use crate::ledger::{ExecutionLedger, IntentLedgerState, LedgerRecord};
 
@@ -61,7 +62,6 @@ struct PendingReport {
 /// A report on its way to the socket.
 #[derive(Debug, Clone)]
 struct Outgoing {
-    intent_id: String,
     text: String,
 }
 
@@ -153,7 +153,7 @@ async fn connect_once(shared: &LinkShared) -> Result<(), String> {
 
     let hello = Node4Frame::ExecutionHello {
         token: &token,
-        service: "xauusd-node4-execution",
+        service: SERVICE_NAME,
         protocol_version: shared.config.protocol_version,
     };
     sender
@@ -765,14 +765,7 @@ async fn publish_report(
             },
         );
     }
-    if outbox
-        .send(Outgoing {
-            intent_id: report.intent_id.clone(),
-            text,
-        })
-        .await
-        .is_err()
-    {
+    if outbox.send(Outgoing { text }).await.is_err() {
         // The link is down; the ledger keeps the truth and the report is
         // re-sent on the next connection from the pending map.
         debug!(

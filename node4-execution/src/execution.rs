@@ -341,20 +341,6 @@ impl ExecutionManager {
         }
     }
 
-    /// Flatten every position this service owns (operator kill switch).
-    pub async fn close_all(&self, reason: &str) -> Result<usize, String> {
-        match self.venue() {
-            ExecutionVenue::DerivMt5Demo => match self.mt5.as_ref() {
-                Some(mt5) => mt5.close_all(reason).await,
-                None => Err("MT5 venue selected but no bridge link exists".into()),
-            },
-            _ => Err(format!(
-                "close_all is only implemented for the MT5 venue (selected: {})",
-                self.venue_label()
-            )),
-        }
-    }
-
     /// Turn a venue outcome into the open-trade record Node 4 tracks.
     pub fn trade_from_outcome(
         &self,

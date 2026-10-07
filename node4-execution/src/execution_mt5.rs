@@ -27,8 +27,8 @@ use tracing::{info, warn};
 use crate::config::Config;
 use crate::intent::{ExecutionStatus, ReconciliationOutcome, TradeIntent};
 use crate::types::{
-    BridgeErrorPayload, Mt5AccountSnapshot, Mt5BridgeStatus, Mt5OrderOutcome, Mt5Position,
-    Mt5PositionsSnapshot, Mt5RecentEvent, Mt5SnapshotState, WsFrame,
+    BridgeErrorPayload, Mt5AccountSnapshot, Mt5BridgeStatus, Mt5OrderOutcome, Mt5RecentEvent,
+    Mt5SnapshotState, WsFrame,
 };
 
 pub const BRIDGE_PROTOCOL_VERSION: u32 = 1;
@@ -51,7 +51,6 @@ pub enum Mt5LinkError {
     Timeout { what: String, timeout_ms: u64 },
     Malformed(String),
     Bridge { code: String, message: String },
-    Refused(String),
 }
 
 impl std::fmt::Display for Mt5LinkError {
@@ -69,7 +68,6 @@ impl std::fmt::Display for Mt5LinkError {
             Mt5LinkError::Bridge { code, message } => {
                 write!(f, "bridge refused the request ({code}): {message}")
             }
-            Mt5LinkError::Refused(msg) => write!(f, "refused: {msg}"),
         }
     }
 }
@@ -102,10 +100,8 @@ pub struct BridgeSessionInfo {
     pub bridge_version: String,
     pub venue: String,
     pub capabilities: Vec<String>,
-    pub connected_at: i64,
     pub last_message_at: i64,
     pub frames_received: u64,
-    pub account: Option<Mt5AccountSnapshot>,
 }
 
 struct BridgeSession {
@@ -127,10 +123,7 @@ struct Mt5LinkInner {
 pub struct Mt5BridgeLink {
     inner: Arc<Mt5LinkInner>,
     configured: bool,
-    control_enabled: bool,
     symbol: String,
-    volume_lots: f64,
-    order_timeout_ms: u64,
 }
 
 impl Mt5BridgeLink {
@@ -165,31 +158,12 @@ impl Mt5BridgeLink {
                 next_generation: AtomicU64::new(0),
             }),
             configured: config.mt5_configured(),
-            control_enabled: config.mt5_control_enabled(),
             symbol: config.mt5_symbol.clone(),
-            volume_lots: config.mt5_volume_lots,
-            order_timeout_ms: config.mt5_order_timeout_ms,
         }
     }
 
     pub fn configured(&self) -> bool {
         self.configured
-    }
-
-    pub fn control_enabled(&self) -> bool {
-        self.control_enabled
-    }
-
-    pub fn symbol(&self) -> &str {
-        &self.symbol
-    }
-
-    pub fn volume_lots(&self) -> f64 {
-        self.volume_lots
-    }
-
-    pub fn order_timeout_ms(&self) -> u64 {
-        self.order_timeout_ms
     }
 
     pub async fn connected(&self) -> bool {
@@ -240,7 +214,6 @@ impl Mt5BridgeLink {
         {
             let mut info_guard = self.inner.info.write().await;
             *info_guard = BridgeSessionInfo {
-                connected_at: now_ms(),
                 last_message_at: now_ms(),
                 protocol: info.protocol,
                 bridge_version: info.bridge_version,
@@ -285,21 +258,6 @@ impl Mt5BridgeLink {
         account.configured = self.configured;
         account.requested_symbol = self.symbol.clone();
         account
-    }
-
-    pub async fn positions_snapshot(&self) -> Mt5PositionsSnapshot {
-        self.inner.state.read().await.positions.clone()
-    }
-
-    pub async fn status_snapshot(&self) -> Mt5BridgeStatus {
-        let mut status = self.inner.state.read().await.status.clone();
-        status.configured = self.configured;
-        status.connected = self.connected().await;
-        status
-    }
-
-    pub async fn recent_events(&self) -> Vec<Mt5RecentEvent> {
-        self.inner.state.read().await.events.clone()
     }
 
     /// Apply a frame pushed by the bridge. Returns the frame that should be
@@ -513,6 +471,7 @@ impl Mt5BridgeLink {
         format!("{prefix}-{}-{seq}", now_ms())
     }
 
+    #[allow(dead_code)] // liveness probe: exercised by the link tests only
     pub async fn ping(&self, timeout_ms: u64) -> Result<BridgeReply, Mt5LinkError> {
         let req_id = self.next_request_id("ping");
         self.request(WsFrame::Mt5Ping { req_id }, timeout_ms).await
@@ -950,22 +909,6 @@ impl Mt5Execution {
 
         Ok(outcome)
     }
-
-    /// Add [`Mt5OrderOutcome`] to the intent-independent close path.
-    pub async fn close_all(&self, reason: &str) -> Result<usize, String> {
-        let reply = self
-            .link
-            .close_all(reason)
-            .await
-            .map_err(|err| format!("close_all failed: {err}"))?;
-        let closed = reply
-            .data
-            .as_ref()
-            .and_then(|data| data.get("closed"))
-            .and_then(|value| value.as_u64())
-            .unwrap_or(0) as usize;
-        Ok(closed)
-    }
 }
 
 /// A refusal that happened **before** any broker write, so it is safe to report
@@ -994,6 +937,7 @@ impl std::fmt::Display for VenueRefusal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{Mt5Position, Mt5PositionsSnapshot};
 
     fn config() -> Config {
         Config {
@@ -1185,8 +1129,9 @@ mod tests {
             data: positions.clone(),
         })
         .await;
-        assert_eq!(link.positions_snapshot().await.count, 1);
-        assert_eq!(link.status_snapshot().await.positions_open, 1);
+        let state = link.snapshot_state().await;
+        assert_eq!(state.positions.count, 1);
+        assert_eq!(state.status.positions_open, 1);
     }
 
     #[tokio::test]

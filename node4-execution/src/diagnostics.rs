@@ -348,7 +348,7 @@ impl DiagnosticsHub {
     // ---- Node 3 link health ----------------------------------------------
 
     pub async fn set_node3_state(&self, connected: bool, authenticated: bool, state: &str) {
-        let (ledger, snap) = {
+        let snap = {
             let ledger = self.ledger_stats().await;
             let mut inner = self.inner.write().await;
             inner.node3.connected = connected;
@@ -366,8 +366,7 @@ impl DiagnosticsHub {
                 "node3",
                 format!("Node 3 intent link: {state}"),
             );
-            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
-            (ledger, snap)
+            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -379,7 +378,7 @@ impl DiagnosticsHub {
     }
 
     pub async fn record_node3_hello_ack(&self, protocol_version: Option<u32>, accepted: bool) {
-        let (ledger, snap) = {
+        let snap = {
             let ledger = self.ledger_stats().await;
             let mut inner = self.inner.write().await;
             inner.node3.authenticated = accepted;
@@ -399,8 +398,7 @@ impl DiagnosticsHub {
                     "Node 3 rejected execution_hello".to_string()
                 },
             );
-            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
-            (ledger, snap)
+            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -412,7 +410,7 @@ impl DiagnosticsHub {
     }
 
     pub async fn record_report_ack(&self, accepted: bool) {
-        let (ledger, snap) = {
+        let snap = {
             let ledger = self.ledger_stats().await;
             let mut inner = self.inner.write().await;
             if accepted {
@@ -421,8 +419,7 @@ impl DiagnosticsHub {
             if !accepted {
                 inner.node3.last_error = Some("Node 3 rejected an execution_report".into());
             }
-            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
-            (ledger, snap)
+            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -430,20 +427,19 @@ impl DiagnosticsHub {
     // ---- intent / report accounting ---------------------------------------
 
     pub async fn record_intent_received(&self, intent: &TradeIntent) {
-        let (ledger, snap) = {
+        let snap = {
             let ledger = self.ledger_stats().await;
             let mut inner = self.inner.write().await;
             inner.work.intents_received = inner.work.intents_received.saturating_add(1);
             inner.work.last_intent_ts = Some(now_ms());
-            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
-            (ledger, snap)
+            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
         let _ = intent;
     }
 
     pub async fn record_intent_accepted(&self, intent: &TradeIntent) {
-        let (ledger, snap) = {
+        let snap = {
             let ledger = self.ledger_stats().await;
             let mut inner = self.inner.write().await;
             inner.work.intents_accepted = inner.work.intents_accepted.saturating_add(1);
@@ -456,14 +452,13 @@ impl DiagnosticsHub {
                     intent.intent_id, intent.side, intent.symbol
                 ),
             );
-            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
-            (ledger, snap)
+            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
 
     pub async fn record_intent_rejected(&self, intent: &TradeIntent, rejection: &IntentRejection) {
-        let (ledger, snap) = {
+        let snap = {
             let ledger = self.ledger_stats().await;
             let mut inner = self.inner.write().await;
             if rejection.code == "intent_expired" {
@@ -479,14 +474,13 @@ impl DiagnosticsHub {
                     intent.intent_id, rejection.message, rejection.code
                 ),
             );
-            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
-            (ledger, snap)
+            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
 
     pub async fn record_duplicate_intent(&self, intent_id: &str, recorded_status: Option<&str>) {
-        let (ledger, snap) = {
+        let snap = {
             let ledger = self.ledger_stats().await;
             let mut inner = self.inner.write().await;
             inner.work.intents_duplicate = inner.work.intents_duplicate.saturating_add(1);
@@ -501,14 +495,13 @@ impl DiagnosticsHub {
                     recorded_status.unwrap_or("accepted")
                 ),
             );
-            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
-            (ledger, snap)
+            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
 
     pub async fn record_report(&self, report: &ExecutionReport) {
-        let (ledger, snap) = {
+        let snap = {
             let ledger = self.ledger_stats().await;
             let mut inner = self.inner.write().await;
             match report.status {
@@ -551,8 +544,7 @@ impl DiagnosticsHub {
                         .unwrap_or_default()
                 ),
             );
-            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
-            (ledger, snap)
+            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -586,7 +578,7 @@ impl DiagnosticsHub {
     }
 
     pub async fn record_order_failed(&self, code: &str, message: &str) {
-        let (ledger, snap) = {
+        let snap = {
             let ledger = self.ledger_stats().await;
             let mut inner = self.inner.write().await;
             inner.work.last_error = Some(format!("{code}: {message}"));
@@ -596,8 +588,7 @@ impl DiagnosticsHub {
                 "execution",
                 format!("Order refused ({code}): {message}"),
             );
-            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
-            (ledger, snap)
+            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -813,9 +804,7 @@ impl DiagnosticsHub {
     /// The bridge itself is not a subscriber, so this never echoes back to it.
     pub async fn apply_mt5_frame(&self, frame: WsFrame) -> Option<WsFrame> {
         let rebroadcast = self.mt5.apply_frame(frame).await;
-        let Some(frame) = rebroadcast else {
-            return None;
-        };
+        let frame = rebroadcast?;
 
         let (extra, snapshot) = {
             let ledger = self.ledger_stats().await;

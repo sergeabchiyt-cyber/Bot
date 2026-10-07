@@ -49,7 +49,7 @@ pub struct ExecutionTrade {
     pub closed_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OpenTradesSnapshot {
     /// Trades this service placed on the selected venue.
     pub node4_open_trades: Vec<ExecutionTrade>,
@@ -61,20 +61,6 @@ pub struct OpenTradesSnapshot {
     pub total_open_count: usize,
     pub mt5_open_count: usize,
     pub timestamp: i64,
-}
-
-impl Default for OpenTradesSnapshot {
-    fn default() -> Self {
-        Self {
-            node4_open_trades: Vec::new(),
-            deriv_open_trades: Vec::new(),
-            mt5_open_positions: Vec::new(),
-            recent_trades: Vec::new(),
-            total_open_count: 0,
-            mt5_open_count: 0,
-            timestamp: 0,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -633,6 +619,7 @@ pub struct Mt5SnapshotState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)] // `Diagnostics` carries the full snapshot
 pub enum WsFrame {
     // ---- operator/public frames -------------------------------------------
     #[serde(rename = "diagnostics")]
