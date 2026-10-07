@@ -20,7 +20,7 @@
 (function (App) {
   "use strict";
 
-  const { $, escapeHtml, fmtPrice } = App.utils;
+  const { $, escapeHtml, fmtPrice, numberOrNull, fetchPublicJson } = App.utils;
   const cfg = App.config;
 
   const swingWindows = cfg.swingWindows || ["SWING_BULL", "SWING_BEAR"];
@@ -31,6 +31,8 @@
 
   const state = {};
   for (const w of cfg.levelWindows) state[w] = null;
+  let wsRevision = 0;
+  let fetchInProgress = false;
 
   /** [window, kind, price, style] for every plotted level of one window. */
   function* visibleLevels(l) {
@@ -39,9 +41,9 @@
     for (const kind of cfg.levelKinds) {
       const raw = l[kind];
       const style = styles[kind];           // PS has only "poc"
-      if (raw == null || !style) continue;
-      const price = Number(raw);
-      if (!Number.isFinite(price)) continue;
+      if (raw == null || raw === "" || !style) continue;
+      const price = numberOrNull(raw);
+      if (price === null) continue;
       yield [l.window, kind, price, style];
     }
   }
@@ -57,8 +59,10 @@
 
   /** Remove every price line + cached payload for one window. */
   function clearWindow(w) {
-    for (const kind of cfg.levelKinds) {
-      App.chart.removePriceLine(`${w}-${kind}`);
+    if (App.chart && typeof App.chart.removePriceLine === "function") {
+      for (const kind of cfg.levelKinds) {
+        App.chart.removePriceLine(`${w}-${kind}`);
+      }
     }
     delete state[w];
   }
@@ -68,9 +72,9 @@
    * Purely informational — the plotted levels remain poc / vah / val.
    */
   function anchorRow(l) {
-    const high = Number(l.swing_high);
-    const low = Number(l.swing_low);
-    if (!Number.isFinite(high) || !Number.isFinite(low)) return null;
+    const high = numberOrNull(l.swing_high);
+    const low = numberOrNull(l.swing_low);
+    if (high === null || low === null) return null;
     const label =
       swingLabels[l.window] ||
       (l.direction === "bearish" ? "Bear Swing" : l.direction === "bullish" ? "Bull Swing" : l.window);
@@ -167,7 +171,9 @@
     }
 
     for (const [w, kind, price, style] of visibleLevels(l)) {
-      App.chart.upsertPriceLine(`${w}-${kind}`, price, style);
+      if (App.chart && typeof App.chart.upsertPriceLine === "function") {
+        App.chart.upsertPriceLine(`${w}-${kind}`, price, style);
+      }
     }
     state[l.window] = l;
   }
@@ -196,7 +202,8 @@
    *   - { window: "CW", … }               → single-window upsert
    *   - anything else                     → ignored, never throws
    */
-  function apply(payload) {
+  function apply(payload, source = "ws") {
+    if (source !== "rest") wsRevision += 1;
     if (Array.isArray(payload)) {
       applySnapshot(payload);
       return;
@@ -220,19 +227,22 @@
   }
 
   async function fetchAll() {
+    if (fetchInProgress || !cfg.endpoints.levels) return;
+    fetchInProgress = true;
+    const requestRevision = wsRevision;
     try {
-      const res = await fetch(cfg.endpoints.levels);
-      if (!res.ok) throw new Error(`levels ${res.status}`);
-      const payload = await res.json();
+      const payload = await fetchPublicJson(cfg.endpoints.levels);
       const list = toSnapshotList(payload);
-      if (list) applySnapshot(list);
+      if (list && wsRevision === requestRevision) applySnapshot(list);
     } catch (e) {
-      console.error("Levels fetch failed:", e);
+      console.error("Market levels snapshot failed:", e);
+    } finally {
+      fetchInProgress = false;
     }
   }
 
   function reset() {
-    App.chart.clearPriceLines();
+    if (App.chart && typeof App.chart.clearPriceLines === "function") App.chart.clearPriceLines();
     for (const w of Object.keys(state)) delete state[w];
     render();
   }

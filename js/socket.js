@@ -1,77 +1,41 @@
 /* ============================================================
- * XAUUSD Terminal — backend WebSocket with backoff reconnect
- * Dispatches frames by `type` to registered handlers.
+ * Node 1 market WebSocket adapter.
+ * Reuses the same independent stream lifecycle as Node 3 and Node 4.
  * ============================================================ */
 (function (App) {
   "use strict";
 
-  const { setStatus } = App.utils;
-  const cfg = App.config;
-
-  let ws = null;
-  let delay = cfg.ws.reconnectMinMs;
-  let timer = null;
-  const handlers = {};
-
-  function on(type, fn) {
-    handlers[type] = fn;
-  }
-
-  function scheduleReconnect() {
-    if (timer) return;
-    setStatus("reconnecting", "busy");
-    timer = setTimeout(() => {
-      timer = null;
-      connect();
-    }, delay);
-    delay = Math.min(delay * 2, cfg.ws.reconnectMaxMs);
-  }
-
-  function connect() {
-    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-      return;
-    }
-    ws = new WebSocket(cfg.endpoints.ws);
-
-    ws.onopen = () => {
-      delay = cfg.ws.reconnectMinMs;
-      setStatus("live", "live");
-      ws.send(JSON.stringify({ type: "subscribe", topics: cfg.ws.topics }));
-    };
-
-    ws.onmessage = (ev) => {
-      let frame;
+  const handlers = Object.create(null);
+  const settings = App.config.market;
+  const stream = App.createServiceStream({
+    service: "market",
+    endpoint: App.config.endpoints.marketWs,
+    topics: settings.topics,
+    reconnectMinMs: settings.reconnectMinMs,
+    reconnectMaxMs: settings.reconnectMaxMs,
+    staleAfterMs: settings.staleAfterMs,
+    heartbeatIntervalMs: settings.heartbeatIntervalMs,
+    heartbeatTimeoutMs: settings.heartbeatTimeoutMs,
+    onFrame(frame) {
+      const handler = frame && handlers[frame.type];
+      if (typeof handler !== "function") return;
       try {
-        frame = JSON.parse(ev.data);
-      } catch {
-        return;
+        handler(Object.prototype.hasOwnProperty.call(frame, "data") ? frame.data : frame);
+      } catch (error) {
+        console.error(`Market handler "${frame.type}" failed:`, error);
       }
-      const fn = frame && handlers[frame.type];
-      if (fn) {
-        try {
-          fn(frame.data);
-        } catch (e) {
-          console.error(`Handler "${frame.type}" failed:`, e);
-        }
-      }
-    };
-
-    ws.onclose = scheduleReconnect;
-    ws.onerror = (e) => {
-      setStatus("ws error", "error");
-      console.error("Backend WS error:", e);
-    };
-  }
-
-  // Reconnect promptly when a mobile tab returns to the foreground.
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && (!ws || ws.readyState === WebSocket.CLOSED)) {
-      clearTimeout(timer);
-      timer = null;
-      delay = cfg.ws.reconnectMinMs;
-      connect();
-    }
+    },
   });
 
-  App.socket = { on, connect };
+  App.socket = {
+    on(type, handler) {
+      if (typeof handler === "function") handlers[type] = handler;
+    },
+    connect: stream.start,
+    start: stream.start,
+    stop: stream.stop,
+    state: stream.getState,
+    refreshSnapshots: stream.refreshSnapshots,
+    setSnapshotRefresh: stream.setSnapshotRefresh,
+  };
 })((window.App = window.App || {}));
