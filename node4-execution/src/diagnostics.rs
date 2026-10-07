@@ -160,7 +160,7 @@ impl DiagnosticsHub {
             orders_reconciled: 0,
             last_intent_ts: None,
             last_report_ts: None,
-            last_error: config.venue_selection_error().map(|err| err.to_string()),
+            last_error: config.venue_selection_error(),
             ws_clients_connected: 0,
         };
 

@@ -146,12 +146,10 @@ pub struct Config {
     // ---- Resolved venue ---------------------------------------------------
     /// Explicit `EXECUTION_VENUE` selection, when set.
     pub execution_venue_override: Option<String>,
-    /// The validated venue this process runs. `ExecutionVenue::None` when the
-    /// configuration is unusable — see `venue_error`.
+    /// The validated venue this process runs, as stored by [`Config::resolve_venue`].
+    /// `ExecutionVenue::None` whenever the configuration is unusable, so the
+    /// dedicated getter is [`Config::venue_selection_error`].
     pub venue: ExecutionVenue,
-    /// Set when venue selection failed; the service must refuse to trade (and
-    /// refuses to start) rather than silently falling back to another venue.
-    pub venue_error: Option<String>,
     /// Malformed `MT5_SYMBOL_MAP` entries collected at load time; surfaced as a
     /// hard error when the MT5 venue is selected.
     pub symbol_map_errors: Vec<String>,
@@ -260,7 +258,6 @@ impl Default for Config {
 
             execution_venue_override: None,
             venue: ExecutionVenue::None,
-            venue_error: None,
             symbol_map_errors: Vec::new(),
         }
     }
@@ -321,18 +318,18 @@ impl Config {
 
             execution_venue_override: env_opt("EXECUTION_VENUE"),
             venue: ExecutionVenue::None,
-            venue_error: None,
             symbol_map_errors: Vec::new(),
         };
         config.symbol_map_errors = symbol_map_errors;
-        match config.venue_decision() {
-            Ok(venue) => config.venue = venue,
-            Err(err) => {
-                config.venue = ExecutionVenue::None;
-                config.venue_error = Some(err);
-            }
-        }
+        config.resolve_venue();
         config
+    }
+
+    /// Store the venue decision in `venue`, leaving the fail-closed
+    /// `ExecutionVenue::None` state when the configuration is contradictory.
+    /// Idempotent: the decision is always recomputed from the current fields.
+    pub fn resolve_venue(&mut self) {
+        self.venue = self.venue_decision().unwrap_or(ExecutionVenue::None);
     }
 
     /// The validated venue (see `venue_selection_error` for why it may be
@@ -344,8 +341,12 @@ impl Config {
     /// Venue selection failure, if any. A configured-but-unusable venue is a
     /// hard error: there is deliberately no fallback to another venue, and no
     /// fallback to signal-only execution.
-    pub fn venue_selection_error(&self) -> Option<&str> {
-        self.venue_error.as_deref()
+    ///
+    /// Recomputed from the current configuration every time, so a `Config` that
+    /// was mutated after construction fails closed just like one built by
+    /// [`Config::from_env`].
+    pub fn venue_selection_error(&self) -> Option<String> {
+        self.venue_decision().err()
     }
 
     /// Startup errors that must stop the process entirely. A Node 4 that cannot
@@ -785,13 +786,11 @@ mod tests {
 
         // A failure leaves the venue as None *and* explains why.
         config.mt5_bridge_token = Some("t".into());
-        match config.venue_decision() {
-            Ok(venue) => config.venue = venue,
-            Err(err) => {
-                config.venue = ExecutionVenue::None;
-                config.venue_error = Some(err);
-            }
-        }
+        assert!(config
+            .venue_selection_error()
+            .unwrap()
+            .contains("multiple execution venues"));
+        config.resolve_venue();
         assert_eq!(config.execution_venue(), ExecutionVenue::None);
         assert!(config
             .venue_selection_error()
