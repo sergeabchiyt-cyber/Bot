@@ -1,6 +1,6 @@
 # Deriv options probe — `frxXAUUSD`
 
-Recorded by `.github/workflows/deriv-probe.yml` on 2026-10-06 16:54 UTC.
+Recorded by `.github/workflows/deriv-probe.yml` on 2026-10-07 12:16 UTC.
 
 ```
 
@@ -24,10 +24,10 @@ Recorded by `.github/workflows/deriv-probe.yml` on 2026-10-06 16:54 UTC.
       - ONETOUCH    expiry=daily     barriers=1  duration=1d..365d market=commodities
       - NOTOUCH     expiry=daily     barriers=1  duration=1d..365d market=commodities
     raw entries Node 4 can trade intraday (all fields Deriv returns):
-      {"barrier": "+2.12", "barriers": 1, "contract_category": "callput", "contract_type": "CALL", "default_stake": 2, "expiry_type": "intraday", "market": "commodities", "max_contract_duration": "1d", "min_contract_duration": "5m", "sentiment": "up", "submarket": "metals", "underlying_symbol": "frxXAUUSD"}
-      {"barrier": "+2.12", "barriers": 1, "contract_category": "callput", "contract_type": "PUT", "default_stake": 2, "expiry_type": "intraday", "market": "commodities", "max_contract_duration": "1d", "min_contract_duration": "5m", "sentiment": "down", "submarket": "metals", "underlying_symbol": "frxXAUUSD"}
+      {"barrier": "+2.23", "barriers": 1, "contract_category": "callput", "contract_type": "CALL", "default_stake": 2, "expiry_type": "intraday", "market": "commodities", "max_contract_duration": "1d", "min_contract_duration": "5m", "sentiment": "up", "submarket": "metals", "underlying_symbol": "frxXAUUSD"}
+      {"barrier": "+2.23", "barriers": 1, "contract_category": "callput", "contract_type": "PUT", "default_stake": 2, "expiry_type": "intraday", "market": "commodities", "max_contract_duration": "1d", "min_contract_duration": "5m", "sentiment": "down", "submarket": "metals", "underlying_symbol": "frxXAUUSD"}
     proposal sweep at stake 0.5 USD, 5m:
-    [CALL, no barrier                          ] OK id=904d35df-b252-e042-cda0-72824f2d7d57 ask_price=0.5 payout=0.82 spot=4155.27 barrier=-
+    [CALL, no barrier                          ] OK id=12aa4b42-3553-3734-62a8-2d4cae8cef90 ask_price=0.5 payout=0.81 spot=4115.95 barrier=-
         Win payout if Gold/USD is strictly higher than entry spot at 5 minutes after contract start time.
     [CALL barrier +0.01                        ] REJECTED ContractBuyValidationError: Invalid barrier. (subcode InvalidBarrier)
     [CALL barrier +0.05                        ] REJECTED ContractBuyValidationError: Invalid barrier. (subcode InvalidBarrier)
@@ -38,7 +38,7 @@ Recorded by `.github/workflows/deriv-probe.yml` on 2026-10-06 16:54 UTC.
     [CALL barrier +6.00 (TP distance on gold)  ] REJECTED ContractBuyValidationError: Invalid barrier. (subcode InvalidBarrier)
     [CALL barrier +15.00                       ] REJECTED ContractBuyValidationError: Invalid barrier. (subcode InvalidBarrier)
     [CALL barrier -2.50 (wrong sign)           ] REJECTED ContractBuyValidationError: Invalid barrier. (subcode InvalidBarrier)
-    [PUT, no barrier                           ] OK id=9771c29f-4cfc-2fbc-ad69-fdcb95a3c3d5 ask_price=0.5 payout=0.87 spot=4155.35 barrier=-
+    [PUT, no barrier                           ] OK id=f112f21b-fdaa-f54f-2726-938db1e1cd0d ask_price=0.5 payout=0.92 spot=4115.96 barrier=-
         Win payout if Gold/USD is strictly lower than entry spot at 5 minutes after contract start time.
     [PUT barrier -0.01                         ] REJECTED ContractBuyValidationError: Invalid barrier. (subcode InvalidBarrier)
     [PUT barrier -0.10                         ] REJECTED ContractBuyValidationError: Invalid barrier. (subcode InvalidBarrier)
