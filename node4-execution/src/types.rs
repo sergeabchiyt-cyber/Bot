@@ -589,15 +589,6 @@ pub struct TradeEvent {
 // MT5 bridge session view (internal; rendered through `Mt5Diagnostics`)
 // ---------------------------------------------------------------------------
 
-/// One bridge event kept for the operator timeline (`halted`, `order_unknown`,
-/// `ea_link_disconnected`, ...). Never carries a secret.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Mt5RecentEvent {
-    pub ts: i64,
-    pub event: String,
-    pub detail: String,
-}
-
 /// The latest broker view the bridge pushed, cached between frames so the
 /// `/mt5/*` resources answer instantly and the venue health checks have one
 /// authoritative source.
@@ -607,10 +598,8 @@ pub struct Mt5SnapshotState {
     pub positions: Mt5PositionsSnapshot,
     pub history: Mt5HistorySnapshot,
     pub status: Mt5BridgeStatus,
-    pub events: Vec<Mt5RecentEvent>,
     /// Timestamp of the last frame of any kind: proof the bridge is alive.
     pub last_bridge_frame: Option<i64>,
-    pub frames_received: u64,
 }
 
 // ---------------------------------------------------------------------------

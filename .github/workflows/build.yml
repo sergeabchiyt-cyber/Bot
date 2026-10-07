@@ -110,6 +110,28 @@ jobs:
           git commit -m "ci: node4 test log [skip ci]"
           git push origin ${{ github.ref_name }}
 
+      - name: Clear stale error logs
+        # A green job leaves no error log behind; the writeback steps above only
+        # run on failure, so this removes whatever an earlier red run committed.
+        if: success()
+        continue-on-error: true
+        working-directory: ${{ github.workspace }}
+        run: |
+          removed=0
+          for f in node4-errors.log node4-fmt-errors.log node4-clippy-errors.log node4-test-errors.log; do
+            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+              git rm -q "$f"
+              removed=1
+            fi
+          done
+          if [ "$removed" = "1" ]; then
+            git config user.email ci@example.invalid
+            git config user.name ci
+            git commit -m "ci: clear stale node4 logs [skip ci]"
+            git fetch origin ${{ github.ref_name }}
+            git push origin HEAD:${{ github.ref_name }}
+          fi
+
       - name: Build release
         run: cargo build --release
 
@@ -171,6 +193,28 @@ jobs:
           git add -f mt5-bridge-test-errors.log
           git commit -m "ci: mt5-bridge test log [skip ci]"
           git push origin ${{ github.ref_name }}
+
+      - name: Clear stale error logs
+        # A green job leaves no error log behind; the writeback steps above only
+        # run on failure, so this removes whatever an earlier red run committed.
+        if: success()
+        continue-on-error: true
+        working-directory: ${{ github.workspace }}
+        run: |
+          removed=0
+          for f in mt5-bridge-errors.log mt5-bridge-test-errors.log; do
+            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+              git rm -q "$f"
+              removed=1
+            fi
+          done
+          if [ "$removed" = "1" ]; then
+            git config user.email ci@example.invalid
+            git config user.name ci
+            git commit -m "ci: clear stale mt5-bridge logs [skip ci]"
+            git fetch origin ${{ github.ref_name }}
+            git push origin HEAD:${{ github.ref_name }}
+          fi
 
       - name: Build release
         run: cargo build --release

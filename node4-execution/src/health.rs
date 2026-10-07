@@ -290,15 +290,17 @@ async fn handle_bridge_session(
     }
 
     let info = crate::execution_mt5::BridgeSessionInfo {
-        token_ok: true,
         protocol: hello
             .protocol
             .unwrap_or(crate::execution_mt5::BRIDGE_PROTOCOL_VERSION),
         bridge_version: hello.bridge.clone().unwrap_or_default(),
-        venue: hello.venue.clone().unwrap_or_default(),
-        capabilities: hello.capabilities.clone().unwrap_or_default(),
-        ..Default::default()
     };
+    info!(
+        "MT5 bridge connected (bridge {}, venue {}, {} capabilities)",
+        info.bridge_version,
+        hello.venue.as_deref().unwrap_or("unknown"),
+        hello.capabilities.as_ref().map(Vec::len).unwrap_or(0),
+    );
     let (generation, mut out_rx) = link.register_session(info).await;
 
     let ack = WsFrame::BridgeHelloAck {

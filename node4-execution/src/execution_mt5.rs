@@ -27,7 +27,7 @@ use tracing::{info, warn};
 use crate::config::Config;
 use crate::intent::{ExecutionStatus, ReconciliationOutcome, TradeIntent};
 use crate::types::{
-    BridgeErrorPayload, Mt5AccountSnapshot, Mt5BridgeStatus, Mt5OrderOutcome, Mt5RecentEvent,
+    BridgeErrorPayload, Mt5AccountSnapshot, Mt5BridgeStatus, Mt5HistorySnapshot, Mt5OrderOutcome,
     Mt5SnapshotState, WsFrame,
 };
 
@@ -39,7 +39,6 @@ pub const BRIDGE_PROTOCOL_VERSION: u32 = 1;
 /// means something is wrong.
 pub const SESSION_STALE_MS: i64 = 15_000;
 const PENDING_CAPACITY: usize = 128;
-const MAX_RECENT_BRIDGE_EVENTS: usize = 30;
 
 fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
@@ -95,13 +94,8 @@ impl BridgeReply {
 
 #[derive(Debug, Clone, Default)]
 pub struct BridgeSessionInfo {
-    pub token_ok: bool,
     pub protocol: u32,
     pub bridge_version: String,
-    pub venue: String,
-    pub capabilities: Vec<String>,
-    pub last_message_at: i64,
-    pub frames_received: u64,
 }
 
 struct BridgeSession {
@@ -124,6 +118,7 @@ pub struct Mt5BridgeLink {
     inner: Arc<Mt5LinkInner>,
     configured: bool,
     symbol: String,
+    order_timeout_ms: u64,
 }
 
 impl Mt5BridgeLink {
@@ -159,6 +154,7 @@ impl Mt5BridgeLink {
             }),
             configured: config.mt5_configured(),
             symbol: config.mt5_symbol.clone(),
+            order_timeout_ms: config.mt5_order_timeout_ms,
         }
     }
 
@@ -208,24 +204,11 @@ impl Mt5BridgeLink {
         if previous.is_some() {
             warn!("a new MT5 bridge session replaced the previous one");
         }
-        let protocol = info.protocol;
-        let venue = info.venue.clone();
-        let capability_count = info.capabilities.len();
-        {
-            let mut info_guard = self.inner.info.write().await;
-            *info_guard = BridgeSessionInfo {
-                last_message_at: now_ms(),
-                protocol: info.protocol,
-                bridge_version: info.bridge_version,
-                venue: info.venue,
-                capabilities: info.capabilities,
-                token_ok: info.token_ok,
-                ..Default::default()
-            };
-        }
         info!(
-            "MT5 bridge connected (protocol {protocol}, venue {venue}, {capability_count} capabilities)"
+            "MT5 bridge session registered (protocol {}, bridge {})",
+            info.protocol, info.bridge_version
         );
+        self.inner.info.write().await.clone_from(&info);
         (generation, rx)
     }
 
@@ -250,6 +233,28 @@ impl Mt5BridgeLink {
                 });
             }
         }
+    }
+
+    pub async fn positions_snapshot(&self) -> Mt5PositionsSnapshot {
+        self.inner.state.read().await.positions.clone()
+    }
+
+    /// Closed deals the bridge pushed, newest first.
+    pub async fn history_snapshot(&self) -> Mt5HistorySnapshot {
+        self.inner.state.read().await.history.clone()
+    }
+
+    pub async fn status_snapshot(&self) -> Mt5BridgeStatus {
+        let (protocol, bridge_version) = {
+            let hello = self.inner.info.read().await;
+            (hello.protocol, hello.bridge_version.clone())
+        };
+        let mut status = self.inner.state.read().await.status.clone();
+        status.configured = self.configured;
+        status.connected = self.connected().await;
+        status.protocol = protocol;
+        status.bridge_version = bridge_version;
+        status
     }
 
     pub async fn account_snapshot(&self) -> Mt5AccountSnapshot {
@@ -329,28 +334,6 @@ impl Mt5BridgeLink {
                 None
             }
             WsFrame::BridgeEvent { event, data } => {
-                let detail = data
-                    .get("error")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .or_else(|| {
-                        data.get("reason")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string())
-                    })
-                    .unwrap_or_else(|| data.to_string());
-                {
-                    let mut state = self.inner.state.write().await;
-                    state.events.insert(
-                        0,
-                        Mt5RecentEvent {
-                            ts: now_ms(),
-                            event: event.clone(),
-                            detail,
-                        },
-                    );
-                    state.events.truncate(MAX_RECENT_BRIDGE_EVENTS);
-                }
                 // Only events that describe broker state are worth rebroadcasting
                 // on their own; the bridge also pushes authoritative snapshots.
                 match event.as_str() {
@@ -363,11 +346,7 @@ impl Mt5BridgeLink {
                     _ => None,
                 }
             }
-            WsFrame::Heartbeat => {
-                let mut info = self.inner.info.write().await;
-                info.last_message_at = now_ms();
-                None
-            }
+            WsFrame::Heartbeat => None,
             other => {
                 // Frames from other sources are not ours to interpret.
                 let _ = other;
@@ -377,15 +356,7 @@ impl Mt5BridgeLink {
     }
 
     async fn touch(&self) {
-        let now = now_ms();
-        {
-            let mut state = self.inner.state.write().await;
-            state.last_bridge_frame = Some(now);
-            state.frames_received = state.frames_received.saturating_add(1);
-        }
-        let mut info = self.inner.info.write().await;
-        info.last_message_at = now;
-        info.frames_received = info.frames_received.saturating_add(1);
+        self.inner.state.write().await.last_bridge_frame = Some(now_ms());
     }
 
     /// Send a command and await its `bridge_ack` within `timeout_ms`.
@@ -1008,8 +979,8 @@ mod tests {
         cfg.mt5_bridge_token = None;
         let link = Mt5BridgeLink::new(&cfg);
         assert!(!link.configured());
-        assert!(link.control_enabled());
-        assert_eq!(link.volume_lots(), crate::config::DEFAULT_MT5_VOLUME_LOTS);
+        assert!(cfg.mt5_control_enabled());
+        assert_eq!(cfg.mt5_volume_lots, crate::config::DEFAULT_MT5_VOLUME_LOTS);
     }
 
     #[tokio::test]
@@ -1129,21 +1100,16 @@ mod tests {
             data: positions.clone(),
         })
         .await;
-        let state = link.snapshot_state().await;
-        assert_eq!(state.positions.count, 1);
-        assert_eq!(state.status.positions_open, 1);
+        assert_eq!(link.positions_snapshot().await.count, 1);
+        assert_eq!(link.status_snapshot().await.positions_open, 1);
     }
 
     #[tokio::test]
     async fn bridge_acks_resolve_pending_requests() {
         let link = Mt5BridgeLink::new(&config());
         let info = BridgeSessionInfo {
-            token_ok: true,
             protocol: 1,
             bridge_version: "test".into(),
-            venue: "deriv_mt5_demo".into(),
-            capabilities: vec!["order_send".into()],
-            ..Default::default()
         };
         let (generation, mut rx) = link.register_session(info).await;
         assert!(link.connected().await);
@@ -1191,8 +1157,8 @@ mod tests {
         let link = Mt5BridgeLink::new(&config());
         let (generation, _rx) = link
             .register_session(BridgeSessionInfo {
-                token_ok: true,
-                ..Default::default()
+                protocol: 1,
+                bridge_version: "test".into(),
             })
             .await;
         let err = link
