@@ -4,213 +4,213 @@
 [1m[92m      Adding[0m reqwest v0.12.28 [1m[33m(available: v0.13.5)[0m
 [1m[92m      Adding[0m tokio-tungstenite v0.26.2 [1m[33m(available: v0.30.0)[0m
 [1m[92m Downloading[0m crates ...
+[1m[92m  Downloaded[0m anyhow v1.0.104
 [1m[92m  Downloaded[0m stable_deref_trait v1.2.1
 [1m[92m  Downloaded[0m block-buffer v0.10.4
-[1m[92m  Downloaded[0m sync_wrapper v1.0.2
-[1m[92m  Downloaded[0m subtle v2.6.1
-[1m[92m  Downloaded[0m futures-core v0.3.34
-[1m[92m  Downloaded[0m form_urlencoded v1.2.2
-[1m[92m  Downloaded[0m socket2 v0.6.5
-[1m[92m  Downloaded[0m synstructure v0.14.0
-[1m[92m  Downloaded[0m smallvec v1.16.2
-[1m[92m  Downloaded[0m slab v0.4.12
-[1m[92m  Downloaded[0m zeroize v1.9.1
-[1m[92m  Downloaded[0m icu_properties v2.3.0
-[1m[92m  Downloaded[0m utf8_iter v1.0.4
-[1m[92m  Downloaded[0m webpki-roots v0.26.11
-[1m[92m  Downloaded[0m want v0.3.2
-[1m[92m  Downloaded[0m untrusted v0.9.0
-[1m[92m  Downloaded[0m futures-macro v0.3.34
-[1m[92m  Downloaded[0m thread_local v1.1.10
-[1m[92m  Downloaded[0m zmij v1.0.23
-[1m[92m  Downloaded[0m zerofrom-derive v0.1.8
-[1m[92m  Downloaded[0m find-msvc-tools v0.1.14
-[1m[92m  Downloaded[0m utf-8 v0.7.6
-[1m[92m  Downloaded[0m tracing-log v0.2.0
-[1m[92m  Downloaded[0m zerotrie v0.2.5
-[1m[92m  Downloaded[0m yoke v0.8.3
-[1m[92m  Downloaded[0m tungstenite v0.26.2
-[1m[92m  Downloaded[0m url v2.5.8
-[1m[92m  Downloaded[0m tracing-core v0.1.36
-[1m[92m  Downloaded[0m rand_pcg v0.10.2
-[1m[92m  Downloaded[0m zerovec v0.11.8
-[1m[92m  Downloaded[0m quote v1.0.47
-[1m[92m  Downloaded[0m tower v0.5.3
-[1m[92m  Downloaded[0m tower-http v0.6.11
-[1m[92m  Downloaded[0m syn v3.0.6
-[1m[92m  Downloaded[0m shlex v2.0.1
-[1m[92m  Downloaded[0m webpki-roots v1.0.9
-[1m[92m  Downloaded[0m serde_core v1.0.229
-[1m[92m  Downloaded[0m serde_derive v1.0.229
-[1m[92m  Downloaded[0m parking_lot v0.12.5
-[1m[92m  Downloaded[0m ryu v1.0.23
-[1m[92m  Downloaded[0m zerocopy v0.8.61
-[1m[92m  Downloaded[0m memchr v2.8.3
-[1m[92m  Downloaded[0m serde v1.0.229
-[1m[92m  Downloaded[0m mio v1.2.4
-[1m[92m  Downloaded[0m hyper v1.12.0
-[1m[92m  Downloaded[0m serde_json v1.0.151
-[1m[92m  Downloaded[0m icu_properties_data v2.3.0
-[1m[92m  Downloaded[0m chrono v0.4.45
-[1m[92m  Downloaded[0m reqwest v0.12.28
-[1m[92m  Downloaded[0m futures-util v0.3.34
-[1m[92m  Downloaded[0m tracing v0.1.44
-[1m[92m  Downloaded[0m quinn-proto v0.11.19
-[1m[92m  Downloaded[0m http v1.5.0
-[1m[92m  Downloaded[0m rand v0.10.3
-[1m[92m  Downloaded[0m quinn v0.11.12
-[1m[92m  Downloaded[0m idna v1.1.0
-[1m[92m  Downloaded[0m rustls-webpki v0.103.15
-[1m[92m  Downloaded[0m rand v0.9.5
-[1m[92m  Downloaded[0m icu_collections v2.3.0
-[1m[92m  Downloaded[0m rustls v0.23.45
-[1m[92m  Downloaded[0m regex-syntax v0.8.11
-[1m[92m  Downloaded[0m proc-macro2 v1.0.107
-[1m[92m  Downloaded[0m icu_provider v2.3.1
-[1m[92m  Downloaded[0m bitflags v2.13.2
-[1m[92m  Downloaded[0m num-traits v0.2.19
-[1m[92m  Downloaded[0m hyper-util v0.1.21
-[1m[92m  Downloaded[0m icu_locale_core v2.3.0
-[1m[92m  Downloaded[0m pin-project-lite v0.2.17
-[1m[92m  Downloaded[0m ring v0.17.14
-[1m[92m  Downloaded[0m icu_normalizer v2.3.0
-[1m[92m  Downloaded[0m futures-channel v0.3.34
-[1m[92m  Downloaded[0m tracing-subscriber v0.3.23
-[1m[92m  Downloaded[0m regex-automata v0.4.18
-[1m[92m  Downloaded[0m tokio v1.53.2
-[1m[92m  Downloaded[0m rand_core v0.9.5
-[1m[92m  Downloaded[0m getrandom v0.4.3
-[1m[92m  Downloaded[0m quinn-udp v0.5.16
-[1m[92m  Downloaded[0m cc v1.6.0
-[1m[92m  Downloaded[0m sha1 v0.10.7
-[1m[92m  Downloaded[0m rustls-pki-types v1.15.1
-[1m[92m  Downloaded[0m rand_core v0.10.1
-[1m[92m  Downloaded[0m ppv-lite86 v0.2.21
-[1m[92m  Downloaded[0m parking_lot_core v0.9.12
-[1m[92m  Downloaded[0m nu-ansi-term v0.50.3
-[1m[92m  Downloaded[0m iana-time-zone v0.1.65
-[1m[92m  Downloaded[0m libc v0.2.190
-[1m[92m  Downloaded[0m syn v2.0.119
-[1m[92m  Downloaded[0m sharded-slab v0.1.7
-[1m[92m  Downloaded[0m ipnet v2.12.2
-[1m[92m  Downloaded[0m displaydoc v0.2.7
 [1m[92m  Downloaded[0m autocfg v1.5.1
-[1m[92m  Downloaded[0m typenum v1.20.1
-[1m[92m  Downloaded[0m signal-hook-registry v1.4.8
-[1m[92m  Downloaded[0m http-body-util v0.1.5
-[1m[92m  Downloaded[0m percent-encoding v2.3.2
-[1m[92m  Downloaded[0m once_cell v1.21.4
-[1m[92m  Downloaded[0m hyper-rustls v0.27.10
-[1m[92m  Downloaded[0m tinyvec v1.13.3
-[1m[92m  Downloaded[0m rand_chacha v0.9.0
-[1m[92m  Downloaded[0m icu_normalizer_data v2.3.0
-[1m[92m  Downloaded[0m http-body v1.1.0
-[1m[92m  Downloaded[0m getrandom v0.3.4
-[1m[92m  Downloaded[0m getrandom v0.2.17
-[1m[92m  Downloaded[0m writeable v0.6.4
-[1m[92m  Downloaded[0m thiserror-impl v2.0.21
-[1m[92m  Downloaded[0m rustc-hash v2.1.3
-[1m[92m  Downloaded[0m potential_utf v0.1.6
-[1m[92m  Downloaded[0m futures-task v0.3.34
-[1m[92m  Downloaded[0m unicode-ident v1.0.26
-[1m[92m  Downloaded[0m tokio-rustls v0.26.6
-[1m[92m  Downloaded[0m scopeguard v1.2.0
-[1m[92m  Downloaded[0m matchers v0.2.0
-[1m[92m  Downloaded[0m lru-slab v0.1.3
-[1m[92m  Downloaded[0m lock_api v0.4.14
-[1m[92m  Downloaded[0m cfg-if v1.0.5
-[1m[92m  Downloaded[0m tokio-tungstenite v0.26.2
-[1m[92m  Downloaded[0m idna_adapter v1.2.2
-[1m[92m  Downloaded[0m atomic-waker v1.1.2
-[1m[92m  Downloaded[0m tracing-attributes v0.1.31
-[1m[92m  Downloaded[0m lazy_static v1.5.1
-[1m[92m  Downloaded[0m httparse v1.10.1
-[1m[92m  Downloaded[0m cpufeatures v0.2.17
-[1m[92m  Downloaded[0m chacha20 v0.10.2
-[1m[92m  Downloaded[0m errno v0.3.14
-[1m[92m  Downloaded[0m cfg_aliases v0.2.2
-[1m[92m  Downloaded[0m zerofrom v0.1.8
-[1m[92m  Downloaded[0m yoke-derive v0.8.4
-[1m[92m  Downloaded[0m version_check v0.9.5
-[1m[92m  Downloaded[0m tokio-macros v2.7.2
 [1m[92m  Downloaded[0m thiserror v2.0.21
-[1m[92m  Downloaded[0m data-encoding v2.11.1
-[1m[92m  Downloaded[0m zerovec-derive v0.11.6
-[1m[92m  Downloaded[0m try-lock v0.2.5
-[1m[92m  Downloaded[0m tower-service v0.3.3
-[1m[92m  Downloaded[0m tower-layer v0.3.3
-[1m[92m  Downloaded[0m serde_urlencoded v0.7.1
-[1m[92m  Downloaded[0m itoa v1.0.18
-[1m[92m  Downloaded[0m digest v0.10.7
-[1m[92m  Downloaded[0m crypto-common v0.1.7
-[1m[92m  Downloaded[0m generic-array v0.14.7
-[1m[92m  Downloaded[0m futures-sink v0.3.34
-[1m[92m  Downloaded[0m cpufeatures v0.3.1
-[1m[92m  Downloaded[0m litemap v0.8.3
-[1m[92m  Downloaded[0m base64 v0.23.1
+[1m[92m  Downloaded[0m zerofrom v0.1.8
+[1m[92m  Downloaded[0m version_check v0.9.5
+[1m[92m  Downloaded[0m slab v0.4.12
+[1m[92m  Downloaded[0m atomic-waker v1.1.2
+[1m[92m  Downloaded[0m thiserror-impl v2.0.21
+[1m[92m  Downloaded[0m once_cell v1.21.4
 [1m[92m  Downloaded[0m aho-corasick v1.1.5
-[1m[92m  Downloaded[0m bytes v1.12.1
-[1m[92m  Downloaded[0m base64 v0.22.1
-[1m[92m  Downloaded[0m anyhow v1.0.104
-[1m[92m  Downloaded[0m tinystr v0.8.4
+[1m[92m  Downloaded[0m utf8_iter v1.0.4
+[1m[92m  Downloaded[0m socket2 v0.6.5
+[1m[92m  Downloaded[0m cfg-if v1.0.5
+[1m[92m  Downloaded[0m webpki-roots v0.26.11
+[1m[92m  Downloaded[0m parking_lot_core v0.9.12
+[1m[92m  Downloaded[0m base64 v0.23.1
+[1m[92m  Downloaded[0m yoke-derive v0.8.4
+[1m[92m  Downloaded[0m generic-array v0.14.7
+[1m[92m  Downloaded[0m crypto-common v0.1.7
+[1m[92m  Downloaded[0m utf-8 v0.7.6
+[1m[92m  Downloaded[0m zerovec-derive v0.11.6
+[1m[92m  Downloaded[0m signal-hook-registry v1.4.8
+[1m[92m  Downloaded[0m quote v1.0.47
+[1m[92m  Downloaded[0m want v0.3.2
+[1m[92m  Downloaded[0m rand_core v0.9.5
+[1m[92m  Downloaded[0m scopeguard v1.2.0
+[1m[92m  Downloaded[0m rand_pcg v0.10.2
+[1m[92m  Downloaded[0m tower-layer v0.3.3
+[1m[92m  Downloaded[0m cpufeatures v0.2.17
+[1m[92m  Downloaded[0m icu_normalizer_data v2.3.0
+[1m[92m  Downloaded[0m sha1 v0.10.7
+[1m[92m  Downloaded[0m zeroize v1.9.1
+[1m[92m  Downloaded[0m yoke v0.8.3
+[1m[92m  Downloaded[0m tracing-log v0.2.0
+[1m[92m  Downloaded[0m shlex v2.0.1
+[1m[92m  Downloaded[0m getrandom v0.2.17
+[1m[92m  Downloaded[0m zmij v1.0.23
+[1m[92m  Downloaded[0m tokio-tungstenite v0.26.2
+[1m[92m  Downloaded[0m futures-sink v0.3.34
+[1m[92m  Downloaded[0m tracing-attributes v0.1.31
+[1m[92m  Downloaded[0m serde_derive v1.0.229
+[1m[92m  Downloaded[0m serde_urlencoded v0.7.1
+[1m[92m  Downloaded[0m tungstenite v0.26.2
+[1m[92m  Downloaded[0m tinyvec v1.13.3
+[1m[92m  Downloaded[0m rustls-pki-types v1.15.1
+[1m[92m  Downloaded[0m zerotrie v0.2.5
+[1m[92m  Downloaded[0m reqwest v0.12.28
+[1m[92m  Downloaded[0m icu_locale_core v2.3.0
+[1m[92m  Downloaded[0m zerovec v0.11.8
+[1m[92m  Downloaded[0m rand v0.10.3
+[1m[92m  Downloaded[0m hyper v1.12.0
+[1m[92m  Downloaded[0m tower-http v0.6.11
+[1m[92m  Downloaded[0m quinn-proto v0.11.19
+[1m[92m  Downloaded[0m syn v2.0.119
+[1m[92m  Downloaded[0m webpki-roots v1.0.9
+[1m[92m  Downloaded[0m regex-syntax v0.8.11
+[1m[92m  Downloaded[0m rustls v0.23.45
+[1m[92m  Downloaded[0m zerocopy v0.8.61
+[1m[92m  Downloaded[0m syn v3.0.6
+[1m[92m  Downloaded[0m tracing-subscriber v0.3.23
+[1m[92m  Downloaded[0m futures-util v0.3.34
+[1m[92m  Downloaded[0m typenum v1.20.1
+[1m[92m  Downloaded[0m icu_normalizer v2.3.0
+[1m[92m  Downloaded[0m tower v0.5.3
+[1m[92m  Downloaded[0m memchr v2.8.3
+[1m[92m  Downloaded[0m chrono v0.4.45
+[1m[92m  Downloaded[0m tracing v0.1.44
+[1m[92m  Downloaded[0m hyper-util v0.1.21
+[1m[92m  Downloaded[0m url v2.5.8
+[1m[92m  Downloaded[0m serde_json v1.0.151
+[1m[92m  Downloaded[0m idna v1.1.0
+[1m[92m  Downloaded[0m icu_properties_data v2.3.0
+[1m[92m  Downloaded[0m chacha20 v0.10.2
+[1m[92m  Downloaded[0m rand v0.9.5
+[1m[92m  Downloaded[0m mio v1.2.4
+[1m[92m  Downloaded[0m ryu v1.0.23
+[1m[92m  Downloaded[0m regex-automata v0.4.18
+[1m[92m  Downloaded[0m rustls-webpki v0.103.15
+[1m[92m  Downloaded[0m rand_core v0.10.1
+[1m[92m  Downloaded[0m proc-macro2 v1.0.107
+[1m[92m  Downloaded[0m icu_collections v2.3.0
+[1m[92m  Downloaded[0m tracing-core v0.1.36
+[1m[92m  Downloaded[0m rustc-hash v2.1.3
 [1m[92m  Downloaded[0m log v0.4.34
+[1m[92m  Downloaded[0m libc v0.2.190
+[1m[92m  Downloaded[0m displaydoc v0.2.7
+[1m[92m  Downloaded[0m serde_core v1.0.229
+[1m[92m  Downloaded[0m num-traits v0.2.19
+[1m[92m  Downloaded[0m http-body-util v0.1.5
+[1m[92m  Downloaded[0m http v1.5.0
+[1m[92m  Downloaded[0m base64 v0.22.1
+[1m[92m  Downloaded[0m serde v1.0.229
+[1m[92m  Downloaded[0m quinn v0.11.12
+[1m[92m  Downloaded[0m parking_lot v0.12.5
+[1m[92m  Downloaded[0m tokio v1.53.2
+[1m[92m  Downloaded[0m futures-channel v0.3.34
+[1m[92m  Downloaded[0m sharded-slab v0.1.7
+[1m[92m  Downloaded[0m itoa v1.0.18
+[1m[92m  Downloaded[0m writeable v0.6.4
+[1m[92m  Downloaded[0m unicode-ident v1.0.26
+[1m[92m  Downloaded[0m quinn-udp v0.5.16
+[1m[92m  Downloaded[0m ppv-lite86 v0.2.21
+[1m[92m  Downloaded[0m litemap v0.8.3
+[1m[92m  Downloaded[0m icu_provider v2.3.1
+[1m[92m  Downloaded[0m icu_properties v2.3.0
+[1m[92m  Downloaded[0m data-encoding v2.11.1
+[1m[92m  Downloaded[0m tokio-rustls v0.26.6
+[1m[92m  Downloaded[0m pin-project-lite v0.2.17
+[1m[92m  Downloaded[0m nu-ansi-term v0.50.3
+[1m[92m  Downloaded[0m lock_api v0.4.14
+[1m[92m  Downloaded[0m thread_local v1.1.10
+[1m[92m  Downloaded[0m rand_chacha v0.9.0
+[1m[92m  Downloaded[0m percent-encoding v2.3.2
+[1m[92m  Downloaded[0m matchers v0.2.0
+[1m[92m  Downloaded[0m hyper-rustls v0.27.10
+[1m[92m  Downloaded[0m errno v0.3.14
+[1m[92m  Downloaded[0m ring v0.17.14
+[1m[92m  Downloaded[0m cfg_aliases v0.2.2
+[1m[92m  Downloaded[0m form_urlencoded v1.2.2
+[1m[92m  Downloaded[0m futures-macro v0.3.34
+[1m[92m  Downloaded[0m cpufeatures v0.3.1
+[1m[92m  Downloaded[0m http-body v1.1.0
+[1m[92m  Downloaded[0m futures-core v0.3.34
+[1m[92m  Downloaded[0m digest v0.10.7
+[1m[92m  Downloaded[0m zerofrom-derive v0.1.8
+[1m[92m  Downloaded[0m tower-service v0.3.3
+[1m[92m  Downloaded[0m try-lock v0.2.5
+[1m[92m  Downloaded[0m tokio-macros v2.7.2
+[1m[92m  Downloaded[0m potential_utf v0.1.6
+[1m[92m  Downloaded[0m lru-slab v0.1.3
+[1m[92m  Downloaded[0m idna_adapter v1.2.2
+[1m[92m  Downloaded[0m futures-task v0.3.34
+[1m[92m  Downloaded[0m ipnet v2.12.2
+[1m[92m  Downloaded[0m getrandom v0.4.3
+[1m[92m  Downloaded[0m tinystr v0.8.4
+[1m[92m  Downloaded[0m iana-time-zone v0.1.65
+[1m[92m  Downloaded[0m httparse v1.10.1
+[1m[92m  Downloaded[0m find-msvc-tools v0.1.14
+[1m[92m  Downloaded[0m untrusted v0.9.0
+[1m[92m  Downloaded[0m lazy_static v1.5.1
+[1m[92m  Downloaded[0m getrandom v0.3.4
+[1m[92m  Downloaded[0m synstructure v0.14.0
+[1m[92m  Downloaded[0m sync_wrapper v1.0.2
+[1m[92m  Downloaded[0m smallvec v1.16.2
+[1m[92m  Downloaded[0m cc v1.6.0
+[1m[92m  Downloaded[0m bytes v1.12.1
+[1m[92m  Downloaded[0m subtle v2.6.1
+[1m[92m  Downloaded[0m bitflags v2.13.2
 [1m[92m   Compiling[0m proc-macro2 v1.0.107
-[1m[92m   Compiling[0m quote v1.0.47
 [1m[92m   Compiling[0m unicode-ident v1.0.26
+[1m[92m   Compiling[0m quote v1.0.47
 [1m[92m   Compiling[0m libc v0.2.190
 [1m[92m    Checking[0m cfg-if v1.0.5
 [1m[92m    Checking[0m smallvec v1.16.2
 [1m[92m    Checking[0m stable_deref_trait v1.2.1
 [1m[92m    Checking[0m pin-project-lite v0.2.17
 [1m[92m    Checking[0m bytes v1.12.1
-[1m[92m   Compiling[0m shlex v2.0.1
-[1m[92m    Checking[0m itoa v1.0.18
-[1m[92m   Compiling[0m parking_lot_core v0.9.12
 [1m[92m   Compiling[0m find-msvc-tools v0.1.14
+[1m[92m    Checking[0m itoa v1.0.18
+[1m[92m   Compiling[0m shlex v2.0.1
+[1m[92m   Compiling[0m parking_lot_core v0.9.12
 [1m[92m   Compiling[0m cc v1.6.0
-[1m[92m   Compiling[0m syn v3.0.6
 [1m[92m    Checking[0m scopeguard v1.2.0
 [1m[92m    Checking[0m futures-core v0.3.34
 [1m[92m    Checking[0m once_cell v1.21.4
 [1m[92m    Checking[0m lock_api v0.4.14
+[1m[92m   Compiling[0m syn v3.0.6
 [1m[92m    Checking[0m zeroize v1.9.1
+[1m[92m    Checking[0m rustls-pki-types v1.15.1
+[1m[92m    Checking[0m http v1.5.0
 [1m[92m    Checking[0m errno v0.3.14
 [1m[92m    Checking[0m signal-hook-registry v1.4.8
 [1m[92m    Checking[0m parking_lot v0.12.5
-[1m[92m    Checking[0m rustls-pki-types v1.15.1
-[1m[92m    Checking[0m socket2 v0.6.5
 [1m[92m    Checking[0m mio v1.2.4
-[1m[92m    Checking[0m http v1.5.0
-[1m[92m    Checking[0m writeable v0.6.4
+[1m[92m    Checking[0m socket2 v0.6.5
+[1m[92m   Compiling[0m ring v0.17.14
 [1m[92m    Checking[0m litemap v0.8.3
 [1m[92m   Compiling[0m version_check v0.9.5
-[1m[92m   Compiling[0m ring v0.17.14
-[1m[92m   Compiling[0m generic-array v0.14.7
+[1m[92m    Checking[0m writeable v0.6.4
 [1m[92m    Checking[0m getrandom v0.2.17
 [1m[92m    Checking[0m untrusted v0.9.0
-[1m[92m    Checking[0m utf8_iter v1.0.4
+[1m[92m   Compiling[0m generic-array v0.14.7
 [1m[92m   Compiling[0m icu_normalizer_data v2.3.0
 [1m[92m   Compiling[0m icu_properties_data v2.3.0
 [1m[92m   Compiling[0m httparse v1.10.1
-[1m[92m    Checking[0m futures-sink v0.3.34
-[1m[92m    Checking[0m percent-encoding v2.3.2
-[1m[92m   Compiling[0m zerocopy v0.8.61
-[1m[92m   Compiling[0m rustls v0.23.45
-[1m[92m    Checking[0m slab v0.4.12
-[1m[92m    Checking[0m typenum v1.20.1
+[1m[92m    Checking[0m utf8_iter v1.0.4
 [1m[92m   Compiling[0m getrandom v0.3.4
-[1m[92m   Compiling[0m serde_core v1.0.229
+[1m[92m   Compiling[0m zerocopy v0.8.61
+[1m[92m    Checking[0m slab v0.4.12
+[1m[92m   Compiling[0m rustls v0.23.45
 [1m[92m    Checking[0m futures-task v0.3.34
+[1m[92m    Checking[0m typenum v1.20.1
+[1m[92m   Compiling[0m serde_core v1.0.229
+[1m[92m    Checking[0m percent-encoding v2.3.2
+[1m[92m    Checking[0m futures-sink v0.3.34
 [1m[92m    Checking[0m http-body v1.1.0
-[1m[92m    Checking[0m tracing-core v0.1.36
 [1m[92m   Compiling[0m syn v2.0.119
-[1m[92m    Checking[0m subtle v2.6.1
+[1m[92m    Checking[0m tracing-core v0.1.36
 [1m[92m   Compiling[0m synstructure v0.14.0
+[1m[92m    Checking[0m subtle v2.6.1
 [1m[92m   Compiling[0m zerofrom-derive v0.1.8
-[1m[92m   Compiling[0m yoke-derive v0.8.4
 [1m[92m    Checking[0m zerofrom v0.1.8
-[1m[92m   Compiling[0m zerovec-derive v0.11.6
+[1m[92m   Compiling[0m yoke-derive v0.8.4
 [1m[92m    Checking[0m yoke v0.8.3
+[1m[92m   Compiling[0m zerovec-derive v0.11.6
 [1m[92m   Compiling[0m displaydoc v0.2.7
 [1m[92m   Compiling[0m tokio-macros v2.7.2
 [1m[92m    Checking[0m zerovec v0.11.8
@@ -218,357 +218,149 @@
 [1m[92m   Compiling[0m futures-macro v0.3.34
 [1m[92m    Checking[0m tokio v1.53.2
 [1m[92m    Checking[0m tinystr v0.8.4
-[1m[92m    Checking[0m potential_utf v0.1.6
 [1m[92m    Checking[0m icu_locale_core v2.3.0
+[1m[92m    Checking[0m potential_utf v0.1.6
 [1m[92m    Checking[0m icu_collections v2.3.0
-[1m[92m    Checking[0m rustls-webpki v0.103.15
-[1m[92m    Checking[0m futures-util v0.3.34
 [1m[92m    Checking[0m icu_provider v2.3.1
+[1m[92m    Checking[0m futures-util v0.3.34
 [1m[92m    Checking[0m icu_normalizer v2.3.0
 [1m[92m    Checking[0m icu_properties v2.3.0
 [1m[92m   Compiling[0m tracing-attributes v0.1.31
-[1m[92m    Checking[0m try-lock v0.2.5
-[1m[92m    Checking[0m tower-service v0.3.3
 [1m[92m   Compiling[0m serde v1.0.229
+[1m[92m    Checking[0m tower-service v0.3.3
 [1m[92m    Checking[0m log v0.4.34
-[1m[92m    Checking[0m tracing v0.1.44
+[1m[92m    Checking[0m try-lock v0.2.5
 [1m[92m    Checking[0m want v0.3.2
-[1m[92m    Checking[0m rand_core v0.9.5
+[1m[92m    Checking[0m tracing v0.1.44
 [1m[92m    Checking[0m idna_adapter v1.2.2
 [1m[92m    Checking[0m ppv-lite86 v0.2.21
 [1m[92m   Compiling[0m serde_derive v1.0.229
+[1m[92m    Checking[0m rand_core v0.9.5
 [1m[92m    Checking[0m crypto-common v0.1.7
 [1m[92m    Checking[0m block-buffer v0.10.4
 [1m[92m    Checking[0m form_urlencoded v1.2.2
 [1m[92m    Checking[0m webpki-roots v1.0.9
-[1m[92m    Checking[0m atomic-waker v1.1.2
-[1m[92m   Compiling[0m thiserror v2.0.21
-[1m[92m   Compiling[0m zmij v1.0.23
 [1m[92m   Compiling[0m autocfg v1.5.1
-[1m[92m    Checking[0m rand_chacha v0.9.0
-[1m[92m    Checking[0m hyper v1.12.0
+[1m[92m    Checking[0m atomic-waker v1.1.2
+[1m[92m   Compiling[0m zmij v1.0.23
+[1m[92m   Compiling[0m thiserror v2.0.21
 [1m[92m   Compiling[0m num-traits v0.2.19
+[1m[92m    Checking[0m hyper v1.12.0
 [1m[92m    Checking[0m digest v0.10.7
+[1m[92m    Checking[0m rand_chacha v0.9.0
 [1m[92m    Checking[0m idna v1.1.0
-[1m[92m    Checking[0m tokio-rustls v0.26.6
 [1m[92m   Compiling[0m thiserror-impl v2.0.21
-[1m[92m    Checking[0m futures-channel v0.3.34
 [1m[92m    Checking[0m sync_wrapper v1.0.2
+[1m[92m    Checking[0m futures-channel v0.3.34
 [1m[92m    Checking[0m base64 v0.23.1
 [1m[92m   Compiling[0m serde_json v1.0.151
-[1m[92m    Checking[0m cpufeatures v0.2.17
-[1m[92m    Checking[0m tower-layer v0.3.3
-[1m[92m    Checking[0m ipnet v2.12.2
 [1m[92m    Checking[0m regex-syntax v0.8.11
-[1m[92m    Checking[0m hyper-util v0.1.21
+[1m[92m    Checking[0m cpufeatures v0.2.17
+[1m[92m    Checking[0m ipnet v2.12.2
+[1m[92m    Checking[0m tower-layer v0.3.3
 [1m[92m    Checking[0m tower v0.5.3
+[1m[92m    Checking[0m hyper-util v0.1.21
 [1m[92m    Checking[0m regex-automata v0.4.18
+[1m[92m    Checking[0m rustls-webpki v0.103.15
 [1m[92m    Checking[0m sha1 v0.10.7
 [1m[92m    Checking[0m url v2.5.8
 [1m[92m    Checking[0m rand v0.9.5
+[1m[92m    Checking[0m bitflags v2.13.2
+[1m[92m    Checking[0m data-encoding v2.11.1
 [1m[92m    Checking[0m memchr v2.8.3
 [1m[92m    Checking[0m ryu v1.0.23
 [1m[92m   Compiling[0m anyhow v1.0.104
-[1m[92m    Checking[0m bitflags v2.13.2
-[1m[92m    Checking[0m lazy_static v1.5.1
-[1m[92m    Checking[0m data-encoding v2.11.1
 [1m[92m    Checking[0m utf-8 v0.7.6
-[1m[92m    Checking[0m tower-http v0.6.11
-[1m[92m    Checking[0m matchers v0.2.0
+[1m[92m    Checking[0m lazy_static v1.5.1
 [1m[92m    Checking[0m sharded-slab v0.1.7
-[1m[92m    Checking[0m tungstenite v0.26.2
 [1m[92m    Checking[0m serde_urlencoded v0.7.1
-[1m[92m    Checking[0m hyper-rustls v0.27.10
+[1m[92m    Checking[0m matchers v0.2.0
+[1m[92m    Checking[0m tower-http v0.6.11
 [1m[92m    Checking[0m webpki-roots v0.26.11
 [1m[92m    Checking[0m tracing-log v0.2.0
 [1m[92m    Checking[0m http-body-util v0.1.5
 [1m[92m    Checking[0m thread_local v1.1.10
 [1m[92m    Checking[0m nu-ansi-term v0.50.3
-[1m[92m    Checking[0m base64 v0.22.1
 [1m[92m    Checking[0m iana-time-zone v0.1.65
-[1m[92m    Checking[0m tracing-subscriber v0.3.23
-[1m[92m    Checking[0m tokio-tungstenite v0.26.2
+[1m[92m    Checking[0m base64 v0.22.1
 [1m[92m    Checking[0m chrono v0.4.45
+[1m[92m    Checking[0m tracing-subscriber v0.3.23
+[1m[92m    Checking[0m tokio-rustls v0.26.6
+[1m[92m    Checking[0m tungstenite v0.26.2
+[1m[92m    Checking[0m hyper-rustls v0.27.10
 [1m[92m    Checking[0m reqwest v0.12.28
+[1m[92m    Checking[0m tokio-tungstenite v0.26.2
 [1m[92m    Checking[0m xauusd-node4-execution v1.0.0 (/home/runner/work/Bot/Bot/node4-execution)
-[1m[91merror[E0584][0m[1m: found a documentation comment that doesn't document anything[0m
-   [1m[94m--> [0msrc/intent.rs:248:5
+[1m[91merror[E0609][0m[1m: no field `order_timeout_ms` on type `&Mt5BridgeLink`[0m
+   [1m[94m--> [0msrc/execution_mt5.rs:561:56
     [1m[94m|[0m
-[1m[94m248[0m [1m[94m|[0m     /// Normalised order type after validation.
-    [1m[94m|[0m     [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[91mthis doc comment doesn't document anything[0m
+[1m[94m561[0m [1m[94m|[0m             timeout_ms: Some(timeout_ms.unwrap_or(self.order_timeout_ms)),
+    [1m[94m|[0m                                                        [1m[91m^^^^^^^^^^^^^^^^[0m [1m[91munknown field[0m
     [1m[94m|[0m
-    [1m[94m= [0m[1mhelp[0m: doc comments must come before what they document, if a comment was intended use `//`
+    [1m[94m= [0m[1mnote[0m: available fields are: `inner`, `configured`, `symbol`
 
-[1m[33mwarning[0m[1m: unused import: `ExecutionVenue`[0m
-  [1m[94m--> [0msrc/intent.rs:17:29
-   [1m[94m|[0m
-[1m[94m17[0m [1m[94m|[0m use crate::config::{Config, ExecutionVenue};
-   [1m[94m|[0m                             [1m[33m^^^^^^^^^^^^^^[0m
-   [1m[94m|[0m
-   [1m[94m= [0m[1mnote[0m: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
-
-[1m[91merror[E0422][0m[1m: cannot find struct, variant or union type `Mt5Position` in this scope[0m
-    [1m[94m--> [0msrc/execution_mt5.rs:1175:29
-     [1m[94m|[0m
-[1m[94m1175[0m [1m[94m|[0m             positions: vec![Mt5Position {
-     [1m[94m|[0m                             [1m[91m^^^^^^^^^^^[0m [1m[91mnot found in this scope[0m
-     [1m[94m|[0m
-[1m[96mhelp[0m: consider importing this struct
-     [1m[94m|[0m
-[1m[94m1002[0m [92m+ [0m    [92muse crate::types::Mt5Position;[0m
-     [1m[94m|[0m
-
-[1m[91merror[E0382][0m[1m: borrow of moved value: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:372:84
+[1m[91merror[E0609][0m[1m: no field `order_timeout_ms` on type `&Mt5BridgeLink`[0m
+   [1m[94m--> [0msrc/execution_mt5.rs:564:55
     [1m[94m|[0m
-[1m[94m355[0m [1m[94m|[0m             let ledger = self.ledger_stats().await;
-    [1m[94m|[0m                 [1m[94m------[0m [1m[94mmove occurs because `ledger` has type `LedgerCache`, which does not implement the `Copy` trait[0m
+[1m[94m564[0m [1m[94m|[0m             .request(frame, timeout_ms.unwrap_or(self.order_timeout_ms) + 5_000)
+    [1m[94m|[0m                                                       [1m[91m^^^^^^^^^^^^^^^^[0m [1m[91munknown field[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: available fields are: `inner`, `configured`, `symbol`
+
+[1m[91merror[E0609][0m[1m: no field `order_timeout_ms` on type `&execution_mt5::Mt5BridgeLink`[0m
+   [1m[94m--> [0msrc/execution_mt5.rs:561:56
+    [1m[94m|[0m
+[1m[94m561[0m [1m[94m|[0m             timeout_ms: Some(timeout_ms.unwrap_or(self.order_timeout_ms)),
+    [1m[94m|[0m                                                        [1m[91m^^^^^^^^^^^^^^^^[0m [1m[91munknown field[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: available fields are: `inner`, `configured`, `symbol`
+
+[1m[91merror[E0609][0m[1m: no field `order_timeout_ms` on type `&execution_mt5::Mt5BridgeLink`[0m
+   [1m[94m--> [0msrc/execution_mt5.rs:564:55
+    [1m[94m|[0m
+[1m[94m564[0m [1m[94m|[0m             .request(frame, timeout_ms.unwrap_or(self.order_timeout_ms) + 5_000)
+    [1m[94m|[0m                                                       [1m[91m^^^^^^^^^^^^^^^^[0m [1m[91munknown field[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mnote[0m: available fields are: `inner`, `configured`, `symbol`
+
+[1m[91merror[E0599][0m[1m: no method named `control_enabled` found for struct `execution_mt5::Mt5BridgeLink` in the current scope[0m
+    [1m[94m--> [0msrc/execution_mt5.rs:1011:22
+     [1m[94m|[0m
+[1m[94m 123[0m [1m[94m|[0m pub struct Mt5BridgeLink {
+     [1m[94m|[0m [1m[94m------------------------[0m [1m[94mmethod `control_enabled` not found for this struct[0m
 [1m[94m...[0m
-[1m[94m372[0m [1m[94m|[0m             (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m              [1m[94m------[0m [1m[94mvalue moved here[0m                                               [1m[91m^^^^^^^[0m [1m[91mvalue borrowed here after move[0m
-    [1m[94m|[0m
-[1m[96mhelp[0m: consider cloning the value if the performance cost is acceptable
-    [1m[94m|[0m
-[1m[94m372[0m [1m[94m| [0m            (ledger[92m.clone()[0m, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m                    [92m++++++++[0m
+[1m[94m1011[0m [1m[94m|[0m         assert!(link.control_enabled());
+     [1m[94m|[0m                      [1m[91m^^^^^^^^^^^^^^^[0m [1m[91mmethod not found in `execution_mt5::Mt5BridgeLink`[0m
 
-[1m[91merror[E0382][0m[1m: borrow of moved value: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:404:84
-    [1m[94m|[0m
-[1m[94m385[0m [1m[94m|[0m             let ledger = self.ledger_stats().await;
-    [1m[94m|[0m                 [1m[94m------[0m [1m[94mmove occurs because `ledger` has type `LedgerCache`, which does not implement the `Copy` trait[0m
+[1m[91merror[E0599][0m[1m: no method named `volume_lots` found for struct `execution_mt5::Mt5BridgeLink` in the current scope[0m
+    [1m[94m--> [0msrc/execution_mt5.rs:1012:25
+     [1m[94m|[0m
+[1m[94m 123[0m [1m[94m|[0m pub struct Mt5BridgeLink {
+     [1m[94m|[0m [1m[94m------------------------[0m [1m[94mmethod `volume_lots` not found for this struct[0m
 [1m[94m...[0m
-[1m[94m404[0m [1m[94m|[0m             (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m              [1m[94m------[0m [1m[94mvalue moved here[0m                                               [1m[91m^^^^^^^[0m [1m[91mvalue borrowed here after move[0m
-    [1m[94m|[0m
-[1m[96mhelp[0m: consider cloning the value if the performance cost is acceptable
-    [1m[94m|[0m
-[1m[94m404[0m [1m[94m| [0m            (ledger[92m.clone()[0m, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m                    [92m++++++++[0m
+[1m[94m1012[0m [1m[94m|[0m         assert_eq!(link.volume_lots(), crate::config::DEFAULT_MT5_VOLUME_LOTS);
+     [1m[94m|[0m                         [1m[91m^^^^^^^^^^^[0m [1m[91mmethod not found in `execution_mt5::Mt5BridgeLink`[0m
 
-[1m[91merror[E0382][0m[1m: borrow of moved value: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:425:84
-    [1m[94m|[0m
-[1m[94m417[0m [1m[94m|[0m             let ledger = self.ledger_stats().await;
-    [1m[94m|[0m                 [1m[94m------[0m [1m[94mmove occurs because `ledger` has type `LedgerCache`, which does not implement the `Copy` trait[0m
+[1m[91merror[E0599][0m[1m: no method named `snapshot_state` found for struct `execution_mt5::Mt5BridgeLink` in the current scope[0m
+    [1m[94m--> [0msrc/execution_mt5.rs:1132:26
+     [1m[94m|[0m
+[1m[94m 123[0m [1m[94m|[0m pub struct Mt5BridgeLink {
+     [1m[94m|[0m [1m[94m------------------------[0m [1m[94mmethod `snapshot_state` not found for this struct[0m
 [1m[94m...[0m
-[1m[94m425[0m [1m[94m|[0m             (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m              [1m[94m------[0m [1m[94mvalue moved here[0m                                               [1m[91m^^^^^^^[0m [1m[91mvalue borrowed here after move[0m
-    [1m[94m|[0m
-[1m[96mhelp[0m: consider cloning the value if the performance cost is acceptable
-    [1m[94m|[0m
-[1m[94m425[0m [1m[94m| [0m            (ledger[92m.clone()[0m, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m                    [92m++++++++[0m
+[1m[94m1132[0m [1m[94m|[0m         let state = link.snapshot_state().await;
+     [1m[94m|[0m                          [1m[91m^^^^^^^^^^^^^^[0m [1m[91mmethod not found in `execution_mt5::Mt5BridgeLink`[0m
 
-[1m[91merror[E0382][0m[1m: borrow of moved value: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:438:84
+[1m[91merror[E0560][0m[1m: struct `ledger::IntentLedgerState` has no field named `intent_id`[0m
+   [1m[94m--> [0msrc/node3.rs:884:13
     [1m[94m|[0m
-[1m[94m434[0m [1m[94m|[0m             let ledger = self.ledger_stats().await;
-    [1m[94m|[0m                 [1m[94m------[0m [1m[94mmove occurs because `ledger` has type `LedgerCache`, which does not implement the `Copy` trait[0m
-[1m[94m...[0m
-[1m[94m438[0m [1m[94m|[0m             (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m              [1m[94m------[0m [1m[94mvalue moved here[0m                                               [1m[91m^^^^^^^[0m [1m[91mvalue borrowed here after move[0m
+[1m[94m884[0m [1m[94m|[0m             intent_id: intent.intent_id.clone(),
+    [1m[94m|[0m             [1m[91m^^^^^^^^^[0m [1m[91m`ledger::IntentLedgerState` does not have this field[0m
     [1m[94m|[0m
-[1m[96mhelp[0m: consider cloning the value if the performance cost is acceptable
-    [1m[94m|[0m
-[1m[94m438[0m [1m[94m| [0m            (ledger[92m.clone()[0m, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m                    [92m++++++++[0m
+    [1m[94m= [0m[1mnote[0m: available fields are: `last_report`, `broker_commands`, `reconciled`, `duplicates`, `first_seen_ms`, `last_update_ms`
 
-[1m[91merror[E0382][0m[1m: borrow of moved value: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:458:84
-    [1m[94m|[0m
-[1m[94m446[0m [1m[94m|[0m             let ledger = self.ledger_stats().await;
-    [1m[94m|[0m                 [1m[94m------[0m [1m[94mmove occurs because `ledger` has type `LedgerCache`, which does not implement the `Copy` trait[0m
-[1m[94m...[0m
-[1m[94m458[0m [1m[94m|[0m             (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m              [1m[94m------[0m [1m[94mvalue moved here[0m                                               [1m[91m^^^^^^^[0m [1m[91mvalue borrowed here after move[0m
-    [1m[94m|[0m
-[1m[96mhelp[0m: consider cloning the value if the performance cost is acceptable
-    [1m[94m|[0m
-[1m[94m458[0m [1m[94m| [0m            (ledger[92m.clone()[0m, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m                    [92m++++++++[0m
-
-[1m[91merror[E0382][0m[1m: borrow of moved value: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:480:84
-    [1m[94m|[0m
-[1m[94m465[0m [1m[94m|[0m             let ledger = self.ledger_stats().await;
-    [1m[94m|[0m                 [1m[94m------[0m [1m[94mmove occurs because `ledger` has type `LedgerCache`, which does not implement the `Copy` trait[0m
-[1m[94m...[0m
-[1m[94m480[0m [1m[94m|[0m             (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m              [1m[94m------[0m [1m[94mvalue moved here[0m                                               [1m[91m^^^^^^^[0m [1m[91mvalue borrowed here after move[0m
-    [1m[94m|[0m
-[1m[96mhelp[0m: consider cloning the value if the performance cost is acceptable
-    [1m[94m|[0m
-[1m[94m480[0m [1m[94m| [0m            (ledger[92m.clone()[0m, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m                    [92m++++++++[0m
-
-[1m[91merror[E0382][0m[1m: borrow of moved value: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:501:84
-    [1m[94m|[0m
-[1m[94m487[0m [1m[94m|[0m             let ledger = self.ledger_stats().await;
-    [1m[94m|[0m                 [1m[94m------[0m [1m[94mmove occurs because `ledger` has type `LedgerCache`, which does not implement the `Copy` trait[0m
-[1m[94m...[0m
-[1m[94m501[0m [1m[94m|[0m             (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m              [1m[94m------[0m [1m[94mvalue moved here[0m                                               [1m[91m^^^^^^^[0m [1m[91mvalue borrowed here after move[0m
-    [1m[94m|[0m
-[1m[96mhelp[0m: consider cloning the value if the performance cost is acceptable
-    [1m[94m|[0m
-[1m[94m501[0m [1m[94m| [0m            (ledger[92m.clone()[0m, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m                    [92m++++++++[0m
-
-[1m[91merror[E0382][0m[1m: borrow of moved value: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:550:84
-    [1m[94m|[0m
-[1m[94m508[0m [1m[94m|[0m             let ledger = self.ledger_stats().await;
-    [1m[94m|[0m                 [1m[94m------[0m [1m[94mmove occurs because `ledger` has type `LedgerCache`, which does not implement the `Copy` trait[0m
-[1m[94m...[0m
-[1m[94m550[0m [1m[94m|[0m             (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m              [1m[94m------[0m [1m[94mvalue moved here[0m                                               [1m[91m^^^^^^^[0m [1m[91mvalue borrowed here after move[0m
-    [1m[94m|[0m
-[1m[96mhelp[0m: consider cloning the value if the performance cost is acceptable
-    [1m[94m|[0m
-[1m[94m550[0m [1m[94m| [0m            (ledger[92m.clone()[0m, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m                    [92m++++++++[0m
-
-[1m[91merror[E0382][0m[1m: borrow of moved value: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:594:84
-    [1m[94m|[0m
-[1m[94m585[0m [1m[94m|[0m             let ledger = self.ledger_stats().await;
-    [1m[94m|[0m                 [1m[94m------[0m [1m[94mmove occurs because `ledger` has type `LedgerCache`, which does not implement the `Copy` trait[0m
-[1m[94m...[0m
-[1m[94m594[0m [1m[94m|[0m             (ledger, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m              [1m[94m------[0m [1m[94mvalue moved here[0m                                               [1m[91m^^^^^^^[0m [1m[91mvalue borrowed here after move[0m
-    [1m[94m|[0m
-[1m[96mhelp[0m: consider cloning the value if the performance cost is acceptable
-    [1m[94m|[0m
-[1m[94m594[0m [1m[94m| [0m            (ledger[92m.clone()[0m, Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger))
-    [1m[94m|[0m                    [92m++++++++[0m
-
-[1m[91merror[E0560][0m[1m: struct `config::Config` has no field named `order_size`[0m
-    [1m[94m--> [0msrc/execution_deriv.rs:1696:13
-     [1m[94m|[0m
-[1m[94m1696[0m [1m[94m|[0m             order_size: 0.01,
-     [1m[94m|[0m             [1m[91m^^^^^^^^^^[0m [1m[91m`config::Config` does not have this field[0m
-     [1m[94m|[0m
-     [1m[94m= [0m[1mnote[0m: available fields are: `node3_ws_url`, `node4_shared_token`, `protocol_version`, `port`, `node3_hello_timeout_ms` ... and 20 others
-
-[1m[91merror[E0560][0m[1m: struct `config::Config` has no field named `order_size`[0m
-    [1m[94m--> [0msrc/execution_deriv.rs:1769:13
-     [1m[94m|[0m
-[1m[94m1769[0m [1m[94m|[0m             order_size: 0.01,
-     [1m[94m|[0m             [1m[91m^^^^^^^^^^[0m [1m[91m`config::Config` does not have this field[0m
-     [1m[94m|[0m
-     [1m[94m= [0m[1mnote[0m: available fields are: `node3_ws_url`, `node4_shared_token`, `protocol_version`, `port`, `node3_hello_timeout_ms` ... and 21 others
-
-[1m[91merror[E0308][0m[1m: mismatched types[0m
-    [1m[94m--> [0msrc/health.rs:1343:20
-     [1m[94m|[0m
-[1m[94m1343[0m [1m[94m|[0m             let Ok(Ok(msg)) = tokio::time::timeout(Duration::from_secs(2), frontend.next()).await
-     [1m[94m|[0m                    [1m[91m^^^^^^^[0m    [1m[94m-------------------------------------------------------------------[0m [1m[94mthis expression has type `Result<Option<Result<Message, Error>>, Elapsed>`[0m
-     [1m[94m|[0m                    [1m[91m|[0m
-     [1m[94m|[0m                    [1m[91mexpected `Option<Result<Message, Error>>`, found `Result<_, _>`[0m
-     [1m[94m|[0m
-     [1m[94m= [0m[1mnote[0m: expected enum `[1m[35mstd::option::Option[0m[1m[35m<[0mResult<[1m[35mtokio_tungstenite::tungstenite::Message[0m, [1m[35mtokio_tungstenite::tungstenite::Error[0m>[1m[35m>[0m`
-                found enum `Result<[1m[35m_[0m, [1m[35m_[0m>`
-     [1m[94m= [0m[1mnote[0m: the full name for the type has been written to '/home/runner/work/Bot/Bot/node4-execution/target/debug/deps/xauusd_node4_execution-84ffa24230fc0db1.long-type-5464462822783929159.txt'
-     [1m[94m= [0m[1mnote[0m: consider using `--verbose` to print the full type name to the console
-
-[1m[91merror[E0618][0m[1m: expected function, found `intent::TradeIntent`[0m
-    [1m[94m--> [0msrc/ledger.rs:497:22
-     [1m[94m|[0m
-[1m[94m 369[0m [1m[94m|[0m     fn intent(id: &str) -> TradeIntent {
-     [1m[94m|[0m     [1m[94m----------------------------------[0m [1m[94mthis function of the same name is available here, but it's shadowed by the local binding[0m
-[1m[94m...[0m
-[1m[94m 491[0m [1m[94m|[0m         let intent = intent("n3-xauusd-3-buy-pw-poc");
-     [1m[94m|[0m             [1m[94m------[0m [1m[94m`intent` has type `intent::TradeIntent`[0m
-[1m[94m...[0m
-[1m[94m 497[0m [1m[94m|[0m                     &intent("n3-xauusd-3-buy-pw-poc"),
-     [1m[94m|[0m                      [1m[91m^^^^^^[0m[1m[94m--------------------------[0m
-     [1m[94m|[0m                      [1m[94m|[0m
-     [1m[94m|[0m                      [1m[94mcall expression requires function[0m
-     [1m[94m|[0m
-    [1m[94m::: [0msrc/execution_mt5.rs:1016:5
-     [1m[94m|[0m
-[1m[94m1016[0m [1m[94m|[0m     fn intent(side: &str) -> TradeIntent {
-     [1m[94m|[0m     [1m[94m------------------------------------[0m [1m[94mthis function of the same name is available here, but it's shadowed by the local binding[0m
-     [1m[94m|[0m
-    [1m[94m::: [0msrc/intent.rs:509:5
-     [1m[94m|[0m
-[1m[94m 509[0m [1m[94m|[0m     fn intent(side: &str) -> TradeIntent {
-     [1m[94m|[0m     [1m[94m------------------------------------[0m [1m[94mthis function of the same name is available here, but it's shadowed by the local binding[0m
-     [1m[94m|[0m
-    [1m[94m::: [0msrc/execution.rs:400:5
-     [1m[94m|[0m
-[1m[94m 400[0m [1m[94m|[0m     fn intent() -> TradeIntent {
-     [1m[94m|[0m     [1m[94m--------------------------[0m [1m[94mthis function of the same name is available here, but it's shadowed by the local binding[0m
-     [1m[94m|[0m
-    [1m[94m::: [0msrc/node3.rs:815:5
-     [1m[94m|[0m
-[1m[94m 815[0m [1m[94m|[0m     fn intent() -> TradeIntent {
-     [1m[94m|[0m     [1m[94m--------------------------[0m [1m[94mthis function of the same name is available here, but it's shadowed by the local binding[0m
-
-[1m[33mwarning[0m[1m: unused variable: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:354:14
-    [1m[94m|[0m
-[1m[94m354[0m [1m[94m|[0m         let (ledger, snap) = {
-    [1m[94m|[0m              [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_ledger`[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mnote[0m: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
-
-[1m[33mwarning[0m[1m: unused variable: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:384:14
-    [1m[94m|[0m
-[1m[94m384[0m [1m[94m|[0m         let (ledger, snap) = {
-    [1m[94m|[0m              [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_ledger`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:416:14
-    [1m[94m|[0m
-[1m[94m416[0m [1m[94m|[0m         let (ledger, snap) = {
-    [1m[94m|[0m              [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_ledger`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:433:14
-    [1m[94m|[0m
-[1m[94m433[0m [1m[94m|[0m         let (ledger, snap) = {
-    [1m[94m|[0m              [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_ledger`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:445:14
-    [1m[94m|[0m
-[1m[94m445[0m [1m[94m|[0m         let (ledger, snap) = {
-    [1m[94m|[0m              [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_ledger`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:464:14
-    [1m[94m|[0m
-[1m[94m464[0m [1m[94m|[0m         let (ledger, snap) = {
-    [1m[94m|[0m              [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_ledger`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:486:14
-    [1m[94m|[0m
-[1m[94m486[0m [1m[94m|[0m         let (ledger, snap) = {
-    [1m[94m|[0m              [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_ledger`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:507:14
-    [1m[94m|[0m
-[1m[94m507[0m [1m[94m|[0m         let (ledger, snap) = {
-    [1m[94m|[0m              [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_ledger`[0m
-
-[1m[33mwarning[0m[1m: unused variable: `ledger`[0m
-   [1m[94m--> [0msrc/diagnostics.rs:584:14
-    [1m[94m|[0m
-[1m[94m584[0m [1m[94m|[0m         let (ledger, snap) = {
-    [1m[94m|[0m              [1m[33m^^^^^^[0m [1m[33mhelp: if this is intentional, prefix it with an underscore: `_ledger`[0m
-
-[1mSome errors have detailed explanations: E0382, E0584.[0m
-[1mFor more information about an error, try `rustc --explain E0382`.[0m
-[1m[33mwarning[0m: `xauusd-node4-execution` (bin "xauusd-node4-execution") generated 10 warnings
-[1m[91merror[0m: could not compile `xauusd-node4-execution` (bin "xauusd-node4-execution") due to 10 previous errors; 10 warnings emitted
+[1mFor more information about this error, try `rustc --explain E0609`.[0m
+[1m[91merror[0m: could not compile `xauusd-node4-execution` (bin "xauusd-node4-execution") due to 2 previous errors
 [1m[33mwarning[0m: build failed, waiting for other jobs to finish...
-[1mSome errors have detailed explanations: E0308, E0382, E0422, E0560, E0584, E0618.[0m
-[1mFor more information about an error, try `rustc --explain E0308`.[0m
-[1m[33mwarning[0m: `xauusd-node4-execution` (bin "xauusd-node4-execution" test) generated 10 warnings (10 duplicates)
-[1m[91merror[0m: could not compile `xauusd-node4-execution` (bin "xauusd-node4-execution" test) due to 15 previous errors; 10 warnings emitted
+[1mSome errors have detailed explanations: E0560, E0599, E0609.[0m
+[1mFor more information about an error, try `rustc --explain E0560`.[0m
+[1m[91merror[0m: could not compile `xauusd-node4-execution` (bin "xauusd-node4-execution" test) due to 6 previous errors
