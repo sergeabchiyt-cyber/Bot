@@ -1,0 +1,224 @@
+[1m[92m   Compiling[0m cfg-if v1.0.5
+[1m[92m   Compiling[0m libc v0.2.190
+[1m[92m   Compiling[0m smallvec v1.16.2
+[1m[92m   Compiling[0m zerofrom v0.1.8
+[1m[92m   Compiling[0m stable_deref_trait v1.2.1
+[1m[92m   Compiling[0m yoke v0.8.3
+[1m[92m   Compiling[0m bytes v1.12.1
+[1m[92m   Compiling[0m pin-project-lite v0.2.17
+[1m[92m   Compiling[0m zerovec v0.11.8
+[1m[92m   Compiling[0m itoa v1.0.18
+[1m[92m   Compiling[0m once_cell v1.21.4
+[1m[92m   Compiling[0m futures-core v0.3.34
+[1m[92m   Compiling[0m scopeguard v1.2.0
+[1m[92m   Compiling[0m lock_api v0.4.14
+[1m[92m   Compiling[0m zeroize v1.9.1
+[1m[92m   Compiling[0m tinystr v0.8.4
+[1m[92m   Compiling[0m rustls-pki-types v1.15.1
+[1m[92m   Compiling[0m http v1.5.0
+[1m[92m   Compiling[0m writeable v0.6.4
+[1m[92m   Compiling[0m parking_lot_core v0.9.12
+[1m[92m   Compiling[0m errno v0.3.14
+[1m[92m   Compiling[0m signal-hook-registry v1.4.8
+[1m[92m   Compiling[0m parking_lot v0.12.5
+[1m[92m   Compiling[0m socket2 v0.6.5
+[1m[92m   Compiling[0m mio v1.2.4
+[1m[92m   Compiling[0m litemap v0.8.3
+[1m[92m   Compiling[0m icu_locale_core v2.3.0
+[1m[92m   Compiling[0m tokio v1.53.2
+[1m[92m   Compiling[0m getrandom v0.2.17
+[1m[92m   Compiling[0m potential_utf v0.1.6
+[1m[92m   Compiling[0m zerotrie v0.2.5
+[1m[92m   Compiling[0m untrusted v0.9.0
+[1m[92m   Compiling[0m utf8_iter v1.0.4
+[1m[92m   Compiling[0m icu_collections v2.3.0
+[1m[92m   Compiling[0m ring v0.17.14
+[1m[92m   Compiling[0m icu_provider v2.3.1
+[1m[92m   Compiling[0m typenum v1.20.1
+[1m[92m   Compiling[0m futures-sink v0.3.34
+[1m[92m   Compiling[0m futures-task v0.3.34
+[1m[92m   Compiling[0m slab v0.4.12
+[1m[92m   Compiling[0m percent-encoding v2.3.2
+[1m[92m   Compiling[0m futures-util v0.3.34
+[1m[92m   Compiling[0m generic-array v0.14.7
+[1m[92m   Compiling[0m rustls-webpki v0.103.15
+[1m[92m   Compiling[0m icu_normalizer_data v2.3.0
+[1m[92m   Compiling[0m httparse v1.10.1
+[1m[92m   Compiling[0m icu_properties_data v2.3.0
+[1m[92m   Compiling[0m http-body v1.1.0
+[1m[92m   Compiling[0m tracing-core v0.1.36
+[1m[92m   Compiling[0m subtle v2.6.1
+[1m[92m   Compiling[0m rustls v0.23.45
+[1m[92m   Compiling[0m icu_properties v2.3.0
+[1m[92m   Compiling[0m icu_normalizer v2.3.0
+[1m[92m   Compiling[0m getrandom v0.3.4
+[1m[92m   Compiling[0m zerocopy v0.8.61
+[1m[92m   Compiling[0m serde_core v1.0.229
+[1m[92m   Compiling[0m log v0.4.34
+[1m[92m   Compiling[0m try-lock v0.2.5
+[1m[92m   Compiling[0m tower-service v0.3.3
+[1m[92m   Compiling[0m want v0.3.2
+[1m[92m   Compiling[0m idna_adapter v1.2.2
+[1m[92m   Compiling[0m rand_core v0.9.5
+[1m[92m   Compiling[0m tracing v0.1.44
+[1m[92m   Compiling[0m block-buffer v0.10.4
+[1m[92m   Compiling[0m crypto-common v0.1.7
+[1m[92m   Compiling[0m form_urlencoded v1.2.2
+[1m[92m   Compiling[0m webpki-roots v1.0.9
+[1m[92m   Compiling[0m atomic-waker v1.1.2
+[1m[92m   Compiling[0m serde v1.0.229
+[1m[92m   Compiling[0m hyper v1.12.0
+[1m[92m   Compiling[0m ppv-lite86 v0.2.21
+[1m[92m   Compiling[0m digest v0.10.7
+[1m[92m   Compiling[0m idna v1.1.0
+[1m[92m   Compiling[0m rand_chacha v0.9.0
+[1m[92m   Compiling[0m tokio-rustls v0.26.6
+[1m[92m   Compiling[0m sync_wrapper v1.0.2
+[1m[92m   Compiling[0m futures-channel v0.3.34
+[1m[92m   Compiling[0m cpufeatures v0.2.17
+[1m[92m   Compiling[0m base64 v0.23.1
+[1m[92m   Compiling[0m regex-syntax v0.8.11
+[1m[92m   Compiling[0m ipnet v2.12.2
+[1m[92m   Compiling[0m tower-layer v0.3.3
+[1m[92m   Compiling[0m tower v0.5.3
+[1m[92m   Compiling[0m hyper-util v0.1.21
+[1m[92m   Compiling[0m sha1 v0.10.7
+[1m[92m   Compiling[0m thiserror v2.0.21
+[1m[92m   Compiling[0m regex-automata v0.4.18
+[1m[92m   Compiling[0m url v2.5.8
+[1m[92m   Compiling[0m rand v0.9.5
+[1m[92m   Compiling[0m zmij v1.0.23
+[1m[92m   Compiling[0m memchr v2.8.3
+[1m[92m   Compiling[0m lazy_static v1.5.1
+[1m[92m   Compiling[0m utf-8 v0.7.6
+[1m[92m   Compiling[0m bitflags v2.13.2
+[1m[92m   Compiling[0m data-encoding v2.11.1
+[1m[92m   Compiling[0m ryu v1.0.23
+[1m[92m   Compiling[0m tungstenite v0.26.2
+[1m[92m   Compiling[0m matchers v0.2.0
+[1m[92m   Compiling[0m serde_urlencoded v0.7.1
+[1m[92m   Compiling[0m serde_json v1.0.151
+[1m[92m   Compiling[0m tower-http v0.6.11
+[1m[92m   Compiling[0m sharded-slab v0.1.7
+[1m[92m   Compiling[0m num-traits v0.2.19
+[1m[92m   Compiling[0m hyper-rustls v0.27.10
+[1m[92m   Compiling[0m webpki-roots v0.26.11
+[1m[92m   Compiling[0m tracing-log v0.2.0
+[1m[92m   Compiling[0m http-body-util v0.1.5
+[1m[92m   Compiling[0m thread_local v1.1.10
+[1m[92m   Compiling[0m nu-ansi-term v0.50.3
+[1m[92m   Compiling[0m iana-time-zone v0.1.65
+[1m[92m   Compiling[0m base64 v0.22.1
+[1m[92m   Compiling[0m chrono v0.4.45
+[1m[92m   Compiling[0m tracing-subscriber v0.3.23
+[1m[92m   Compiling[0m tokio-tungstenite v0.26.2
+[1m[92m   Compiling[0m reqwest v0.12.28
+[1m[92m   Compiling[0m anyhow v1.0.104
+[1m[92m   Compiling[0m xauusd-node4-execution v1.0.0 (/home/runner/work/Bot/Bot/node4-execution)
+[1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 16.13s
+[1m[92m     Running[0m unittests src/main.rs (target/debug/deps/xauusd_node4_execution-ec569d74deb4d773)
+
+running 84 tests
+test config::tests::detects_whether_deriv_app_id_is_configured ... ok
+test config::tests::deriv_ws_url_does_not_force_app_id ... ok
+test config::tests::deriv_ws_url_appends_configured_app_id ... ok
+test config::tests::legacy_single_venue_configuration_still_resolves ... ok
+test config::tests::mt5_broker_symbol_mapping_is_explicit ... ok
+test config::tests::mt5_control_requires_a_token ... ok
+test config::tests::mt5_token_alone_selects_the_mt5_venue ... ok
+test config::tests::mt5_volume_default_is_not_the_options_stake ... ok
+
+thread 'config::tests::startup_refuses_a_contradictory_venue' (4989) panicked at src/config.rs:832:9:
+assertion failed: errors.iter().any(|e| e.contains("venue"))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test config::tests::startup_requires_the_node3_link_and_a_token ... ok
+test config::tests::mt5_symbol_and_volume_are_validated ... ok
+test config::tests::stored_venue_follows_the_decision_and_reports_errors ... ok
+test config::tests::startup_refuses_a_contradictory_venue ... FAILED
+test config::tests::venue_labels_and_parsing_round_trip ... ok
+test config::tests::symbol_resolution_is_exact_or_explicitly_mapped ... ok
+test config::tests::unknown_venue_override_is_refused ... ok
+test config::tests::venues_are_mutually_exclusive_and_fail_closed ... ok
+
+thread 'execution::tests::mt5_health_is_refused_without_a_bridge_session' (4999) panicked at src/execution.rs:456:9:
+assertion `left == right` failed
+  left: "mt5_bridge_not_connected"
+ right: "venue_configuration_error"
+test execution::tests::mt5_health_is_refused_without_a_bridge_session ... FAILED
+test diagnostics::tests::report_counters_track_broker_outcomes ... ok
+test diagnostics::tests::open_trades_are_execution_records_keyed_by_intent ... ok
+test diagnostics::tests::the_snapshot_separates_the_node3_link_from_the_broker ... ok
+test execution::tests::only_unclear_write_codes_become_unknown ... ok
+test execution::tests::the_none_venue_is_explicit_dry_run ... ok
+test execution::tests::trade_records_carry_the_intent_and_node3_prices ... ok
+test execution_deriv::tests::clamps_stakes_below_the_deriv_minimum ... ok
+test execution_deriv::tests::blank_app_id_is_treated_as_unset ... ok
+test execution_deriv::tests::detects_pat_tokens ... ok
+test execution_deriv::tests::a_rejected_order_names_the_shape_that_was_sent ... ok
+test execution_deriv::tests::explains_the_errors_that_stopped_trading ... ok
+test execution_deriv::tests::a_response_must_answer_the_request_that_was_sent ... ok
+test execution_deriv::tests::duration_specs_never_mix_ticks_with_wall_clock_windows ... ok
+test execution_deriv::tests::flags_pat_without_app_id ... ok
+test execution_deriv::tests::formats_rest_api_errors ... ok
+test execution_deriv::tests::hand_built_upgrade_request_is_rejected_without_a_socket_key ... ok
+test execution_deriv::tests::handshake_request_carries_the_required_upgrade_headers ... ok
+test execution_deriv::tests::labels_token_kinds ... ok
+test execution_deriv::tests::legacy_fallback_rules ... ok
+test execution_deriv::tests::legacy_candidates_honor_configured_url_and_app_id ... ok
+test execution_deriv::tests::legacy_candidates_fail_over_across_hosts ... ok
+test execution_deriv::tests::pat_guidance_includes_the_underlying_error_and_remedy ... ok
+test execution_deriv::tests::only_a_barrier_complaint_triggers_the_barrier_retry ... ok
+test execution_deriv::tests::parses_portfolio_and_open_contract_messages ... ok
+test execution_deriv::tests::pat_remedy_distinguishes_missing_from_wrong_app_id ... ok
+test execution_deriv::tests::parses_contracts_for_specs ... ok
+test execution_deriv::tests::redacts_and_strips_url_secrets ... ok
+test execution_deriv::tests::reads_money_fields_from_numbers_and_strings ... ok
+test execution_deriv::tests::relative_barriers_are_signed_and_pip_sized ... ok
+test execution_mt5::tests::account_frames_update_the_snapshot_cache ... ok
+test execution_mt5::tests::commands_without_a_session_fail_closed ... ok
+test execution_deriv::tests::selects_demo_account_from_rest_payloads ... ok
+test execution_mt5::tests::bridge_acks_resolve_pending_requests ... ok
+test execution_mt5::tests::hello_authorization_requires_a_matching_server_side_token ... ok
+test execution_mt5::tests::link_defaults_are_unconfigured_and_fail_closed ... ok
+test execution_mt5::tests::outcome_status_maps_the_bridge_contract ... ok
+test execution_mt5::tests::reconciliation_matches_a_broker_comment_by_intent_id ... ok
+test execution_mt5::tests::risk_estimate_needs_the_broker_contract_size ... ok
+test health::tests::detects_websocket_upgrade_headers ... ok
+test health::tests::health_path_is_ok ... ok
+test execution_mt5::tests::the_order_path_refuses_everything_without_a_healthy_bridge ... ok
+test health::tests::node4_has_no_market_resources ... ok
+test health::tests::mt5_commands_fail_closed_without_a_bridge_session ... ok
+test health::tests::other_paths_are_not_found ... ok
+test health::tests::query_string_is_ignored ... ok
+test health::tests::topic_filter_allows_default_and_specific_topics ... ok
+test intent::tests::buy_and_sell_intents_keep_node3_prices_untouched ... ok
+test intent::tests::hello_ack_requires_accepted_true ... ok
+test intent::tests::hello_frame_matches_the_protocol_document ... ok
+test health::tests::ws_and_http_diagnostics_server_roundtrip ... ok
+test intent::tests::protocol_intent_round_trips_from_the_documented_payload ... ok
+test intent::tests::reports_serialise_with_the_documented_status_strings ... ok
+test intent::tests::validation_accepts_both_sides_and_rejects_broken_payloads ... ok
+test ledger::tests::an_unwritable_path_reports_unavailable ... ok
+test ledger::tests::malformed_lines_do_not_prevent_startup ... ok
+test ledger::tests::accepted_intents_survive_a_reopen_and_block_the_second_attempt ... ok
+test ledger::tests::the_ledger_never_contains_a_secret_looking_field ... ok
+test node3::tests::a_report_is_retried_only_after_the_ack_timeout ... ok
+test node3::tests::a_duplicate_intent_replays_the_recorded_result ... ok
+test node3::tests::link_freshness_uses_the_configured_stale_window ... ok
+test node3::tests::refusals_become_rejected_reports_with_the_exact_reason ... ok
+test types::tests::bridge_frames_round_trip_through_the_tagged_enum ... ok
+test types::tests::execution_trade_serialisation_keeps_optional_fields_absent ... ok
+test types::tests::mt5_order_outcome_requires_a_confirmed_fill ... ok
+test types::tests::open_trades_uses_the_node4_field_name ... ok
+test execution_mt5::tests::a_command_without_an_ack_times_out_without_hanging ... ok
+test health::tests::mt5_bridge_session_authenticates_streams_and_accepts_control ... ok
+
+failures:
+
+failures:
+    config::tests::startup_refuses_a_contradictory_venue
+    execution::tests::mt5_health_is_refused_without_a_bridge_session
+
+test result: FAILED. 82 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
+
+[1m[91merror[0m: test failed, to rerun pass `--bin xauusd-node4-execution`
