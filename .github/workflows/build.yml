@@ -269,6 +269,8 @@ jobs:
         if: success()
         continue-on-error: true
         working-directory: ${{ github.workspace }}
+        env:
+          CARGO_TERM_COLOR: never
         run: |
           set -eu
           {
@@ -292,6 +294,9 @@ jobs:
               | grep -E "^(test result|running |   Doc-tests|error)" || true
             echo '```'
           } > /tmp/HOST-PROOF.md
+          # Belt and braces: cargo honours CARGO_TERM_COLOR above, but the tee'd
+          # test log was written by a step that did not set it.
+          sed -i -E 's/\x1b\[[0-9;]*[A-Za-z]//g' /tmp/HOST-PROOF.md
           for attempt in 1 2 3 4 5; do
             # Another job may publish its own log at the same time; rebuild on
             # top of whatever the branch is now and retry the push.
