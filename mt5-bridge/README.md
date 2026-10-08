@@ -5,6 +5,12 @@ gives Node 4 full control of a Deriv MT5 **demo** account: place orders, modify
 stops, close positions, close everything, halt/resume, and read the account,
 positions and closed-deal history.
 
+On Linux the bridge is started (and restarted) by `mt5-host`, the headless
+terminal host — it owns the Wine prefix, installs and logs in the terminal,
+attaches this EA and then spawns the bridge with the environment below. See
+[`../mt5-host/README.md`](../mt5-host/README.md). Started by hand on Windows or
+Linux, the bridge behaves identically: it reads the process environment only.
+
 Read [`../docs/mt5/EXECUTION_ARCHITECTURE.md`](../docs/mt5/EXECUTION_ARCHITECTURE.md)
 first — it explains the topology (why the bridge must be the TCP server and why
 it cannot run on the Node 4 host), the venue rules and the integration gate.
@@ -64,10 +70,28 @@ demo account — a second layer behind the bridge's own demo guard.
 
 ### 2.2 Bridge side
 
+The bridge reads its configuration from the **process environment** — it does
+not parse a `.env` file. Keep the values in `.env` (never committed) and export
+them before starting, or wrap the start command in a script:
+
 ```bash
 cd mt5-bridge
 cp .env.example .env      # fill it in; never commit it
+
+# Linux / macOS / Wine
+set -a; . ./.env; set +a
 cargo run --release
+```
+
+```bat
+:: Windows (run-bridge.cmd) — `set` lines instead of sourcing .env
+set NODE4_WS_URL=wss://<node4-host>/mt5/bridge
+set MT5_BRIDGE_TOKEN=<same value as Node 4's MT5_BRIDGE_TOKEN>
+set MT5_EA_TOKEN=<must equal the EA input InpToken>
+set MT5_LOGIN=<demo account number>
+set MT5_PASSWORD=<demo account password>
+set MT5_TRADING_ENABLED=0
+mt5-bridge.exe
 ```
 
 For protocol work without a terminal (no broker, no orders):

@@ -22,11 +22,15 @@ Two facts drive the whole design:
 1. **MQL5 sockets are client-only.** `SocketCreate` + `SocketConnect` exist;
    there is no `SocketBind` / `SocketListen` / `SocketAccept`. A process can
    therefore never connect *to* the terminal. The terminal must connect *out*.
-2. **The MT5 terminal cannot run on the Node 4 host.** It is a Windows GUI
-   application (or a Wine container with a desktop), it needs a persistent
-   profile, and Render's containers are ephemeral. The bridge therefore runs on
-   the same machine as the terminal, and the terminal-side EA dials into the
-   bridge on loopback.
+2. **The MT5 terminal cannot run inside the Node 4 process.** It is a Windows
+   GUI application, it needs its own Wine prefix and login session, and it must
+   not share the execution service's memory budget. The bridge therefore runs on
+   the same *machine* as the terminal, and the terminal-side EA dials into the
+   bridge on loopback — which is also why the terminal host is a separate
+   service rather than another endpoint of this one. `mt5-host`
+   (`../mt5-host/README.md`) is that service: a Linux container that installs
+   the terminal under Wine, attaches the EA and supervises the bridge, with no
+   desktop and no inbound control port. §1.1 covers what it changes.
 
 ```text
   ┌──────────────────────────── Render (public) ─────────────────────────────┐
@@ -39,8 +43,10 @@ Two facts drive the whole design:
   └──────────────────────────────────▲───────────────────────────────────────┘
                                      │ outbound WSS, `bridge_hello {token}`
                                      │ (no inbound port on the terminal host)
-  ┌────────────────── MT5 host (Windows / Wine) ────────────────────────────┐
-  │  mt5-bridge (Rust)                                                      │
+  ┌──────── MT5 host (Linux + wine + Xvfb, or Windows) ─────────────────────┐
+  │  mt5-host (Rust)            supervisor: Xvfb, prefix, install, EA,      │
+  │                             startup ini, terminal, /health /readyz      │
+  │  mt5-bridge (Rust)          started and restarted by mt5-host           │
   │    • listens on MT5_EA_BIND_ADDR:MT5_EA_PORT (default 127.0.0.1:5055)    │
   │    • demo guard, validation, idempotency, reconciliation, JSONL history  │
   │         ▲ line protocol over loopback TCP                               │
@@ -66,6 +72,53 @@ The design doc's original sketch ("bridge hosted on Render, reach the terminal
 from there") is **not realizable**: it would require the terminal side to accept
 inbound connections, which MQL5 cannot do. The corrected shape above is what is
 implemented.
+
+### 1.1 The terminal host on Linux (supersedes the Windows/Wine-desktop assumption)
+
+The MT5 host is no longer assumed to be a Windows box (or a Wine container with
+a desktop someone can look at). `mt5-host` runs the same topology inside one
+headless Linux container:
+
+* **Xvfb** provides a virtual display, so the terminal's GUI has a screen that
+  nothing ever renders to. There is no VNC, no RDP and no open graphics port.
+* **Wine** runs `terminal64.exe`, installed unattended from `mt5setup.exe /auto`
+  during the container's boot stages.
+* **The EA is attached by configuration**, not by hand: the host writes the MT5
+  startup ini (`[StartUp] Expert=Node4\Mt5BridgeEA`) and compiles the EA with
+  `metaeditor64 /compile`, so a fresh container reaches the same state a
+  hand-configured Windows terminal would.
+* **The bridge is a child process** of the host, inheriting the operator's
+  environment plus the defaults the host owns (`MT5_TRADING_ENABLED=0`,
+  `MT5_HISTORY_FILE`, `MT5_EA_PORT`).
+* `GET /health`, `/readyz` and `/diagnostics` report the terminal side; there is
+  still no inbound control port, and the host has no order path of its own.
+
+The parts of the deployment that this does *not* fix are the platform's, and
+they are documented honestly in `mt5-host/README.md` §*Free-plan realities*: an
+ephemeral filesystem (the prefix is rebuilt from the image on every deploy), a
+free instance that spins down after 15 minutes without inbound traffic (taking
+the login session with it), and 0.1 CPU for an unloved Windows application. The
+Windows deployment remains supported — nothing in the bridge, the EA or the
+protocol changes — it is simply no longer the only shape.
+
+---
+
+## 1.2 Where credentials live on the Linux host
+
+The startup ini is the only file that ever holds the terminal password. It is
+written mode 0600 into the state directory and deleted as soon as the EA
+connects, because from then on the terminal owns its session:
+
+| secret | where it lives | where it must never appear |
+|---|---|---|
+| `MT5_PASSWORD` | the container's environment, then `mt5-start.ini` (0600, deleted after attach) | logs, `/diagnostics`, the bridge, Node 4, a prepared prefix |
+| `MT5_LOGIN` / `MT5_SERVER` | same as above; they are identifiers, not secrets | — |
+| `MT5_BRIDGE_TOKEN` | environment of Node 4 and of the bridge | the prepared prefix image/archive (`MT5_HOST_PREPARE_ONLY=1` refuses to run with it set) |
+| `MT5_EA_TOKEN` | environment of the bridge and the EA's input | any non-loopback listener (unset ⇒ the bridge is read-only) |
+
+`ci/mt5/protocol_lint.py` fails the build if the bundle image could bake a
+credential into a published prefix, and unit tests in `mt5-host/src` assert that
+no credential-shaped field can reach `/diagnostics`.
 
 ---
 
@@ -304,6 +357,27 @@ curl -sX POST $NODE4/mt5/control -H "X-Control-Token: $MT5_CONTROL_TOKEN" \
 ```
 
 Bridge-side kill switch: stop the bridge process (trading goes away with it) or
-start it with `MT5_TRADING_ENABLED=0` (read-only monitoring, no orders).
+start it with `MT5_TRADING_ENABLED=0` (read-only monitoring, no orders). On the
+Linux host, `MT5_TRADING_ENABLED=0` is the default and the host passes it to the
+bridge unless the operator set it explicitly.
 
-Configuration reference: [`mt5-bridge/README.md`](../../mt5-bridge/README.md).
+### 9.1 When the MT5 link looks wrong
+
+Check the terminal host before Node 4 — it knows whether the terminal, its login
+and the EA are actually up:
+
+```bash
+curl -s $MT5_HOST/health      # 200 while the process is alive, whatever else is wrong
+curl -s $MT5_HOST/readyz      # 200 only when display + prefix + terminal + EA + bridge agree
+curl -s $MT5_HOST/diagnostics | jq '{stage,last_error,processes,node4,memory_mb}'
+```
+
+`/readyz` answers `503` with one reason per line, so a monitor can alert on the
+first line instead of guessing, and `/diagnostics.node4` shows Node 4's own view
+of this bridge (connected, authorized, `ea_connected`, `ea_mode`, halted) next to
+the local one — which is usually enough to tell a dead terminal from a rejected
+token. See `mt5-host/README.md` §*Troubleshooting* for the reason-by-reason
+table.
+
+Configuration reference: [`mt5-bridge/README.md`](../../mt5-bridge/README.md)
+and [`mt5-host/README.md`](../../mt5-host/README.md).

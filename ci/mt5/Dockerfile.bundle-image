@@ -1,0 +1,78 @@
+# Offline MT5 prefix bundle — the artifact that makes a free-tier redeploy cheap.
+#
+# A free Render instance has no persistent disk, so every deploy starts from the
+# image and `/data` is empty. Without this bundle the container has to run the
+# whole unattended install again on boot: Wine prefix creation, ~150 MB of
+# terminal download from download.mql5.com, MSI unpacking, then the EA compile —
+# minutes of wall clock on 0.1 CPU, and a network dependency inside the boot.
+#
+# This file builds an image in which that work is already done:
+#
+#     1. build the runtime image          (mt5-host/Dockerfile)
+#     2. build this file on top of it     (installs MT5 into the prefix at build
+#                                          time, then bakes it at /opt/mt5-prefix)
+#     3. deploy *that* image to Render    (docker-entrypoint.sh copies the baked
+#                                          prefix into /data in a few seconds)
+#
+#     docker build -f mt5-host/Dockerfile -t mt5-host:local .
+#     docker build -f ci/mt5/Dockerfile.bundle-image \
+#         --build-arg MT5_HOST_IMAGE=mt5-host:local -t mt5-host:prefix .
+#
+# Point Render at the Dockerfile path `ci/mt5/Dockerfile.bundle-image` and give
+# its build a registry-visible name for MT5_HOST_IMAGE (`mt5-host:local` only
+# works when the base image is already in the builder's local cache).
+#
+# The baked prefix contains no credentials: the prepare run never logs in (that
+# is what MT5_HOST_PREPARE_ONLY=1 guarantees, and what the host's validate()
+# enforces by refusing to run with NODE4_WS_URL/MT5_BRIDGE_TOKEN set in that
+# mode). It is safe to publish the resulting image or tarball.
+#
+# Requires network access to download.mql5.com *at build time only*.
+
+ARG MT5_HOST_IMAGE=mt5-host:local
+
+# ── stage 1: run the boot stages once, without starting a terminal ───────────
+# `MT5_HOST_PREPARE_ONLY=1` stops after: state dir, Xvfb, Wine prefix, unattended
+# `mt5setup.exe /auto`, EA write + compile, startup ini. It exits non-zero if any
+# of those failed, so a broken prefix can never end up baked into an image.
+FROM ${MT5_HOST_IMAGE} AS install
+ENV MT5_HOST_PREPARE_ONLY=1 \
+    MT5_HOST_WINEBOOT_TIMEOUT_SECS=900 \
+    MT5_HOST_INSTALL_TIMEOUT_SECS=3600 \
+    MT5_HOST_COMPILE_TIMEOUT_SECS=900
+# The exit code and both artifacts are checked, because a build that silently
+# bakes a half-installed prefix is worse than a red build: the failure moves to
+# every deploy that uses the image.
+RUN set -eu; \
+    status=0; \
+    /usr/local/bin/mt5-host-entrypoint || status=$?; \
+    test -d /data/wine/drive_c || { echo "the prepare run created no prefix"; exit 1; }; \
+    find /data/wine -name 'Mt5BridgeEA.ex5' -print -quit | grep -q . \
+        || { echo "the EA was never compiled into the prefix"; exit 1; }; \
+    test "$status" -eq 0 || { echo "the prepare run failed with exit $status"; exit 1; }
+
+# ── stage 2: the deployable image ────────────────────────────────────────────
+FROM ${MT5_HOST_IMAGE}
+COPY --from=install /data/wine /opt/mt5-prefix
+
+# Also ship the same prefix as a gzipped tarball with `wine/` at its root, for
+# deployments that prefer MT5_HOST_PREFIX_ARCHIVE_URL over a second image:
+#
+#     docker run --rm --entrypoint cp mt5-host:prefix \
+#         /opt/mt5/mt5-prefix.tar.gz /out/       # with a bind mount on /out
+#
+# `tar -xzf` of that file inside $MT5_HOST_STATE_DIR yields $MT5_HOST_STATE_DIR/wine,
+# which is exactly the layout the host looks for.
+RUN set -eux; \
+    tar czf /opt/mt5/mt5-prefix.tar.gz --transform='s|^mt5-prefix|wine|' -C /opt mt5-prefix; \
+    ls -lh /opt/mt5/mt5-prefix.tar.gz; \
+    du -sh /opt/mt5-prefix
+
+# Sanity: the terminal must actually be inside the baked prefix.
+RUN set -eux; \
+    found="$(find /opt/mt5-prefix -iname 'terminal64.exe' -print -quit)"; \
+    echo "terminal in the baked prefix: ${found:-MISSING}"; \
+    test -n "$found"
+
+# Nothing else changes: the entrypoint sees /opt/mt5-prefix, copies it to
+# /data/wine, and mt5-host skips the install stage entirely.
