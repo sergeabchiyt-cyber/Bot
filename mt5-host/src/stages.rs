@@ -986,8 +986,7 @@ pub fn compile_error_count(report: &str) -> Option<u32> {
             let prefix = &line[..position];
             if let Some(number) = prefix
                 .split(|c: char| !c.is_ascii_digit())
-                .filter(|part| !part.is_empty())
-                .next_back()
+                .rfind(|part| !part.is_empty())
             {
                 if let Ok(value) = number.parse::<u32>() {
                     return Some(value);
