@@ -15,6 +15,6 @@ mt5-host v0.1.0 (/home/runner/work/Bot/Bot/mt5-host)
 
 ```
 $ cargo test --all-targets -- --nocapture
-running 37 tests
-test result: ok. 37 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished
+running 38 tests
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished
 ```
