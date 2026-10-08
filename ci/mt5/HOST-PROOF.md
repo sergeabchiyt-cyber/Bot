@@ -10,7 +10,7 @@ instead of only from the Actions tab.
 ```
 $ cargo tree --depth 1   # must resolve serde_json from crates.io
 mt5-host v0.1.0 (/home/runner/work/Bot/Bot/mt5-host)
-[2m└──[0m serde_json v1.0.151
+└── serde_json v1.0.151
 ```
 
 ```
