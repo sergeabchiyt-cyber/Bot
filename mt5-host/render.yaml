@@ -1,0 +1,66 @@
+# Render Blueprint for the MT5 host — reference copy.
+#
+# Render only reads a file named `render.yaml` in the *root* of the connected
+# repository (this one lives next to the crate so the Node 4 repo root stays
+# clean). Either copy it to the repo root before creating a Blueprint, or create
+# the service by hand in the dashboard with the same settings — the values below
+# are the whole configuration.
+#
+# Notes that matter on the free plan:
+#   * `plan: free` = a shared 0.1 CPU / 512 MB instance. It is enough for one
+#     Wine + MT5 terminal only because nothing is rendered (Xvfb) and the chart
+#     is a single fixed period. See README §Resource budget.
+#   * Free instances spin down when idle and have no persistent disk, so `/data`
+#     is recreated on every deploy and every wake-up. The prefix bundle image
+#     (`ci/mt5/Dockerfile.bundle-image`) is what keeps that cheap.
+#   * Health checks must point at /health, never /readyz: /health answers 200
+#     while Wine is still installing, /readyz is for monitoring.
+services:
+  - type: web
+    name: mt5-host
+    runtime: docker
+    plan: free
+    # Pick the region closest to your Node 4 service: the bridge dials out to it
+    # over a WebSocket and every intent crosses that link.
+    region: frankfurt
+    dockerfilePath: mt5-host/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: MT5_HOST_STATE_DIR
+        value: /data
+      - key: MT5_HOST_DISPLAY
+        value: ":99"
+      - key: MT5_HOST_BRIDGE_BIN
+        value: /usr/local/bin/mt5-bridge
+      # Monitor-only until the demo integration gate in
+      # docs/mt5/EXECUTION_ARCHITECTURE.md passes.
+      - key: MT5_TRADING_ENABLED
+        value: "0"
+      - key: MT5_SYMBOL
+        value: XAUUSD
+      # Symbols the EA is allowed to touch; widen it with MT5_SYMBOL_MAP when the
+      # broker spells the symbol differently.
+      - key: MT5_HOST_ALLOWED_SYMBOLS
+        value: XAUUSD
+      # ── secrets: set the values in the dashboard, not in git ──────────────
+      # Node 4's private bridge endpoint, e.g.
+      # wss://your-node4-service.onrender.com/mt5/bridge
+      - key: NODE4_WS_URL
+        sync: false
+      # Must equal Node 4's MT5_BRIDGE_TOKEN.
+      - key: MT5_BRIDGE_TOKEN
+        sync: false
+      # Shared secret between the EA and the bridge on their loopback socket.
+      # Leave unset for a read-only monitor (the bridge then refuses orders).
+      - key: MT5_EA_TOKEN
+        sync: false
+      # MQL5 demo account used by the unattended login in `[Common]`.
+      - key: MT5_LOGIN
+        sync: false
+      - key: MT5_PASSWORD
+        sync: false
+      # Exact server name from the terminal's login box, e.g. "MetaQuotes-Demo".
+      - key: MT5_SERVER
+        sync: false

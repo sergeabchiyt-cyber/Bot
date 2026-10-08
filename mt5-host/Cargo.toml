@@ -1,0 +1,13 @@
+[package]
+name = "mt5-host"
+version = "0.1.0"
+edition = "2021"
+description = "Headless Linux host for the Deriv MT5 demo terminal: virtual display, Wine prefix, unattended terminal install, EA compile/attach and the mt5-bridge, all orchestrated from environment configuration"
+publish = false
+
+# Deliberately tiny: the supervisor is std + serde_json only, so the image that
+# must fit in 512 MB never pays for an HTTP client or an async runtime. The
+# bridge (the process that talks to the terminal and to Node 4) keeps its own
+# dependency set and is built from `mt5-bridge/`.
+[dependencies]
+serde_json = "1"

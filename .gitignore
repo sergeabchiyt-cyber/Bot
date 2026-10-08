@@ -2,6 +2,7 @@
 target/
 node4-execution/target/
 mt5-bridge/target/
+mt5-host/target/
 
 # Python (tooling)
 .venv/
@@ -17,6 +18,8 @@ __pycache__/
 .env
 .env.local
 node4-execution/.env
+mt5-host/.env
+mt5-bridge/.env
 
 # Logs and runtime artifacts
 *.log
@@ -29,9 +32,14 @@ node4-clippy-errors.log
 node4-fmt-errors.log
 mt5-bridge-errors.log
 mt5-bridge-test-errors.log
+mt5-host-errors.log
+mt5-host-fmt-errors.log
+mt5-host-clippy-errors.log
+mt5-host-test-errors.log
 node4.log
 node4.err
 mt5-bridge/data/
+mt5-host/data/
 
 
 # Testing & coverage
