@@ -1079,6 +1079,20 @@ mod tests {
     }
 
     #[test]
+    fn the_count_is_the_last_number_before_the_word_error() {
+        // MetaEditor puts its own numbers in front of the summary — a build, a
+        // line, a column — so the count is the number closest to "error", not
+        // the first one in the line. Reading it left to right would report the
+        // build number here and a clean compile would look broken.
+        assert_eq!(compile_error_count("MetaEditor 5: 3 errors\r\n"), Some(3));
+        assert_eq!(
+            compile_error_count("Mt5BridgeEA.mq5(120,9) : information: 2 errors\r\n"),
+            Some(2)
+        );
+        assert_eq!(compile_error_count("; errors, no summary number\r\n"), None);
+    }
+
+    #[test]
     fn the_tree_search_finds_a_terminal_by_name_case_insensitively() {
         let root = std::env::temp_dir().join(format!("mt5-host-tree-{}", std::process::id()));
         let nested = root.join("Program Files").join("MetaTrader 5");
