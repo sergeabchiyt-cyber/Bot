@@ -1,10 +1,13 @@
 name: build
 
 # Node 4 is the only application in this repository: the execution service
-# (`node4-execution`) plus its MT5 demo bridge (`mt5-bridge`), which runs next to
-# the terminal and dials out to Node 4. There is no market-data engine or
-# strategy crate here, so this workflow builds and tests exactly those two
-# crates and lints the bridge's EA ⇄ bridge ⇄ Node 4 protocol.
+# (`node4-execution`), its MT5 demo bridge (`mt5-bridge`), which runs next to the
+# terminal and dials out to Node 4, and `mt5-host`, the headless Linux host that
+# installs and supervises that terminal under Wine so the whole path runs on a
+# Render free instance without a GUI. There is no market-data engine or strategy
+# crate here, so this workflow builds and tests exactly those three crates and
+# lints the bridge's EA ⇄ bridge ⇄ Node 4 protocol plus the host's deployment
+# surface (environment contract, embedded EA, image contents).
 #
 # On failure the relevant log is pushed back to the branch so the error is
 # readable without the Actions tab.
@@ -135,9 +138,131 @@ jobs:
       - name: Build release
         run: cargo build --release
 
+  # The headless MT5 host: Xvfb, Wine, an unattended terminal install, the EA
+  # compile and the bridge, all supervised by one Rust binary. It has no Docker
+  # runtime in CI (no Wine, no terminal), so this job is exactly what can be
+  # proven without a terminal: it compiles, it lints, its unit tests pass, and
+  # the protocol lint agrees that its environment contract, the EA it embeds and
+  # the image its Dockerfile builds all line up.
+  host:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mt5-host
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.0"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "mt5-host -> target"
+
+      - name: Check
+        id: check
+        run: |
+          set -o pipefail
+          cargo check --all-targets 2>&1 | tee /tmp/host-check.log
+
+      - name: Save error log to branch
+        if: failure() && steps.check.outcome == 'failure'
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          tail -c 400000 /tmp/host-check.log > mt5-host-errors.log
+          git add -f mt5-host-errors.log
+          git commit -m "ci: mt5-host build error log [skip ci]"
+          git push origin ${{ github.ref_name }}
+
+      - name: Format check
+        id: fmt
+        run: |
+          set -o pipefail
+          cargo fmt --all -- --check 2>&1 | tee /tmp/host-fmt.log
+
+      - name: Save format log to branch
+        if: failure() && steps.fmt.outcome == 'failure'
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          tail -c 400000 /tmp/host-fmt.log > mt5-host-fmt-errors.log
+          git add -f mt5-host-fmt-errors.log
+          git commit -m "ci: mt5-host fmt log [skip ci]"
+          git push origin ${{ github.ref_name }}
+
+      - name: Clippy
+        id: clippy
+        run: |
+          set -o pipefail
+          cargo clippy --all-targets -- -D warnings 2>&1 | tee /tmp/host-clippy.log
+
+      - name: Save clippy log to branch
+        if: failure() && steps.clippy.outcome == 'failure'
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          tail -c 400000 /tmp/host-clippy.log > mt5-host-clippy-errors.log
+          git add -f mt5-host-clippy-errors.log
+          git commit -m "ci: mt5-host clippy log [skip ci]"
+          git push origin ${{ github.ref_name }}
+
+      - name: Unit tests
+        id: tests
+        run: |
+          set -o pipefail
+          cargo test --all-targets -- --nocapture 2>&1 | tee /tmp/host-tests.log
+
+      - name: Save test log to branch
+        if: failure() && steps.tests.outcome == 'failure'
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git fetch origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
+          tail -c 400000 /tmp/host-tests.log > mt5-host-test-errors.log
+          git add -f mt5-host-test-errors.log
+          git commit -m "ci: mt5-host test log [skip ci]"
+          git push origin ${{ github.ref_name }}
+
+      - name: Clear stale error logs
+        if: success()
+        continue-on-error: true
+        working-directory: ${{ github.workspace }}
+        run: |
+          removed=0
+          for f in mt5-host-errors.log mt5-host-fmt-errors.log mt5-host-clippy-errors.log mt5-host-test-errors.log; do
+            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
+              git rm -q "$f"
+              removed=1
+            fi
+          done
+          if [ "$removed" = "1" ]; then
+            git config user.email ci@example.invalid
+            git config user.name ci
+            git commit -m "ci: clear stale mt5-host logs [skip ci]"
+            git fetch origin ${{ github.ref_name }}
+            git push origin HEAD:${{ github.ref_name }}
+          fi
+
+      - name: Build release
+        run: cargo build --release
+
   # The MT5 demo bridge runs on the terminal host, not on the Node 4 host, but it
   # is part of this service's execution surface and must keep compiling, passing
-  # its fake-terminal contract tests, and agreeing with the EA protocol.
+  # its fake-terminal contract tests, and agreeing with the EA protocol — which
+  # is what `ci/mt5/protocol_lint.py` checks, including the mt5-host⇄bridge⇄EA
+  # wiring (environment contract, embedded EA source, image contents).
   bridge:
     runs-on: ubuntu-latest
     defaults:

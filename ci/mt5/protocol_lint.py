@@ -13,6 +13,11 @@ never reads, a response field nobody sets, a frame Node 4 parses as
 ``Unknown``, or a snapshot field that is always ``null``. None of that is
 visible to a compiler, so CI runs this script instead.
 
+The Linux deployment surface (``mt5-host``) is cross-checked the same way, for
+the same reason: its environment contract, the EA it embeds and the image its
+Dockerfile builds all live in different files, and a drift between them shows up
+as a container that boots and then never becomes ready.
+
 Exit code 0 = consistent, 1 = at least one error. Warnings never fail.
 
 Usage:  python3 ci/mt5/protocol_lint.py [repo_root]
@@ -403,6 +408,135 @@ def main() -> int:
     # --- 7. documented bridge_event names --------------------------------
     events_checked = documented_bridge_events(bridge, root / "docs")
 
+    # --- 8. the Linux host deployment surface -----------------------------
+    host = root / "mt5-host"
+    host_cfg_src = read(host / "src/config.rs")
+    host_templates_src = read(host / "src/templates.rs")
+    host_env_doc = read(host / ".env.example")
+    host_dockerfile = read(host / "Dockerfile")
+    host_entrypoint = read(host / "docker-entrypoint.sh")
+    bundle_dockerfile = read(root / "ci/mt5/Dockerfile.bundle-image")
+    host_checks = 0
+
+    # The host compiles the EA into its own binary, so the path in include_str!
+    # is the only link between the two. If it ever points somewhere else, the
+    # container would install a *different* Expert Advisor than the one the
+    # bridge contract tests and this lint reason about.
+    for embedded in re.findall(r'include_str!\("([^"]+)"\)', host_templates_src):
+        resolved = (host / "src" / embedded).resolve()
+        if not resolved.exists():
+            error(f"mt5-host embeds '{embedded}' but that path does not exist")
+            continue
+        if resolved != (bridge / "mql5/Mt5BridgeEA.mq5").resolve():
+            error(
+                f"mt5-host embeds {embedded}, which is not mt5-bridge/mql5/Mt5BridgeEA.mq5"
+            )
+        else:
+            host_checks += 1
+
+    # The host's configuration and its documented environment must describe the
+    # same keys. Both directions are checked: a documented key nobody reads is a
+    # lie to the operator, an undocumented key is a setting nobody can find.
+    code_keys = (
+        set(re.findall(r'env_(?:str|opt|flag|u64)\("([A-Z0-9_]+)"', host_cfg_src))
+        | set(re.findall(r'env::var(?:_os)?\("([A-Z0-9_]+)"', host_cfg_src))
+    )
+    # Set by the host itself, never by an operator: the EA socket must stay on
+    # loopback, so documenting it would only invite widening it.
+    internal_keys = {"MT5_EA_BIND_ADDR"}
+    documented_keys = set(re.findall(r"(?m)^\s*#?\s*([A-Z][A-Z0-9_]*)=", host_env_doc))
+    for key in sorted(documented_keys - code_keys):
+        error(f"mt5-host/.env.example documents {key}, which mt5-host/src/config.rs never reads")
+    for key in sorted(code_keys - documented_keys - internal_keys):
+        error(f"mt5-host/src/config.rs reads {key}, which mt5-host/.env.example never mentions")
+    host_checks += len(code_keys & documented_keys)
+
+    # A prepared prefix is published as an image layer or an archive, so the
+    # bundle build must be incapable of writing a credential into it.
+    if "MT5_HOST_PREPARE_ONLY=1" not in bundle_dockerfile:
+        error("ci/mt5/Dockerfile.bundle-image does not set MT5_HOST_PREPARE_ONLY=1")
+    for secret in ("NODE4_WS_URL", "MT5_BRIDGE_TOKEN", "MT5_PASSWORD", "MT5_EA_TOKEN"):
+        # `ENV KEY=value`, a bare `KEY=value` and a `KEY: value` mapping all set
+        # it; a bare mention in prose or a comment does not.
+        sets_it = re.compile(rf"(?m)(?:^|\s)(?:ENV\s+)?{secret}\s*[:=]")
+        if sets_it.search(bundle_dockerfile):
+            error(f"ci/mt5/Dockerfile.bundle-image sets {secret}: a prepared prefix must be credential-free")
+        if sets_it.search(host_dockerfile):
+            error(f"mt5-host/Dockerfile bakes {secret} into the image; pass secrets at deploy time")
+    host_checks += 1
+
+    # The runtime image is only complete if it carries both binaries and the
+    # entrypoint, and the entrypoint must not grow a second supervisor.
+    for needed in ("mt5-host", "mt5-bridge"):
+        if f"/usr/local/bin/{needed}" not in host_dockerfile:
+            error(f"mt5-host/Dockerfile never installs /usr/local/bin/{needed}")
+    if "docker-entrypoint.sh" not in host_dockerfile:
+        error("mt5-host/Dockerfile does not install docker-entrypoint.sh")
+    if "exec mt5-host" not in host_entrypoint:
+        error("mt5-host/docker-entrypoint.sh does not exec mt5-host")
+    for line in host_entrypoint.splitlines():
+        command = line.strip()
+        if command.startswith("#"):
+            continue
+        if command.split(maxsplit=1)[:1] and command.split()[0] in {"wine", "wineboot", "wineserver"}:
+            error(
+                "mt5-host/docker-entrypoint.sh runs wine itself; every wine step belongs to "
+                "the host's Rust boot stages, where it is supervised and reported on /readyz"
+            )
+    host_checks += 1
+
+    # The baked prefix path is a promise between two files that never import
+    # each other: the entrypoint's default and the bundle image's COPY target.
+    # When they disagree the bundle silently does nothing and every deploy pays
+    # for a full install again.
+    baked = re.search(r"MT5_HOST_BAKED_PREFIX:-([^}]+)", host_entrypoint)
+    if not baked:
+        error("mt5-host/docker-entrypoint.sh defines no default MT5_HOST_BAKED_PREFIX")
+    else:
+        baked_path = baked.group(1)
+        if baked_path not in bundle_dockerfile:
+            error(
+                f"the entrypoint looks for a baked prefix at {baked_path}, which "
+                f"ci/mt5/Dockerfile.bundle-image never creates"
+            )
+        if "mt5-prefix.tar.gz" not in bundle_dockerfile:
+            warn(
+                "ci/mt5/Dockerfile.bundle-image ships no prefix tarball, so the "
+                "MT5_HOST_PREFIX_ARCHIVE_URL path has no official source"
+            )
+        if "Mt5BridgeEA.ex5" not in bundle_dockerfile:
+            error(
+                "ci/mt5/Dockerfile.bundle-image does not check that the EA was compiled "
+                "into the prefix it bakes"
+            )
+    host_checks += 1
+
+    # Trading is off unless an operator turns it on, at every layer.
+    if not re.search(r"(?m)^\s*MT5_TRADING_ENABLED=0(\s*\\?)\s*$", host_dockerfile):
+        error("mt5-host/Dockerfile does not default MT5_TRADING_ENABLED=0")
+    host_checks += 1
+
+    # The host supervises a terminal; it must never grow an order path of its
+    # own. Orders exist only on the bridge's Node 4 session.
+    host_sources = sorted((host / "src").glob("*.rs"))
+    for source in host_sources:
+        body = strip_rust_tests(source.read_text(encoding="utf-8"))
+        for verb in ("order_send", "OrderSend", "order_check"):
+            if verb in body:
+                error(f"mt5-host/src/{source.name} contains {verb}: the host must not trade")
+    host_checks += 1
+
+    # render.yaml's health check must be /health: /readyz is 503 for the whole
+    # first boot, which would make every deploy look like a failure.
+    render_yaml = host / "render.yaml"
+    if render_yaml.exists():
+        render_text = read(render_yaml)
+        if "healthCheckPath: /health" not in render_text:
+            error("mt5-host/render.yaml must set healthCheckPath: /health")
+        if "healthCheckPath: /readyz" in render_text:
+            error("mt5-host/render.yaml must not point the platform health check at /readyz")
+        host_checks += 1
+
     # --- report -----------------------------------------------------------
     for message in WARNINGS:
         print(f"warning: {message}")
@@ -415,7 +549,8 @@ def main() -> int:
         "protocol lint ok: "
         f"{len(rust_methods)} EA methods, {len(sent)} request params, "
         f"{len(read_fields)} response fields, {len(bridge_frames)} frames, "
-        f"{events_checked} bridge events checked"
+        f"{events_checked} bridge events checked, "
+        f"{host_checks} host deployment checks"
     )
     return 0
 
