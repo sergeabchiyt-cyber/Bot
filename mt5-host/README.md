@@ -251,13 +251,18 @@ Honest status of this deployment path:
 
 * `mt5-host` compiles with no warnings under `cargo check --all-targets`,
   `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --all -- --check`.
-* 37 unit tests pass: configuration validation and the fail-closed rules,
+* The dependency is the real one, resolved from crates.io: the `host` CI job
+  writes the toolchain, `cargo tree --depth 1` and the `cargo test` summary to
+  [`ci/mt5/HOST-PROOF.md`](../ci/mt5/HOST-PROOF.md) on every green run, so the
+  proof is readable from a checkout instead of only from the Actions tab.
+* 38 unit tests pass: configuration validation and the fail-closed rules,
   readiness and JSON rendering, the `/proc` helpers (including the
   established-connection count used for `ea_connections`, and the `SLOT` column
   parsing bug that made it always zero), timeouts that kill children, the
   startup ini / EA preset / fallback profile generators, the EA source that is
-  compiled into the binary, and the HTTP surface (`/health`, `/readyz`,
-  `/diagnostics`, `404`, `405`).
+  compiled into the binary, the MetaEditor summary parsing (the count is the
+  number closest to the word "error", not the first number in the line), and the
+  HTTP surface (`/health`, `/readyz`, `/diagnostics`, `404`, `405`).
 * `ci/mt5/protocol_lint.py` cross-checks the deployment surface and fails the
   build if the environment documentation and the code drift, if the embedded EA
   is not the one the bridge contract tests use, if the bundle image could bake a
@@ -292,15 +297,17 @@ sandbox:**
 * That Node 4 and the host complete a real `execution_hello`/snapshot exchange
   through this container. Everything up to the WebSocket is tested; the session
   itself needs a deployment.
-* The sandbox had no crates.io, so the checks above ran against a faithful API
-  stand-in for `serde_json` instead of the real crate: `cargo fmt --check`,
-  `cargo clippy --all-targets -- -D warnings`, `cargo test --all-targets` (37
-  tests), `cargo build --release` and the runtime smoke test all pass with it,
-  but the first `cargo test` on a machine with registry access is the
-  authoritative run. The crate uses nothing beyond `Value`, the `json!` macro,
-  `from_str::<Value>`, `pointer` and the `as_bool`/`as_str`/`as_u64`/`as_i64`
-  accessors, and has no `Deserialize` derive anywhere — so there is no API
-  surface a stand-in could have faked into passing.
+* The stand-in caveat is closed, not open: this crate was first checked in a
+  sandbox with no crates.io access, where `serde_json` was a faithful API
+  stand-in, so the authoritative run had to be the first one with registry
+  access. That run has happened — the `host` job resolves `serde_json` v1.0.151
+  on rustc 1.94.0 and passes `cargo check --all-targets`, `cargo clippy
+  --all-targets -- -D warnings`, 38 unit tests and `cargo build --release`
+  against it ([`ci/mt5/HOST-PROOF.md`](../ci/mt5/HOST-PROOF.md)). The crate uses
+  nothing beyond `Value`, the `json!` macro, `from_str::<Value>`, `pointer` and
+  the `as_bool`/`as_str`/`as_u64`/`as_i64` accessors, and has no `Deserialize`
+  derive anywhere — so there is no API surface a stand-in could have faked into
+  passing.
 
 The honest summary: the orchestration logic is tested, the wiring between the
 crate, the bridge, the EA and the image is linted, and the terminal itself has
