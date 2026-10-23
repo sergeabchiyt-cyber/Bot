@@ -74,10 +74,7 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Starting Node 4 (Execution Service)");
     match config.intent_source {
-        IntentSource::Node3 => info!(
-            "Intent source: Node 3 ({})",
-            config.node3_ws_url
-        ),
+        IntentSource::Node3 => info!("Intent source: Node 3 ({})", config.node3_ws_url),
         IntentSource::Node1Strategy => info!(
             "Intent source: local strategy on Node 1 feed ({})",
             config.node1_ws_url

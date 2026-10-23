@@ -411,17 +411,16 @@ impl Config {
         let (mt5_symbol_map, symbol_map_errors) = env_pairs("MT5_SYMBOL_MAP");
 
         let intent_source_raw = env_str("NODE4_INTENT_SOURCE", "node3");
-        let (intent_source, intent_source_error) =
-            match IntentSource::parse(&intent_source_raw) {
-                Some(source) => (source, None),
-                None => (
-                    IntentSource::Node3,
-                    Some(format!(
-                        "NODE4_INTENT_SOURCE='{intent_source_raw}' is not recognised \
+        let (intent_source, intent_source_error) = match IntentSource::parse(&intent_source_raw) {
+            Some(source) => (source, None),
+            None => (
+                IntentSource::Node3,
+                Some(format!(
+                    "NODE4_INTENT_SOURCE='{intent_source_raw}' is not recognised \
                          (expected node3 | node1_strategy)"
-                    )),
-                ),
-            };
+                )),
+            ),
+        };
 
         let mut config = Self {
             intent_source,
@@ -530,22 +529,17 @@ impl Config {
         self.strategy_ttl_secs = self.strategy_ttl_secs.clamp(5, 3_600);
         self.strategy_volume_threshold = self.strategy_volume_threshold.max(0.0);
         self.strategy_sl_min_pips = self.strategy_sl_min_pips.max(1.0);
-        self.strategy_sl_max_pips = self
-            .strategy_sl_max_pips
-            .max(self.strategy_sl_min_pips);
+        self.strategy_sl_max_pips = self.strategy_sl_max_pips.max(self.strategy_sl_min_pips);
         self.strategy_tp_min_pips = self.strategy_tp_min_pips.max(1.0);
-        self.strategy_tp_max_pips = self
-            .strategy_tp_max_pips
-            .max(self.strategy_tp_min_pips);
+        self.strategy_tp_max_pips = self.strategy_tp_max_pips.max(self.strategy_tp_min_pips);
         self.strategy_rr_min = self.strategy_rr_min.max(0.1);
         self.strategy_rr_max = self.strategy_rr_max.max(self.strategy_rr_min);
-        self.strategy_atr_fallback = if self.strategy_atr_fallback.is_finite()
-            && self.strategy_atr_fallback > 0.0
-        {
-            self.strategy_atr_fallback
-        } else {
-            3.0
-        };
+        self.strategy_atr_fallback =
+            if self.strategy_atr_fallback.is_finite() && self.strategy_atr_fallback > 0.0 {
+                self.strategy_atr_fallback
+            } else {
+                3.0
+            };
         self.node1_heartbeat_timeout_ms = self.node1_heartbeat_timeout_ms.max(1_000);
         self.node1_stale_ms = self.node1_stale_ms.max(1_000);
         self.node1_max_candle_age_ms = self.node1_max_candle_age_ms.max(1_000);
@@ -677,9 +671,7 @@ impl Config {
                 errors.push(err);
             }
             if self.node1_feed_require_auth && self.node1_feed_token.is_none() {
-                errors.push(
-                    "NODE1_FEED_REQUIRE_AUTH=1 but NODE1_FEED_TOKEN is not set".into(),
-                );
+                errors.push("NODE1_FEED_REQUIRE_AUTH=1 but NODE1_FEED_TOKEN is not set".into());
             }
             if self.node1_symbol.trim().is_empty() {
                 errors.push("NODE1_SYMBOL must not be empty".into());
@@ -1207,7 +1199,10 @@ mod tests {
             IntentSource::parse("node1_strategy"),
             Some(IntentSource::Node1Strategy)
         );
-        assert_eq!(IntentSource::parse("node1"), Some(IntentSource::Node1Strategy));
+        assert_eq!(
+            IntentSource::parse("node1"),
+            Some(IntentSource::Node1Strategy)
+        );
         assert_eq!(IntentSource::parse("nonsense"), None);
         assert!(!IntentSource::Node3.is_local());
         assert!(IntentSource::Node1Strategy.is_local());
@@ -1223,8 +1218,10 @@ mod tests {
         };
         let errors = config.startup_errors();
         assert!(errors.iter().any(|e| e.contains("NODE4_STRATEGY_APPROVED")));
-        assert!(!errors.iter().any(|e| e.contains("NODE3_WS_URL")),
-                "node3 variables must not be required in local mode");
+        assert!(
+            !errors.iter().any(|e| e.contains("NODE3_WS_URL")),
+            "node3 variables must not be required in local mode"
+        );
 
         config.strategy_approved = true;
         assert!(config.startup_errors().is_empty());

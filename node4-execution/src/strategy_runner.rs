@@ -182,12 +182,7 @@ impl Runner {
             return;
         };
 
-        let intent = build_intent(
-            &trigger,
-            &self.risk,
-            self.config.strategy_ttl_secs,
-            now,
-        );
+        let intent = build_intent(&trigger, &self.risk, self.config.strategy_ttl_secs, now);
         let expected_id = intent_id(&trigger);
         debug_assert_eq!(intent.intent_id, expected_id);
         self.handle.update(|snapshot| {
@@ -230,16 +225,16 @@ pub async fn run(
 ) {
     info!(
         "local strategy runner started: {} {} {} (threshold {:.0})",
-        STRATEGY_VERSION, config.node1_symbol, config.node1_interval,
+        STRATEGY_VERSION,
+        config.node1_symbol,
+        config.node1_interval,
         config.strategy_volume_threshold
     );
     let mut runner = Runner::new(config, feed, shared, handle);
     while let Some(event) = rx.recv().await {
         match event {
             FeedEvent::Levels { level } => runner.on_levels(level),
-            FeedEvent::ClosedCandle { candle, replay } => {
-                runner.on_candle(candle, replay).await
-            }
+            FeedEvent::ClosedCandle { candle, replay } => runner.on_candle(candle, replay).await,
         }
     }
     warn!("local strategy runner stopped: the market feed channel closed");
@@ -275,13 +270,7 @@ mod tests {
         let hub = DiagnosticsHub::new(config);
         let manager = Arc::new(ExecutionManager::new(config, hub.mt5()));
         let ledger = Arc::new(ExecutionLedger::open(&config.execution_ledger_file));
-        crate::node3::LinkShared::for_local(
-            config.clone(),
-            hub,
-            manager,
-            ledger,
-            feed,
-        )
+        crate::node3::LinkShared::for_local(config.clone(), hub, manager, ledger, feed)
     }
 
     #[tokio::test]

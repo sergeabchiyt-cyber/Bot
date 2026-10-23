@@ -102,7 +102,12 @@ impl MarketFeed {
             contract_required: rules.contract_required.clone(),
             symbol: rules.symbol.clone(),
             interval: rules.interval.clone(),
-            state: if rules.enabled { "connecting" } else { "disabled" }.into(),
+            state: if rules.enabled {
+                "connecting"
+            } else {
+                "disabled"
+            }
+            .into(),
             not_ready_reason: if rules.enabled {
                 Some("not connected".into())
             } else {
@@ -412,9 +417,7 @@ impl MarketFeed {
             return SeqOutcome::Ok;
         }
         let Some(seq) = seq else {
-            self.record_violation(format!(
-                "{kind} frame is missing the v1 seq envelope"
-            ));
+            self.record_violation(format!("{kind} frame is missing the v1 seq envelope"));
             return SeqOutcome::Resync;
         };
         let mut outcome = SeqOutcome::Ok;
@@ -430,15 +433,13 @@ impl MarketFeed {
                     snapshot.out_of_order = snapshot.out_of_order.saturating_add(1);
                     snapshot.gaps = snapshot.gaps.saturating_add(1);
                     snapshot.state = "resyncing".into();
-                    snapshot.last_error =
-                        Some(format!("{kind} seq {seq} is older than {last}"));
+                    snapshot.last_error = Some(format!("{kind} seq {seq} is older than {last}"));
                     outcome = SeqOutcome::Resync;
                 }
                 Some(last) if seq.saturating_sub(last) > 1 => {
                     snapshot.gaps = snapshot.gaps.saturating_add(1);
                     snapshot.state = "resyncing".into();
-                    snapshot.last_error =
-                        Some(format!("{kind} seq gap: {last} -> {seq}"));
+                    snapshot.last_error = Some(format!("{kind} seq gap: {last} -> {seq}"));
                     outcome = SeqOutcome::Resync;
                 }
                 Some(_) => snapshot.last_seq = Some(seq),
@@ -616,10 +617,7 @@ struct WireGap {
     dropped: u64,
 }
 
-async fn send_event(
-    tx: &mpsc::Sender<FeedEvent>,
-    event: FeedEvent,
-) -> Result<(), String> {
+async fn send_event(tx: &mpsc::Sender<FeedEvent>, event: FeedEvent) -> Result<(), String> {
     tx.send(event)
         .await
         .map_err(|_| "the strategy runner is not receiving feed events".to_string())
@@ -644,7 +642,10 @@ async fn handle_text(
         return Ok(());
     }
     let seq = value.get("seq").and_then(Value::as_u64);
-    let replay = value.get("replay").and_then(Value::as_bool).unwrap_or(false);
+    let replay = value
+        .get("replay")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     feed.touch();
 
     match kind {
@@ -721,16 +722,21 @@ async fn handle_text(
             feed.record_gap(gap.dropped);
             Err("Node 1 reported a sequence gap".into())
         }
-        "strategy" | "demo" | "calendar" | "audio_chunk" | "learn" | "transcript"
-        | "sentiment" | "health" | "prediction" | "sentiment_req" | "predict_req" => {
+        "strategy" | "demo" | "calendar" | "audio_chunk" | "learn" | "transcript" | "sentiment"
+        | "health" | "prediction" | "sentiment_req" | "predict_req" => {
             // Out of scope for the execution feed, and explicitly not a reason
             // to trade or disconnect. Node 1's v1 contract removes the first
             // two; an older producer may still send them.
             feed.record_ignored();
             Ok(())
         }
-        "trade_intent" | "execution_hello" | "execution_hello_ack" | "execution_report"
-        | "execution_report_ack" | "trades" | "order" => {
+        "trade_intent"
+        | "execution_hello"
+        | "execution_hello_ack"
+        | "execution_report"
+        | "execution_report_ack"
+        | "trades"
+        | "order" => {
             feed.record_violation(format!(
                 "Node 1 published execution frame '{kind}'; the feed is not a trade channel"
             ));
@@ -848,14 +854,7 @@ async fn handle_candle(
     }
 
     feed.record_closed_candle(candle.time, replay);
-    send_event(
-        tx,
-        FeedEvent::ClosedCandle {
-            candle,
-            replay,
-        },
-    )
-    .await
+    send_event(tx, FeedEvent::ClosedCandle { candle, replay }).await
 }
 
 async fn handle_levels(
@@ -995,9 +994,13 @@ mod tests {
         let bucket = aligned_now_bucket(900_000);
 
         // Replay burst: two closed candles (no seq), ascending.
-        handle(&feed, &tx, &candle_json(bucket - 1_800_000, None, true, true))
-            .await
-            .unwrap();
+        handle(
+            &feed,
+            &tx,
+            &candle_json(bucket - 1_800_000, None, true, true),
+        )
+        .await
+        .unwrap();
         handle(&feed, &tx, &candle_json(bucket - 900_000, None, true, true))
             .await
             .unwrap();
@@ -1089,9 +1092,13 @@ mod tests {
             .await
             .unwrap();
         handle(&feed, &tx, &levels_json(2)).await.unwrap();
-        handle(&feed, &tx, &candle_json(bucket - 1_800_000, None, true, true))
-            .await
-            .unwrap();
+        handle(
+            &feed,
+            &tx,
+            &candle_json(bucket - 1_800_000, None, true, true),
+        )
+        .await
+        .unwrap();
         handle(&feed, &tx, &candle_json(bucket - 900_000, None, true, true))
             .await
             .unwrap();

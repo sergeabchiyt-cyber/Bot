@@ -268,13 +268,7 @@ impl StrategyEngine {
         now_ms: i64,
     ) -> StrategyDecision {
         let atr = self.calculate_atr();
-        let mut decision = StrategyDecision::flat(
-            symbol,
-            interval,
-            now_ms,
-            atr,
-            self.levels.len(),
-        );
+        let mut decision = StrategyDecision::flat(symbol, interval, now_ms, atr, self.levels.len());
 
         let Some(candle) = self.history.back().cloned() else {
             decision.events.push("no closed candle".into());
@@ -308,7 +302,8 @@ impl StrategyEngine {
             match state {
                 BreakState::None => {
                     if is_green && candle.close > lvl_price && candle.open <= lvl_price {
-                        self.break_states.insert(id.clone(), BreakState::BrokenAbove);
+                        self.break_states
+                            .insert(id.clone(), BreakState::BrokenAbove);
                         self.breaks_detected += 1;
                         decision.breaks_detected += 1;
                         decision.events.push(format!(
@@ -316,7 +311,8 @@ impl StrategyEngine {
                             target.name, candle.close, lvl_price, PROXIMITY_DOLLARS
                         ));
                     } else if is_red && candle.close < lvl_price && candle.open >= lvl_price {
-                        self.break_states.insert(id.clone(), BreakState::BrokenBelow);
+                        self.break_states
+                            .insert(id.clone(), BreakState::BrokenBelow);
                         self.breaks_detected += 1;
                         decision.breaks_detected += 1;
                         decision.events.push(format!(
@@ -504,11 +500,9 @@ impl RiskProjector {
         };
         let atr_pct = (self.atr / safe_entry).clamp(0.001, 0.05);
         let sl_pips = self.params.sl_min_pips
-            + (self.params.sl_max_pips - self.params.sl_min_pips)
-                * (atr_pct * 20.0).min(1.0);
+            + (self.params.sl_max_pips - self.params.sl_min_pips) * (atr_pct * 20.0).min(1.0);
         let requested_tp_pips = self.params.tp_min_pips
-            + (self.params.tp_max_pips - self.params.tp_min_pips)
-                * (atr_pct * 20.0).min(1.0);
+            + (self.params.tp_max_pips - self.params.tp_min_pips) * (atr_pct * 20.0).min(1.0);
 
         let sl_distance = sl_pips * 0.01;
         let mut tp_distance = requested_tp_pips * 0.01;
@@ -703,9 +697,7 @@ mod tests {
         let c1 = candle(1_000, 2_649.0, 2_652.0, 2_648.5, 2_651.5, 8_000.0);
         assert!(engine.observe_closed(&c1));
         assert!(!engine.observe_closed(&c1));
-        assert!(!engine.observe_closed(&candle(
-            900, 2_649.0, 2_652.0, 2_648.5, 2_651.5, 8_000.0
-        )));
+        assert!(!engine.observe_closed(&candle(900, 2_649.0, 2_652.0, 2_648.5, 2_651.5, 8_000.0)));
         assert_eq!(engine.history_len(), 1);
     }
 
