@@ -17,32 +17,47 @@ pub struct Config {
     pub port: u16,
 
     // ---- Chart / candles ----
-    /// Binance is retained for order flow only; price history/live candles
-    /// come from SiftingIO so VP calculations use one price domain.
-    pub binance_ws_url: String,
+    /// SiftingIO is the single price domain: chart candles, tick volume and
+    /// every volume profile are built from its spot XAUUSD stream, so the
+    /// strategy evaluates one consistent price series.
     pub sifting_ws_url: String,
     pub sifting_hist_url: String,
     pub sifting_api_key: String,
     pub sifting_symbol: String,
-
-    // ---- Order flow feeds ----
-    pub feed_binance: bool,
-    pub feed_bybit: bool,
-    pub feed_okx: bool,
-    pub feed_bitget: bool,
-    pub feed_gate: bool,
-    pub feed_kraken: bool,
-    pub feed_alltick: bool,
-    pub feed_itick: bool,
     pub feed_sifting: bool,
 
-    pub bitget_symbol: String,
-    pub gate_symbol: String,
-    pub kraken_product: String,
-    pub alltick_ws_url: String,
-    pub alltick_code: String,
-    pub itick_ws_url: String,
-    pub itick_symbol: String,
+    // ---- Strategy evaluation (price + volume profile + tick volume) ----
+    pub strategy_enabled: bool,
+    /// How often the strategy is evaluated (seconds).
+    pub strategy_eval_secs: u64,
+    /// Minimum confidence before a signal becomes an order.
+    pub strategy_min_confidence: f64,
+    /// Percent of equity risked per trade (used for position sizing).
+    pub strategy_risk_pct: f64,
+    pub strategy_atr_period: usize,
+    /// Stop distance = ATR(15m) * this multiple.
+    pub strategy_atr_stop_mult: f64,
+    pub strategy_reward_risk: f64,
+    /// Stand aside this many seconds either side of a high-impact USD print.
+    pub strategy_event_blackout_secs: i64,
+
+    // ---- Demo (paper) execution ----
+    /// The demo engine is a local simulator: it holds no credential, opens no
+    /// socket and cannot reach a broker. Node4 remains the only execution path.
+    pub demo_enabled: bool,
+    pub demo_start_balance: f64,
+    /// 1:1000 — margin = notional / 1000.
+    pub demo_leverage: f64,
+    /// Full bid/ask spread in XAUUSD price units (0.10 = 10 cents).
+    pub demo_spread: f64,
+    pub demo_min_lots: f64,
+    pub demo_max_lots: f64,
+    pub demo_lot_step: f64,
+    /// Close the position when equity/margin falls below this percent.
+    pub demo_stop_out_pct: f64,
+    /// Seconds after a *stop-driven* close (stop loss / stop out) before the
+    /// simulator may open a new position again.
+    pub demo_cooldown_secs: i64,
 
     // ---- Browser API ----
     /// The only origin allowed to call the REST API from a browser (the Node2
@@ -191,10 +206,6 @@ impl Config {
     pub fn from_env() -> Self {
         let sifting_api_key = env_opt("SIFTING_API_KEY").unwrap_or_default();
         let has_sifting_key = !sifting_api_key.is_empty();
-        let alltick_token = env_opt("ALLTICK_TOKEN");
-        let itick_token = env_opt("ITICK_TOKEN");
-
-        let binance_symbol = env_str("BINANCE_SYMBOL", "XAUUSDT").to_lowercase();
 
         Self {
             port: env::var("PORT")
@@ -202,31 +213,31 @@ impl Config {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(3000),
 
-            binance_ws_url: env::var("BINANCE_WS_URL").unwrap_or_else(|_| {
-                format!("wss://fstream.binance.com/ws/{binance_symbol}@aggTrade")
-            }),
             sifting_ws_url: env_str("SIFTING_WS_URL", "wss://stream.sifting.io/ws/v1"),
             sifting_hist_url: env_str("SIFTING_HIST_URL", "https://api.sifting.io"),
             sifting_api_key,
             sifting_symbol: env_str("SIFTING_SYMBOL", "XAUUSD"),
-
-            feed_binance: env_switch("FEED_BINANCE", true),
-            feed_bybit: env_switch("FEED_BYBIT", true),
-            feed_okx: env_switch("FEED_OKX", true),
-            feed_bitget: env_switch("FEED_BITGET", true),
-            feed_gate: env_switch("FEED_GATE", true),
-            feed_kraken: env_switch("FEED_KRAKEN", true),
-            feed_alltick: env_switch("FEED_ALLTICK", alltick_token.is_some()),
-            feed_itick: env_switch("FEED_ITICK", itick_token.is_some()),
             feed_sifting: env_switch("FEED_SIFTING", has_sifting_key),
 
-            bitget_symbol: env_str("BITGET_SYMBOL", "XAUTUSDT"),
-            gate_symbol: env_str("GATE_SYMBOL", "XAUT_USDT"),
-            kraken_product: env_str("KRAKEN_PRODUCT", "PF_XAUTUSD"),
-            alltick_ws_url: env_str("ALLTICK_WS_URL", "wss://quote.alltick.co/quote-b-ws-api"),
-            alltick_code: env_str("ALLTICK_CODE", "XAUUSD"),
-            itick_ws_url: env_str("ITICK_WS_URL", "wss://api-free.itick.org/forex"),
-            itick_symbol: env_str("ITICK_SYMBOL", "XAUUSD"),
+            strategy_enabled: env_bool("STRATEGY_ENABLED", true),
+            strategy_eval_secs: env_u64("STRATEGY_EVAL_SECS", 15).clamp(1, 3_600),
+            strategy_min_confidence: env_f64("STRATEGY_MIN_CONFIDENCE", 0.55).clamp(0.0, 1.0),
+            strategy_risk_pct: env_f64("STRATEGY_RISK_PCT", 0.5).clamp(0.01, 5.0),
+            strategy_atr_period: env_u64("STRATEGY_ATR_PERIOD", 14).clamp(2, 200) as usize,
+            strategy_atr_stop_mult: env_f64("STRATEGY_ATR_STOP_MULT", 1.5).clamp(0.25, 10.0),
+            strategy_reward_risk: env_f64("STRATEGY_REWARD_RISK", 2.0).clamp(0.5, 10.0),
+            strategy_event_blackout_secs: env_i64("STRATEGY_EVENT_BLACKOUT_SECS", 900)
+                .clamp(0, 86_400),
+
+            demo_enabled: env_bool("DEMO_ENABLED", true),
+            demo_start_balance: env_f64("DEMO_START_BALANCE", 10_000.0).max(100.0),
+            demo_leverage: env_f64("DEMO_LEVERAGE", 1000.0).clamp(1.0, 1000.0),
+            demo_spread: env_f64("DEMO_SPREAD", 0.10).clamp(0.0, 5.0),
+            demo_min_lots: env_f64("DEMO_MIN_LOTS", 0.01).clamp(0.01, 1.0),
+            demo_max_lots: env_f64("DEMO_MAX_LOTS", 1.0).clamp(0.01, 100.0),
+            demo_lot_step: env_f64("DEMO_LOT_STEP", 0.01).clamp(0.01, 1.0),
+            demo_stop_out_pct: env_f64("DEMO_STOP_OUT_PCT", 50.0).clamp(1.0, 100.0),
+            demo_cooldown_secs: env_i64("DEMO_COOLDOWN_SECS", 60).clamp(0, 86_400),
 
             cors_allowed_origin: normalize_origin(&env_str(
                 "CORS_ALLOWED_ORIGIN",

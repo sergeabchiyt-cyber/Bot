@@ -188,20 +188,59 @@ print(f"replay: {len(levels)} levels, {len(candles)} candles")
 print(f"candle: source={candle['source']} close={candle['close']}")
 print(f"levels: {levels[0]['window']} poc={levels[0]['poc']}")
 
-# Node2-style dashboard: subscribes to the read-only market topics.
+# Node2-style dashboard: subscribes to the read-only market + strategy topics.
+# `bubbles` is gone with the order-flow analyzer, so subscribing to it must be a
+# no-op rather than an error, and it must never produce a frame.
 dashboard_sock, dashboard_reader = connect()
-send_json(dashboard_sock, {"type": "subscribe", "topics": ["levels", "bubbles"]})
-status_deadline = time.monotonic() + 10
+send_json(
+    dashboard_sock,
+    {"type": "subscribe", "topics": ["levels", "strategy", "demo", "bubbles"]},
+)
+
 status_seen = False
-while time.monotonic() < status_deadline:
-    frame = read_json(dashboard_reader, status_deadline)
+strategy_seen = None
+demo_seen = None
+deadline = time.monotonic() + 30
+while time.monotonic() < deadline:
+    frame = read_json(dashboard_reader, deadline)
     if frame is None:
-        fail("dashboard did not receive the post-subscribe status frame")
-    if frame["type"] == "status":
-        status_seen = True
         break
+    kind = frame["type"]
+    if kind == "bubbles":
+        fail(f"the removed order-flow topic still publishes: {frame}")
+    if kind == "status":
+        status_seen = True
+    elif kind == "strategy":
+        strategy_seen = frame["data"]
+    elif kind == "demo":
+        demo_seen = frame["data"]
+    if status_seen and strategy_seen is not None and demo_seen is not None:
+        break
+
 if not status_seen:
-    fail("timed out waiting for the post-subscribe status frame")
+    fail("dashboard did not receive the post-subscribe status frame")
+if strategy_seen is None:
+    fail("no `strategy` frame: the built-in evaluator never published a decision")
+if demo_seen is None:
+    fail("no `demo` frame: the paper account never published a snapshot")
+
+if strategy_seen.get("action") not in {"buy", "sell", "flat"}:
+    fail(f"strategy frame has no usable action: {strategy_seen}")
+for key in ("score", "confidence", "atr", "lots", "reasons"):
+    if key not in strategy_seen:
+        fail(f"strategy frame is missing `{key}`: {strategy_seen}")
+if demo_seen.get("mode") != "demo" or demo_seen.get("leverage") != 1000:
+    fail(f"demo frame is not the 1:1000 simulator: {demo_seen}")
+if abs(demo_seen["quote"]["spread"] - 0.10) > 1e-9:
+    fail(f"demo frame spread is not 0.10: {demo_seen['quote']}")
+print(
+    f"strategy frame: {strategy_seen['action']} score={strategy_seen['score']:+.3f} "
+    f"lots={strategy_seen['lots']:.2f}"
+)
+print(
+    f"demo frame: 1:{demo_seen['leverage']:.0f} spread={demo_seen['quote']['spread']:.2f} "
+    f"equity={demo_seen['account']['equity']:.2f} position={demo_seen['position'] is not None}"
+)
 
 # Node1 is a market-data service: there is no broker write path, so an
 # execution/fill frame published by any client must never be rebroadcast.
@@ -234,7 +273,8 @@ while time.monotonic() < silence_deadline:
 print("no broker write path: an inbound `trades` frame is never rebroadcast")
 
 # The topics Node3 and Node2 do consume must still be live: re-subscribing to
-# `levels` replays cached profiles on the same socket.
+# `levels` replays cached profiles on the same socket. (The `bubbles`
+# subscription above proves the removed topic stays silent.)
 send_json(dashboard_sock, {"type": "subscribe", "topics": ["levels"]})
 replay_deadline = time.monotonic() + 10
 replayed = False

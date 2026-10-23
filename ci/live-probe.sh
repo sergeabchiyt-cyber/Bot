@@ -33,6 +33,8 @@ fetch levels      /levels
 fetch candles     /candles
 fetch tick-volume /tick-volume
 fetch calendar    /calendar
+fetch strategy    /strategy
+fetch demo        /demo
 
 # Volume-profile audit (added on the current branch; 404 on older builds).
 fetch vp-PW       '/vp?window=PW'

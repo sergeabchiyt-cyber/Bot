@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """Static guard for the Node1 service boundary.
 
-Node1 must be a market-data / volume-profile service only. This script fails
-when anything execution- or broker-shaped reappears in Node1 source,
-configuration, CI or deployment — the checks that CI would otherwise rely on
-the compiler for, plus the ones the compiler cannot see (env vars, workflows,
-Dockerfile, docs).
+Node1 is the market-data / volume-profile service plus the built-in strategy
+evaluator and the **demo (paper) simulator**. It is still not an execution
+venue: no broker credential, no MT5 bridge, no node3-execution, no write route
+and no way to reach a broker from the strategy or demo modules.
+
+This script fails when a broker/execution shape reappears, when the removed
+order-flow path comes back (exchange aggTrade adapters + the bubbles analyzer),
+or when one of the demo contract's fixed invariants (1:1000 leverage, 0.10
+spread, 0.01-1.00 lots) drifts.
 
 Note: this file is the *denylist*, so it is the one place in the branch where
-the forbidden identifiers (`DERIV_DEMO_API`, `MCP_CHELSEA_URL`, `MT5_...`,
-`ExecutionManager`, `node3-execution`, …) legitimately appear as text. It is
-skipped when scanning itself. Everywhere else they are banned.
+the forbidden identifiers legitimately appear as text. It is skipped when
+scanning itself. Everywhere else they are banned.
 
 usage: check_node1_boundary.py [repo-root]
 """
@@ -63,7 +66,7 @@ FORBIDDEN: list[tuple[str, re.Pattern[str], str]] = [
     (
         "account stake / lot config",
         re.compile(r"\b(ORDER_SIZE|DERIV_MIN_STAKE|MT5_VOLUME_LOTS|STAKE_|LOT_?SIZE)\b"),
-        "stake/lot-size setting still present",
+        "stake/lot-size setting still present (the demo uses DEMO_MIN_LOTS/DEMO_MAX_LOTS)",
     ),
     (
         "execution SL/TP/RR config",
@@ -84,6 +87,32 @@ FORBIDDEN: list[tuple[str, re.Pattern[str], str]] = [
         "broker write route",
         re.compile(r"\.route\([^)]*,\s*(post|put|delete|patch)\("),
         "a write route is registered on the router",
+    ),
+    # ---- Order flow was removed from Node1; it must not come back ----
+    (
+        "order-flow analyzer",
+        re.compile(r"\bOrderFlowAnalyzer\b"),
+        "the removed order-flow analyzer is still referenced",
+    ),
+    (
+        "exchange aggTrade adapter",
+        re.compile(r"\bAggTrade\b"),
+        "the removed exchange aggTrade adapter is still referenced",
+    ),
+    (
+        "order-flow delta history",
+        re.compile(r"\bdelta_history\b"),
+        "order-flow delta state is still referenced",
+    ),
+    (
+        "bubbles WS frame",
+        re.compile(r'#\[serde\(rename = "bubbles"\)\]'),
+        "the removed order-flow `bubbles` frame is back in the wire contract",
+    ),
+    (
+        "order-flow feed switch",
+        re.compile(r"\bFEED_(BINANCE|BYBIT|OKX|BITGET|GATE|KRAKEN|ALLTICK|ITICK)\b"),
+        "an exchange order-flow feed switch is still read",
     ),
 ]
 
@@ -111,13 +140,8 @@ RECORDED_DIRS = {"live"}
 # allowed there. Every entry needs a reason: this is the audit trail for
 # "the remaining matches are deliberate".
 ALLOWED_SITES: dict[str, set[str]] = {
-    # Upstream exchange market-data channels are literally named `trades`
-    # (OKX / Bybit / Gate / Kraken public WS). That is *inbound* exchange
-    # trade data — exactly what the order-flow bubbles are computed from —
-    # and has nothing to do with Node1's own WS topic list.
-    "src/multi_exchange.rs": {"trades WS topic"},
-    # Negative tests: each one asserts that Node1 *rejects* an execution
-    # frame, so the forbidden string is the thing under test.
+    # Negative tests: each one asserts that Node1 *rejects* an execution frame
+    # or that the removed order-flow topic no longer parses.
     "src/types.rs": {"trades WS topic"},
     "src/ws_server.rs": {"trades WS topic"},
     "ci/verify_ws.py": {"trades WS topic"},
@@ -126,7 +150,28 @@ ALLOWED_SITES: dict[str, set[str]] = {
 # Directories never walked.
 SKIP_DIRS = {".git", "target", "__pycache__", "node_modules", ".venv"}
 
-MARKET_TOPICS_REQUIRED = ["levels", "candle", "tick_volume", "bubbles", "calendar", "status"]
+MARKET_TOPICS_REQUIRED = [
+    "levels", "candle", "tick_volume", "calendar", "status", "strategy", "demo",
+]
+MARKET_ROUTES_REQUIRED = [
+    "/health", "/status", "/levels", "/vp", "/candles", "/tick-volume",
+    "/calendar", "/ai", "/strategy", "/demo", "/ws",
+]
+
+# The demo contract the desk asked for, pinned so a refactor cannot silently
+# turn the simulator into something else.
+DEMO_CONTRACT = [
+    (r'env_f64\("DEMO_LEVERAGE", 1000\.0\)', "1:1000 leverage default"),
+    (r'env_f64\("DEMO_SPREAD", 0\.10\)', "0.10 spread default"),
+    (r'env_f64\("DEMO_MIN_LOTS", 0\.01\)', "0.01 minimum lot"),
+    (r'env_f64\("DEMO_MAX_LOTS", 1\.0\)', "1.00 maximum lot"),
+    (r'env_f64\("DEMO_START_BALANCE", 10_000\.0\)', "10,000 starting balance"),
+]
+
+# Modules that must stay offline: a simulator that could open a socket is one
+# refactor away from being an execution path.
+OFFLINE_MODULES = ["src/strategy.rs", "src/demo_engine.rs"]
+NETWORK_PATTERN = re.compile(r"\breqwest\b|connect_async|\bTcpStream\b|https?://|wss?://")
 
 
 def iter_files():
@@ -166,13 +211,12 @@ def main() -> int:
                 snippet = text.splitlines()[line - 1].strip()[:120]
                 failures.append(f"{rel}:{line}: {message}\n      {snippet}")
 
-    # Positive checks: the market surface must survive the cleanup.
+    # Positive checks: the market + strategy surface must survive the cleanup.
     def has(path: str, pattern: str) -> bool:
         p = ROOT / path
         return p.is_file() and re.search(pattern, p.read_text(encoding="utf-8", errors="replace"))
 
-    for route in ["/health", "/status", "/levels", "/vp", "/candles", "/tick-volume",
-                  "/calendar", "/ai", "/ws"]:
+    for route in MARKET_ROUTES_REQUIRED:
         if not has("src/ws_server.rs", re.escape(f'"{route}"')):
             failures.append(f"src/ws_server.rs: market route {route} is missing")
 
@@ -180,11 +224,29 @@ def main() -> int:
         if not has("src/ws_server.rs", re.escape(f'"{topic}"')):
             failures.append(f"src/ws_server.rs: market WS topic {topic} is missing")
 
-    if not has("src/types.rs", r"#\[serde\(rename = \"bubbles\"\)\]"):
-        failures.append("src/types.rs: order-flow `bubbles` frame was removed")
+    if not has("src/strategy.rs", r"pub struct StrategyEngine"):
+        failures.append("src/strategy.rs: the strategy evaluator is missing")
 
-    if not has("src/types.rs", r"pub struct AggTrade"):
-        failures.append("src/types.rs: exchange trade data (AggTrade) was removed")
+    if not has("src/demo_engine.rs", r"pub struct DemoEngine"):
+        failures.append("src/demo_engine.rs: the demo engine is missing")
+
+    # Nothing may sit between the strategy/demo modules and a network socket.
+    for module in OFFLINE_MODULES:
+        p = ROOT / module
+        if not p.is_file():
+            failures.append(f"{module}: missing")
+            continue
+        text = p.read_text(encoding="utf-8", errors="replace")
+        if NETWORK_PATTERN.search(text):
+            failures.append(f"{module}: the strategy/demo path must stay offline")
+
+    # The 1:1000 / 0.10 / 0.01-1.00 demo contract.
+    config_text = ""
+    if (ROOT / "src/config.rs").is_file():
+        config_text = (ROOT / "src/config.rs").read_text(encoding="utf-8", errors="replace")
+    for pattern, label in DEMO_CONTRACT:
+        if not re.search(pattern, config_text):
+            failures.append(f"src/config.rs: demo contract drifted — missing {label}")
 
     # Deployment builds only the engine crate.
     dockerfile = ROOT / "Dockerfile"
@@ -195,12 +257,14 @@ def main() -> int:
         if re.search(r"COPY\s+(node3-execution|mt5-bridge)", text):
             failures.append("Dockerfile: copies an execution/MT5 crate")
 
-    # No execution subtree survived on the branch.
+    # No execution subtree survived on the branch, and the order-flow files
+    # that were removed must not come back.
     for gone in ["node3-execution", "mt5-bridge", "docs/mt5", "ci/mt5", "ci/deriv",
                  "ci/deriv_probe.py", "src/execution.rs", "src/execution_deriv.rs",
-                 "src/execution_chelsea.rs", ".github/workflows/deriv-probe.yml"]:
+                 "src/execution_chelsea.rs", ".github/workflows/deriv-probe.yml",
+                 "src/order_flow.rs", "src/binance_ws.rs", "src/multi_exchange.rs"]:
         if (ROOT / gone).exists():
-            failures.append(f"{gone}: execution/MT5 asset still present on Node1")
+            failures.append(f"{gone}: removed Node1 asset is still present")
 
     if failures:
         print(f"NODE1 BOUNDARY CHECK FAILED ({len(failures)} finding(s))")

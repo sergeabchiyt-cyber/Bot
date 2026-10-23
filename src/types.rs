@@ -1,96 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 // =====================================================================
-// Normalized trade tick (all order flow sources funnel into this)
-// =====================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AggTrade {
-    #[serde(rename = "e", default)]
-    pub event_type: String,
-    #[serde(rename = "E", default)]
-    pub event_time: i64,
-    #[serde(rename = "s", default)]
-    pub symbol: String,
-    #[serde(rename = "a", default)]
-    pub agg_id: u64,
-    #[serde(rename = "p")]
-    pub price: String,
-    #[serde(rename = "q")]
-    pub quantity: String,
-    #[serde(rename = "f", default)]
-    pub first_trade_id: u64,
-    #[serde(rename = "l", default)]
-    pub last_trade_id: u64,
-    #[serde(rename = "T")]
-    pub trade_time: i64,
-    #[serde(rename = "m")]
-    pub is_buyer_maker: bool,
-
-    #[serde(default = "default_exchange")]
-    pub exchange: String,
-    /// False for feeds that publish no taker side (quote ticks).
-    /// Those count toward volume but never toward delta, so a
-    /// direction-less feed cannot fabricate directional flow.
-    #[serde(default = "default_true")]
-    pub has_flow_side: bool,
-}
-
-fn default_exchange() -> String {
-    "binance".into()
-}
-
-fn default_true() -> bool {
-    true
-}
-
-impl AggTrade {
-    /// Constructor used by the exchange adapters (Bybit/OKX/Bitset/Gate/Kraken/...).
-    /// `taker_buy` = the aggressive side was the buyer.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        exchange: &str,
-        symbol: &str,
-        price: &str,
-        qty: &str,
-        ts: i64,
-        taker_buy: bool,
-        has_flow_side: bool,
-    ) -> Self {
-        Self {
-            event_type: "trade".into(),
-            event_time: ts,
-            symbol: symbol.into(),
-            agg_id: 0,
-            price: price.into(),
-            quantity: qty.into(),
-            first_trade_id: 0,
-            last_trade_id: 0,
-            trade_time: ts,
-            is_buyer_maker: !taker_buy,
-            exchange: exchange.into(),
-            has_flow_side,
-        }
-    }
-
-    pub fn price_f64(&self) -> f64 {
-        self.price.parse().unwrap_or(0.0)
-    }
-
-    pub fn qty_f64(&self) -> f64 {
-        self.quantity.parse().unwrap_or(0.0)
-    }
-
-    pub fn signed_delta(&self) -> f64 {
-        if self.is_buyer_maker {
-            -self.qty_f64()
-        } else {
-            self.qty_f64()
-        }
-    }
-}
-
-// =====================================================================
 // Volume profile
 // =====================================================================
 
@@ -208,21 +118,6 @@ pub struct VpLevels {
 }
 
 // =====================================================================
-// Order flow events
-// =====================================================================
-
-/// kind = "BUY_BUBBLE" | "SELL_BUBBLE" | "ABS_BUY" | "ABS_SELL"
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OrderflowEvent {
-    pub kind: String,
-    pub level: f64,
-    pub strength: f64,
-    pub timestamp: i64,
-    #[serde(default = "default_exchange")]
-    pub exchange: String,
-}
-
-// =====================================================================
 // WebSocket frames
 // =====================================================================
 
@@ -238,14 +133,21 @@ pub enum WsFrame {
     #[serde(rename = "tick_volume")]
     TickVolume { data: TickVolumeBar },
 
-    #[serde(rename = "bubbles")]
-    Bubbles { data: OrderflowEvent },
-
     #[serde(rename = "calendar")]
     Calendar { data: serde_json::Value },
 
     #[serde(rename = "status")]
     Status { data: serde_json::Value },
+
+    /// Evaluation of the built-in strategy engine (price + volume profile +
+    /// tick volume). Read-only: `/strategy` serves the same snapshot.
+    #[serde(rename = "strategy")]
+    Strategy { data: serde_json::Value },
+
+    /// Demo (paper) account snapshot — balance, equity, margin, open position.
+    /// Read-only in both directions: no frame here submits an order.
+    #[serde(rename = "demo")]
+    Demo { data: serde_json::Value },
 
     #[serde(rename = "subscribe")]
     Subscribe { topics: Vec<String> },
@@ -345,10 +247,9 @@ mod tests {
         assert_eq!(wire["data"]["sunday_open"], 2_341.25);
     }
 
-    /// Node1 has no broker write path: a `trades` frame is not a variant the
-    /// market service can parse, so an inbound one is ignored rather than
-    /// fanned out. The enum is a tagged union, so deserialization simply
-    /// fails — there is no execution/fill frame for a client to submit.
+    /// Node1 has no broker write path: an execution/fill frame is not a
+    /// variant the market service can parse, so an inbound one is ignored
+    /// rather than fanned out.
     #[test]
     fn trade_frames_are_not_part_of_the_node1_wire_contract() {
         let raw = serde_json::json!({
@@ -369,9 +270,28 @@ mod tests {
             serde_json::from_value::<WsFrame>(raw).is_err(),
             "Node1 must not accept an execution/fill frame"
         );
+    }
 
-        // The market frames Node3 and Node2 do consume still parse: candles
-        // for ATR seeding and order-flow bubbles for the chart.
+    /// Order flow was removed with the exchange aggTrade adapters: the
+    /// `bubbles` topic is not part of the wire contract any more, so an old
+    /// client subscribing to it gets nothing rather than a silent 404.
+    #[test]
+    fn orderflow_bubbles_are_gone_from_the_market_contract() {
+        let raw = serde_json::json!({
+            "type": "bubbles",
+            "data": {
+                "kind": "BUY_BUBBLE", "level": 2340.0, "strength": 20.0,
+                "timestamp": 1_700_000_000_000_i64, "exchange": "binance"
+            }
+        });
+        assert!(
+            serde_json::from_value::<WsFrame>(raw).is_err(),
+            "the removed order-flow `bubbles` frame must no longer parse"
+        );
+    }
+
+    #[test]
+    fn market_candle_frame_still_parses() {
         let candle = serde_json::json!({
             "type": "candle",
             "data": {
@@ -384,18 +304,25 @@ mod tests {
             matches!(frame, WsFrame::Candle { .. }),
             "the market candle frame must still parse"
         );
+    }
 
-        let bubbles = serde_json::json!({
-            "type": "bubbles",
-            "data": {
-                "kind": "BUY_BUBBLE", "level": 2340.0, "strength": 20.0,
-                "timestamp": 1_700_000_000_000_i64, "exchange": "binance"
-            }
-        });
-        let frame: WsFrame = serde_json::from_value(bubbles).unwrap();
-        assert!(
-            matches!(frame, WsFrame::Bubbles { .. }),
-            "the order-flow bubbles frame must still parse"
-        );
+    /// The strategy and demo frames are read-only projections: a client can
+    /// subscribe to them, but neither carries any way to submit an order.
+    #[test]
+    fn strategy_and_demo_frames_round_trip() {
+        for (raw, expected) in [
+            (
+                serde_json::json!({"type": "strategy", "data": {"action": "buy"}}),
+                "strategy",
+            ),
+            (
+                serde_json::json!({"type": "demo", "data": {"leverage": 1000}}),
+                "demo",
+            ),
+        ] {
+            let frame: WsFrame = serde_json::from_value(raw).expect("market frame");
+            let wire = serde_json::to_value(&frame).unwrap();
+            assert_eq!(wire["type"], expected);
+        }
     }
 }

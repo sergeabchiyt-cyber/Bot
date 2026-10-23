@@ -17,7 +17,9 @@ use tracing::info;
 
 use crate::ai_cache::AiCache;
 use crate::config::Config;
+use crate::demo_engine::DemoEngine;
 use crate::status::FeedStatus;
+use crate::strategy::StrategyEngine;
 use crate::tick_volume::TickVolumeStore;
 use crate::types::{TickVolumeBar, VpCandle, VpLevels, WsFrame};
 use crate::volume_profile::{CustomRangeError, VolumeProfileEngine};
@@ -39,6 +41,10 @@ pub struct AppState {
     pub config: Config,
     /// Everything Node3 reports back (transcripts, sentiment, health).
     pub ai: Arc<AiCache>,
+    /// Built-in strategy evaluator (price + volume profile + tick volume).
+    pub strategy: Arc<RwLock<StrategyEngine>>,
+    /// Demo (paper) account: 1:1000 leverage, 0.10 spread, 0.01-1.00 lots.
+    pub demo: Arc<RwLock<DemoEngine>>,
 }
 
 /// Browser-facing CORS policy.
@@ -92,6 +98,8 @@ pub fn router(state: AppState) -> Router {
         .route("/tick-volume", get(tick_volume_snapshot))
         .route("/calendar", get(calendar_snapshot))
         .route("/ai", get(ai_snapshot))
+        .route("/strategy", get(strategy_snapshot))
+        .route("/demo", get(demo_snapshot))
         .route("/status", get(status_snapshot))
         .route("/ws", get(ws_handler))
         .with_state(state)
@@ -237,6 +245,21 @@ async fn ai_snapshot(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(state.ai.snapshot_today())
 }
 
+/// Latest strategy evaluation: params, the current decision and a short
+/// history. The `strategy` WS topic carries the same decision payload live.
+async fn strategy_snapshot(State(state): State<AppState>) -> Response {
+    let body = state.strategy.read().await.snapshot();
+    ([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
+}
+
+/// Demo (paper) account: balance, equity, margin, the open position and the
+/// closed-trade history. This is a simulator — the response is read-only and
+/// there is no route that submits an order.
+async fn demo_snapshot(State(state): State<AppState>) -> Response {
+    let body = state.demo.read().await.snapshot();
+    ([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
+}
+
 /// Fill in the `data` envelope at the edge for loose producer payloads:
 /// `{"type":"learn","features":[..],"target":1}` and
 /// `{"type":"audio_chunk","audio":"<b64>"}` are accepted alongside the
@@ -327,6 +350,22 @@ async fn status_snapshot(State(state): State<AppState>) -> Response {
             "input": state.config.vp_lower_tf,
             "audit": "/vp?window=PW",
         },
+        "strategy": {
+            "enabled": state.config.strategy_enabled,
+            "eval_secs": state.config.strategy_eval_secs,
+            "min_confidence": state.config.strategy_min_confidence,
+            "risk_pct": state.config.strategy_risk_pct,
+            "endpoint": "/strategy",
+        },
+        "demo": {
+            "enabled": state.config.demo_enabled && state.config.strategy_enabled,
+            "mode": "demo",
+            "leverage": state.config.demo_leverage,
+            "spread": state.config.demo_spread,
+            "min_lots": state.config.demo_min_lots,
+            "max_lots": state.config.demo_max_lots,
+            "endpoint": "/demo",
+        },
     });
     ([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
 }
@@ -414,6 +453,30 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                         return;
                                     }
                                 }
+                                if topics.iter().any(|x| x == "strategy") {
+                                    let last = {
+                                        let engine = state.strategy.read().await;
+                                        engine
+                                            .last()
+                                            .and_then(|d| serde_json::to_value(d).ok())
+                                    };
+                                    if let Some(data) = last {
+                                        let frame = WsFrame::Strategy { data };
+                                        let json =
+                                            serde_json::to_string(&frame).unwrap_or_default();
+                                        if sender.send(Message::Text(json.into())).await.is_err() {
+                                            return;
+                                        }
+                                    }
+                                }
+                                if topics.iter().any(|x| x == "demo") {
+                                    let data = state.demo.read().await.snapshot();
+                                    let frame = WsFrame::Demo { data };
+                                    let json = serde_json::to_string(&frame).unwrap_or_default();
+                                    if sender.send(Message::Text(json.into())).await.is_err() {
+                                        return;
+                                    }
+                                }
                                 let frame = WsFrame::Status { data: state.status.snapshot() };
                                 let json = serde_json::to_string(&frame).unwrap_or_default();
                                 if sender.send(Message::Text(json.into())).await.is_err() {
@@ -475,9 +538,10 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             WsFrame::Levels { .. } => "levels",
                             WsFrame::Candle { .. } => "candle",
                             WsFrame::TickVolume { .. } => "tick_volume",
-                            WsFrame::Bubbles { .. } => "bubbles",
                             WsFrame::Calendar { .. } => "calendar",
                             WsFrame::Status { .. } => "status",
+                            WsFrame::Strategy { .. } => "strategy",
+                            WsFrame::Demo { .. } => "demo",
                             WsFrame::AudioChunk { .. } => "audio_chunk",
                             WsFrame::Learn { .. } => "learn",
                             WsFrame::Transcript { .. } => "transcript",
@@ -527,19 +591,23 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::demo_engine::DemoParams;
+    use crate::strategy::StrategyParams;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
 
     const ALLOWED: &str = "https://static-dash-frontend.onrender.com";
     const FOREIGN: &str = "https://evil.example";
-    const REST_ROUTES: [&str; 7] = [
+    const REST_ROUTES: [&str; 9] = [
         "/health",
         "/levels",
         "/candles",
         "/tick-volume",
         "/calendar",
         "/ai",
+        "/strategy",
+        "/demo",
         "/status",
     ];
 
@@ -584,6 +652,12 @@ mod tests {
             status: FeedStatus::new(tx),
             config,
             ai: Arc::new(AiCache::new()),
+            strategy: Arc::new(RwLock::new(StrategyEngine::new(StrategyParams::default()))),
+            demo: Arc::new(RwLock::new(DemoEngine::new(
+                DemoParams::default(),
+                3400.0,
+                1_700_000_000_000,
+            ))),
         };
         router(state)
     }
@@ -916,6 +990,34 @@ mod tests {
             WsFrame::Learn { data } => assert_eq!(data["target"], 0.0),
             other => panic!("wrong variant: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn strategy_and_demo_routes_serve_the_plan_and_the_print() {
+        let res = send("GET", "/strategy", Some(ALLOWED)).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["symbol"], "XAUUSD");
+        assert_eq!(json["params"]["min_lots"], 0.01);
+        assert_eq!(json["params"]["max_lots"], 1.0);
+        // No evaluation has run yet in this router.
+        assert!(json["last"].is_null());
+
+        let res = send("GET", "/demo", Some(ALLOWED)).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["mode"], "demo");
+        assert_eq!(json["symbol"], "XAUUSD");
+        assert_eq!(json["leverage"], 1000.0);
+        assert_eq!(json["quote"]["spread"], 0.1);
+        assert!(json["account"]["balance"].is_number());
+        assert!(json["position"].is_null());
     }
 
     /// `/vp?start=&end=` is the Fixed Range case: the caller picks the range,

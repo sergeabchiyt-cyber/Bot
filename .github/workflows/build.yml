@@ -1,8 +1,9 @@
 name: build
 
-# Node1 only: the XAUUSD market-data and volume-profile service.
-# Node2 (dashboard), Node3 (strategy) and Node4 (execution/MT5) are separate
-# branches with their own CI; this workflow must never build them.
+# Node1 only: the XAUUSD market-data, volume-profile and strategy service
+# (the demo engine is a local simulator, not execution).
+# Node2 (dashboard), Node3 (AI strategy) and Node4 (live execution/MT5) are
+# separate branches with their own CI; this workflow must never build them.
 
 on:
   push:
@@ -64,8 +65,9 @@ jobs:
           set -o pipefail
           cargo test --all-targets -- --ignored --nocapture 2>&1 | tee /tmp/live.log
 
-      # Node1 owns market data only: no execution module, no broker env var,
-      # no MT5 bridge, no `trades` write path.
+      # Node1 owns market data + the strategy/demo simulator: no execution
+      # module, no broker env var, no MT5 bridge, no `trades` write path, no
+      # order-flow (bubbles) path, and the demo contract stays 1:1000/0.10/0.01-1.
       - name: Node1 service boundary
         run: python3 ci/check_node1_boundary.py .
 

@@ -5,10 +5,12 @@
 #       profiles a hand-selected range (?start=&end=) as `CUSTOM`
 #   2. /calendar is actually populated with real ForexFactory events
 #   3. CORS lets the Node2 static origin (and only that origin) read the REST API
-#   4. /ws upgrades, replays levels + 15 candles, and proves it accepts no
-#      execution/fill frame (Node1 has no broker write path)
-#   5. /tick-volume serves well-formed live tick-volume bars
-#   6. the econ-news audio pipeline serves `audio_chunk`/`learn` on /ws and
+#   4. /tick-volume serves well-formed live tick-volume bars
+#   5. /strategy evaluates the built-in strategy (order flow removed) and
+#      /demo books it in the 1:1000 / 0.10-spread / 0.01-1.00-lot simulator
+#   6. /ws upgrades, replays levels + 15 candles + strategy + demo, and proves
+#      it accepts no execution/fill frame (Node1 has no broker write path)
+#   7. the econ-news audio pipeline serves `audio_chunk`/`learn` on /ws and
 #      caches Node3 transcripts for GET /ai (test-tone mode, no ffmpeg needed)
 set -uo pipefail
 
@@ -133,7 +135,7 @@ cors_headers() {
 one_line() { printf '%s' "$1" | tr '\n' '|'; }
 
 echo "1) allowed origin gets access-control-allow-origin on every route"
-for r in /health /levels /candles /tick-volume /calendar /ai /status /vp; do
+for r in /health /levels /candles /tick-volume /calendar /ai /status /vp /strategy /demo; do
   h=$(cors_headers GET "$r" -H "Origin: $CORS_ALLOWED")
   printf '%s\n' "$h" | head -n1 | grep -q " 200" \
     || fail "$r: expected 200, got '$(printf '%s\n' "$h" | head -n1)'"
@@ -155,7 +157,7 @@ printf '%s\n' "$h" | grep -qi "^access-control-max-age: 600\$" \
 printf '  %s\n' "$(one_line "$(printf '%s\n' "$h" | grep -Ei '^(HTTP/|access-control|vary)')")"
 
 echo "3) every other origin gets NO allow-header"
-for r in /health /levels /candles /tick-volume /calendar /ai /status /vp; do
+for r in /health /levels /candles /tick-volume /calendar /ai /status /vp /strategy /demo; do
   h=$(cors_headers GET "$r" -H "Origin: $CORS_FOREIGN")
   printf '%s\n' "$h" | grep -qi "^access-control-allow-origin" \
     && fail "$r: leaked an allow-header to $CORS_FOREIGN [$(one_line "$h")]"
@@ -175,15 +177,32 @@ grep -qiE "sifting_api_key|api_?key|token" /tmp/levels.json /tmp/candles.json \
   && fail "a key-like field appeared in a response body"
 echo "  headers are CORS-only"
 
-echo "5) /ws still upgrades and replays frames through the layer"
+echo
+echo "5) /strategy + /demo (order-flow removal, demo engine contract)"
+# The evaluator ticks as soon as the engine has a price; wait for the first
+# decision instead of racing the interval.
+for _ in $(seq 1 40); do
+  curl -sf "$BASE/strategy" -o /tmp/strategy.json || fail "/strategy request failed"
+  if python3 -c 'import json,sys;sys.exit(0 if json.load(open("/tmp/strategy.json")).get("last") else 1)' ; then
+    break
+  fi
+  sleep 1
+done
+cat /tmp/strategy.json | head -c 1200
+echo
+curl -sf "$BASE/demo" -o /tmp/demo.json || fail "/demo request failed"
+cat /tmp/demo.json | head -c 1200
+echo
+python3 ci/verify_demo.py /tmp/strategy.json /tmp/demo.json || fail "/strategy or /demo verification failed"
+
+echo "6) /ws still upgrades and replays frames through the layer"
 python3 ci/verify_ws.py "${BASE#*://}" "$CORS_ALLOWED" || fail "/ws no longer streams through the CORS layer"
 
 echo
-echo "6) econ-news audio pipeline serves audio_chunk/learn and caches /ai digests"
+echo "7) econ-news audio pipeline serves audio_chunk/learn and caches /ai digests"
 ECON_LOG=/tmp/engine-econ.log
 PORT=3100 SEED_SYNTHETIC_CANDLES=1 ECON_TEST_TONE=1 \
-FEED_BINANCE=0 FEED_BYBIT=0 FEED_OKX=0 FEED_BITGET=0 FEED_GATE=0 FEED_KRAKEN=0 \
-FEED_ALLTICK=0 FEED_ITICK=0 FEED_SIFTING=0 ECON_USE_MCP=0 \
+FEED_SIFTING=0 ECON_USE_MCP=0 \
 RUST_LOG=${RUST_LOG:-info} "$BIN" >"$ECON_LOG" 2>&1 &
 PID2=$!
 for _ in $(seq 1 30); do
