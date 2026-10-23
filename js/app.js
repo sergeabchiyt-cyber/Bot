@@ -1,96 +1,105 @@
 /* ============================================================
- * XAUUSD Terminal — bootstrap and dashboard navigation.
- * Node 1 market, Node 3 strategy, and Node 4 execution start independently.
+ * XAUUSD Terminal — bootstrap.
+ *
+ * One Node 1 WebSocket feeds every panel. On mount the REST snapshots
+ * (`/strategy`, `/demo`, `/status`) seed the UI; while the socket is down a
+ * 5 s REST poll keeps strategy + demo fresh and the header shows DELAYED.
+ * Nothing on this page can place, modify or close an order.
  * ============================================================ */
 (function (App) {
   "use strict";
 
-  const { setStatus } = App.utils;
+  const { $, setStatus } = App.utils;
+  const cfg = App.config;
 
-  // Node 1 market frame routing. A missing chart library only disables chart
-  // drawing; it does not prevent strategy, execution, or diagnostics startup.
-  App.socket.on("heartbeat", () => {});
-  if (App.levels) App.socket.on("levels", App.levels.apply);
-  if (App.chart) {
-    App.socket.on("candle", App.chart.updateCandle);
-    App.socket.on("tick_volume", App.chart.updateTickVolume);
-    App.socket.on("tickVolume", App.chart.updateTickVolume);
-  }
-  if (App.orderflow) App.socket.on("bubbles", App.orderflow.add);
-  if (App.sentiment) App.socket.on("sentiment", App.sentiment.update);
-  if (App.calendar) App.socket.on("calendar", App.calendar.ingest);
+  App.runtime = { polling: false };
 
-  // ---------- Dashboard tabs ----------
-  const tabs = Array.from(document.querySelectorAll(".panel-tab"));
-  const panels = Array.from(document.querySelectorAll(".panel"));
-  tabs.forEach((tab, index) => {
-    tab.addEventListener("click", () => {
-      const target = tab.dataset.panel;
-      tabs.forEach((item) => {
-        const active = item === tab;
-        item.setAttribute("aria-selected", String(active));
-        item.setAttribute("tabindex", active ? "0" : "-1");
-      });
-      panels.forEach((panel) => {
-        const active = panel.id === target;
-        panel.classList.toggle("is-active", active);
-        panel.setAttribute("aria-hidden", String(!active));
-      });
-      try { localStorage.setItem("xau.panel", target); } catch {}
-    });
-    tab.addEventListener("keydown", (event) => {
-      let next = index;
-      if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (index + 1) % tabs.length;
-      else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (index - 1 + tabs.length) % tabs.length;
-      else if (event.key === "Home") next = 0;
-      else if (event.key === "End") next = tabs.length - 1;
-      else return;
-      event.preventDefault();
-      tabs[next].focus();
-      tabs[next].click();
-    });
-  });
-  let saved = null;
-  try { saved = localStorage.getItem("xau.panel"); } catch {}
-  const initial = tabs.find((tab) => tab.dataset.panel === saved) || tabs[0];
-  if (initial) initial.click();
+  // ---------- Frame routing ----------
 
-  // ---------- Timeframe tabs (only 15M is currently provided by Node 1) ----------
-  document.querySelectorAll(".tf").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (button.dataset.tf !== "15m" || button.classList.contains("active")) return;
-      if (App.levels) App.levels.reset();
-      if (App.orderflow) App.orderflow.clear();
-      if (App.chart) App.chart.loadHistory();
-      if (App.levels) App.levels.fetchAll();
-    });
-  });
+  App.socket.on("levels", (data) => { if (App.levels) App.levels.apply(data); });
+  App.socket.on("candle", (data) => { if (App.chart) App.chart.updateCandle(data); });
+  App.socket.on("tick_volume", (data) => { if (App.chart) App.chart.updateTickVolume(data); });
+  App.socket.on("calendar", (data) => { if (App.calendar) App.calendar.ingest(data); });
+  App.socket.on("strategy", (data) => { if (App.strategy) App.strategy.applyDecision(data, "ws"); });
+  App.socket.on("demo", (data) => { if (App.demo) App.demo.applySnapshot(data, "ws"); });
+  App.socket.on("status", (data) => { if (App.status) App.status.ingest(data, "ws"); });
 
-  function refreshMarketSnapshots() {
-    const tasks = [];
-    if (App.chart) tasks.push(App.chart.loadHistory());
-    if (App.levels) tasks.push(App.levels.fetchAll());
-    if (App.calendar) tasks.push(App.calendar.fetchAll());
-    return Promise.allSettled(tasks);
+  // ---------- Polling fallback ----------
+
+  let pollTimer = null;
+  let pollGraceTimer = null;
+  let lastStreamKey = null;
+
+  function paintDelayed(active) {
+    const badge = $("delayed-badge");
+    if (!badge) return;
+    badge.hidden = !active;
+    badge.title = "Socket unavailable \u2014 /strategy and /demo refresh from REST every 5 s.";
   }
 
-  App.socket.setSnapshotRefresh(refreshMarketSnapshots);
+  function stopPolling() {
+    if (pollGraceTimer !== null) { clearTimeout(pollGraceTimer); pollGraceTimer = null; }
+    if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
+    App.runtime.polling = false;
+    paintDelayed(false);
+  }
+
+  function startPolling() {
+    if (pollTimer !== null) return;
+    App.runtime.polling = true;
+    paintDelayed(true);
+    pollTimer = setInterval(() => {
+      if (App.strategy) App.strategy.poll();
+      if (App.demo) App.demo.poll();
+    }, cfg.socket.pollFallbackMs);
+  }
+
+  function handleSocketState(state) {
+    // publish() runs for every frame; only react when the state actually
+    // changes so the aria-live line is not repeated every few seconds.
+    const key = `${state.status}|${state.connected}|${state.endpointConfigured}`;
+    if (key === lastStreamKey) return;
+    lastStreamKey = key;
+
+    if (state.connected) {
+      stopPolling();
+      setStatus("stream connected", "live");
+      return;
+    }
+    setStatus(`stream ${state.status}`, "busy");
+    if (!state.endpointConfigured) {
+      stopPolling();
+      return;
+    }
+    if (pollTimer !== null || pollGraceTimer !== null) return;
+    // Brief grace so a normal first connect never flashes DELAYED.
+    pollGraceTimer = setTimeout(() => {
+      pollGraceTimer = null;
+      startPolling();
+      if (App.strategy) App.strategy.tick();
+      if (App.demo) App.demo.load();
+    }, 1500);
+  }
+
+  App.socket.onState(handleSocketState);
 
   // ---------- Boot ----------
+
   setStatus("dashboard starting", "busy");
   if (App.calendar) App.calendar.start();
   if (App.strategy) App.strategy.start();
-  if (App.execution) App.execution.start();
+  if (App.demo) App.demo.start();
+  if (App.status) App.status.start();
 
-  // Each service starts even if another service's REST endpoint is offline.
-  App.socket.connect();
+  // Mount-time REST seeds run before the first socket frame.
+  App.socket.start();
   if (App.chart) App.chart.loadHistory();
   if (App.levels) App.levels.fetchAll();
 
-  if (App.config.levelsRefreshMs > 0 && App.levels) {
-    setInterval(() => App.levels.fetchAll(), App.config.levelsRefreshMs);
+  if (cfg.levelsRefreshMs > 0 && App.levels) {
+    setInterval(() => App.levels.fetchAll(), cfg.levelsRefreshMs);
   }
-  if (App.config.marketSnapshotRefreshMs > 0 && App.chart) {
-    setInterval(() => App.chart.loadHistory(), App.config.marketSnapshotRefreshMs);
+  if (cfg.candlesRefreshMs > 0 && App.chart) {
+    setInterval(() => App.chart.loadHistory(), cfg.candlesRefreshMs);
   }
 })((window.App = window.App || {}));

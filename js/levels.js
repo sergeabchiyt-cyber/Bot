@@ -20,7 +20,8 @@
 (function (App) {
   "use strict";
 
-  const { $, escapeHtml, fmtPrice, numberOrNull, fetchPublicJson } = App.utils;
+  const { $, escapeHtml, numberOrNull, fetchPublicJson } = App.utils;
+  const format = App.format;
   const cfg = App.config;
 
   const swingWindows = cfg.swingWindows || ["SWING_BULL", "SWING_BEAR"];
@@ -135,7 +136,7 @@
         rows.push(`
           <div class="level-row level-anchor">
             <span class="level-label">${escapeHtml(anchor.label)}</span>
-            <span class="level-meta">${escapeHtml(fmtPrice(anchor.high))} &rarr; ${escapeHtml(fmtPrice(anchor.low))}</span>
+            <span class="level-meta">${escapeHtml(format.price(anchor.high))} &rarr; ${escapeHtml(format.price(anchor.low))}</span>
           </div>`);
       }
       for (const [, , price, s] of visibleLevels(l)) {
@@ -143,7 +144,7 @@
         rows.push(`
           <div class="level-row">
             <span class="level-label"><i class="swatch ${escapeHtml(s.cls)}"></i>${escapeHtml(s.title)}</span>
-            <span class="level-price">${escapeHtml(fmtPrice(price))}</span>
+            <span class="level-price">${escapeHtml(format.price(price))}</span>
           </div>`);
       }
     }
@@ -241,11 +242,5 @@
     }
   }
 
-  function reset() {
-    if (App.chart && typeof App.chart.clearPriceLines === "function") App.chart.clearPriceLines();
-    for (const w of Object.keys(state)) delete state[w];
-    render();
-  }
-
-  App.levels = { apply, fetchAll, reset };
+  App.levels = { apply, fetchAll };
 })((window.App = window.App || {}));
