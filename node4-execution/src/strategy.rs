@@ -738,7 +738,7 @@ mod tests {
         let (_, _, sl_pips, tp_pips, rr) = risk.compute_details(2_650.0, "buy");
         assert!((sl_pips - 300.0).abs() < 1e-9);
         assert!((tp_pips - 800.0).abs() < 1e-9);
-        assert!(rr >= 2.0 && rr <= 3.0);
+        assert!((2.0..=3.0).contains(&rr));
 
         // Force an out-of-band raw RR by requesting a tiny TP band.
         let params = RiskParams {
