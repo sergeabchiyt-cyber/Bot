@@ -337,6 +337,7 @@ test("performance shows the stats, caps profit factor and handles zero trades", 
   assert.match(html, /0\.0%/);
   assert.match(html, /\u2014/);
   assert.equal((html.match(/99\+/g) || []).length, 0);
+  assert.match(elements.get("trades-body").innerHTML, /No closed demo trades yet\./);
 
   App.demo.applySnapshot(demoSnapshot({
     ts: now + 5,
