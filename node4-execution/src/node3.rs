@@ -35,6 +35,7 @@ use crate::intent::{
     SERVICE_NAME,
 };
 use crate::ledger::{ExecutionLedger, IntentLedgerState, LedgerRecord};
+use crate::node1::MarketFeed;
 
 /// Heartbeat cadence on the Node 3 socket.
 const HEARTBEAT_SECS: u64 = 20;
@@ -53,7 +54,7 @@ fn now_ms() -> i64 {
 
 /// A report waiting for `execution_report_ack`.
 #[derive(Debug, Clone)]
-struct PendingReport {
+pub(crate) struct PendingReport {
     text: String,
     attempts: u32,
     last_sent_ms: i64,
@@ -61,33 +62,88 @@ struct PendingReport {
 
 /// A report on its way to the socket.
 #[derive(Debug, Clone)]
-struct Outgoing {
-    text: String,
+pub(crate) struct Outgoing {
+    pub(crate) text: String,
+}
+
+/// Where a lifecycle report goes.
+///
+/// Node 3 intents report back over the authenticated execution socket with
+/// acknowledgement tracking. Local-strategy intents have no Node 3 peer: the
+/// durable ledger and `/diagnostics` are their report, and the same
+/// `ExecutionReport` object is still built and recorded.
+#[derive(Clone)]
+pub(crate) enum ReportSink {
+    Node3 {
+        outbox: mpsc::Sender<Outgoing>,
+        pending: Arc<std::sync::Mutex<HashMap<String, PendingReport>>>,
+    },
+    Local,
 }
 
 #[derive(Clone)]
-struct LinkShared {
-    config: Config,
-    hub: DiagnosticsHub,
-    manager: Arc<ExecutionManager>,
-    ledger: Arc<ExecutionLedger>,
+pub(crate) struct LinkShared {
+    pub(crate) config: Config,
+    pub(crate) hub: DiagnosticsHub,
+    pub(crate) manager: Arc<ExecutionManager>,
+    pub(crate) ledger: Arc<ExecutionLedger>,
     /// Serialises broker writes: at most one order in flight at a time.
-    order_gate: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) order_gate: Arc<tokio::sync::Mutex<()>>,
     /// Reports awaiting `execution_report_ack`, surviving reconnects.
-    pending: Arc<std::sync::Mutex<HashMap<String, PendingReport>>>,
+    pub(crate) pending: Arc<std::sync::Mutex<HashMap<String, PendingReport>>>,
     /// Timestamp of the last frame received from Node 3.
-    last_frame_ms: Arc<AtomicI64>,
+    pub(crate) last_frame_ms: Arc<AtomicI64>,
+    /// Present only for the local-strategy source: the live Node 1 feed is the
+    /// gate that replaces the Node 3 link-freshness check.
+    local_feed: Option<MarketFeed>,
 }
 
 impl LinkShared {
-    fn venue_label(&self) -> &'static str {
+    pub(crate) fn venue_label(&self) -> &'static str {
         self.manager.venue_label()
     }
 
-    /// True when a frame arrived recently enough to trust the link.
+    /// Build the shared execution state for the local-strategy source.
+    pub(crate) fn for_local(
+        config: Config,
+        hub: DiagnosticsHub,
+        manager: Arc<ExecutionManager>,
+        ledger: Arc<ExecutionLedger>,
+        feed: MarketFeed,
+    ) -> Self {
+        Self {
+            config,
+            hub,
+            manager,
+            ledger,
+            order_gate: Arc::new(tokio::sync::Mutex::new(())),
+            pending: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            last_frame_ms: Arc::new(AtomicI64::new(now_ms())),
+            local_feed: Some(feed),
+        }
+    }
+
+    /// True when the source that produced this intent is still trustworthy.
     fn link_is_fresh(&self) -> bool {
+        if let Some(feed) = &self.local_feed {
+            return feed.is_trading_ready();
+        }
         let last = self.last_frame_ms.load(Ordering::SeqCst);
         last > 0 && now_ms() - last <= self.config.node3_stale_ms
+    }
+
+    /// The fail-closed pre-write gate, with the exact reason it refuses.
+    pub(crate) fn source_gate(&self) -> Result<(), IntentRejection> {
+        if let Some(feed) = &self.local_feed {
+            return feed.gate_check();
+        }
+        if !self.link_is_fresh() {
+            return Err(IntentRejection::new(
+                "node3_link_stale",
+                "the Node 3 link went stale before the order could be placed",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -106,6 +162,7 @@ pub async fn run(
         order_gate: Arc::new(tokio::sync::Mutex::new(())),
         pending: Arc::new(std::sync::Mutex::new(HashMap::new())),
         last_frame_ms: Arc::new(AtomicI64::new(0)),
+        local_feed: None,
     };
 
     let mut backoff = config.node3_reconnect_min_ms.max(100);
@@ -171,6 +228,10 @@ async fn connect_once(shared: &LinkShared) -> Result<(), String> {
     info!("Node 3 execution link is up ({url})");
 
     let (outbox_tx, mut outbox_rx) = mpsc::channel::<Outgoing>(64);
+    let report_sink = ReportSink::Node3 {
+        outbox: outbox_tx.clone(),
+        pending: shared.pending.clone(),
+    };
     let mut heartbeat = tokio::time::interval(Duration::from_secs(HEARTBEAT_SECS));
     heartbeat.tick().await;
     let mut sweep = tokio::time::interval(Duration::from_secs(SWEEP_INTERVAL_SECS));
@@ -219,9 +280,9 @@ async fn connect_once(shared: &LinkShared) -> Result<(), String> {
                         match Node3Frame::parse(&text) {
                             Some(Node3Frame::TradeIntent { data }) => {
                                 let shared_clone = shared.clone();
-                                let outbox = outbox_tx.clone();
+                                let sink = report_sink.clone();
                                 tokio::spawn(async move {
-                                    handle_intent(shared_clone, outbox, data).await;
+                                    handle_intent(shared_clone, sink, data).await;
                                 });
                             }
                             Some(Node3Frame::ExecutionReportAck { intent_id, accepted, error }) => {
@@ -355,7 +416,14 @@ fn take_retryable(shared: &LinkShared, on_connect: bool) -> Vec<(String, String)
 
 /// Handle one validated-scope intent: validate, deduplicate durably, then place
 /// at most one broker order.
-async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, intent: TradeIntent) {
+/// Entry point for an intent produced by the local strategy. It uses the same
+/// validation, ledger, venue policy and reconciliation as a Node 3 intent; only
+/// the report sink differs (ledger + diagnostics, no upstream socket).
+pub(crate) async fn handle_local_intent(shared: LinkShared, intent: TradeIntent) {
+    handle_intent(shared, ReportSink::Local, intent).await;
+}
+
+async fn handle_intent(shared: LinkShared, sink: ReportSink, intent: TradeIntent) {
     let received_at = now_ms();
     shared.hub.record_intent_received(&intent).await;
 
@@ -365,7 +433,7 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
         shared.hub.record_intent_rejected(&intent, &rejection).await;
         publish_report(
             &shared,
-            &outbox,
+            &sink,
             refusal_report(
                 &intent,
                 shared.venue_label(),
@@ -385,7 +453,7 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
         shared.hub.record_intent_rejected(&intent, &rejection).await;
         publish_report(
             &shared,
-            &outbox,
+            &sink,
             refusal_report(
                 &intent,
                 shared.venue_label(),
@@ -401,7 +469,7 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
     // 3. Duplicate: the recorded result is replayed, and no order is placed.
     if let Some(state) = shared.ledger.state(&intent.intent_id).await {
         if state.accepted {
-            replay_duplicate(&shared, &outbox, &intent, &state).await;
+            replay_duplicate(&shared, &sink, &intent, &state).await;
             return;
         }
     }
@@ -423,7 +491,7 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
         shared.hub.record_intent_rejected(&intent, &rejection).await;
         publish_report(
             &shared,
-            &outbox,
+            &sink,
             refusal_report(
                 &intent,
                 shared.venue_label(),
@@ -456,7 +524,7 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
         shared.hub.record_intent_rejected(&intent, &rejection).await;
         publish_report(
             &shared,
-            &outbox,
+            &sink,
             refusal_report(
                 &intent,
                 shared.venue_label(),
@@ -469,7 +537,7 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
         return;
     }
     shared.hub.record_intent_accepted(&intent).await;
-    publish_report(&shared, &outbox, accepted, false).await;
+    publish_report(&shared, &sink, accepted, false).await;
 
     // 6. Explicit dry-run venue: nothing else to do. The intent was validated,
     //    durably recorded and reported; no broker order exists.
@@ -486,7 +554,7 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
             shared.hub.record_intent_rejected(&intent, &rejection).await;
             publish_report(
                 &shared,
-                &outbox,
+                &sink,
                 refusal_report(
                     &intent,
                     shared.venue_label(),
@@ -502,17 +570,13 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
 
     let _gate = shared.order_gate.lock().await;
 
-    if !shared.link_is_fresh() {
-        // Defensive: an intent can only arrive over a live socket, but never
-        // trade against a link state we cannot trust.
-        let rejection = IntentRejection::new(
-            "node3_link_stale",
-            "the Node 3 link went stale before the order could be placed",
-        );
+    if let Err(rejection) = shared.source_gate() {
+        // Defensive: the intent arrived while its source was healthy, but a
+        // Node 3 link or a market feed can go stale before the write.
         shared.hub.record_intent_rejected(&intent, &rejection).await;
         publish_report(
             &shared,
-            &outbox,
+            &sink,
             refusal_report(
                 &intent,
                 shared.venue_label(),
@@ -542,7 +606,7 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
         shared.hub.record_intent_rejected(&intent, &rejection).await;
         publish_report(
             &shared,
-            &outbox,
+            &sink,
             refusal_report(
                 &intent,
                 shared.venue_label(),
@@ -595,13 +659,13 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
                     .await;
             }
 
-            publish_report(&shared, &outbox, report, true).await;
+            publish_report(&shared, &sink, report, true).await;
 
             if outcome.status == ExecutionStatus::Unknown {
                 let shared_clone = shared.clone();
-                let outbox_clone = outbox.clone();
+                let sink_clone = sink.clone();
                 tokio::spawn(async move {
-                    reconcile_unknown(shared_clone, outbox_clone, intent).await;
+                    reconcile_unknown(shared_clone, sink_clone, intent).await;
                 });
             }
         }
@@ -612,7 +676,7 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
                 .await;
             publish_report(
                 &shared,
-                &outbox,
+                &sink,
                 refusal_report(
                     &intent,
                     shared.venue_label(),
@@ -629,7 +693,7 @@ async fn handle_intent(shared: LinkShared, outbox: mpsc::Sender<Outgoing>, inten
 /// Replay the recorded result of a repeated `intent_id`.
 async fn replay_duplicate(
     shared: &LinkShared,
-    outbox: &mpsc::Sender<Outgoing>,
+    sink: &ReportSink,
     intent: &TradeIntent,
     state: &IntentLedgerState,
 ) {
@@ -664,18 +728,14 @@ async fn replay_duplicate(
     };
     // The recorded report already lives in the ledger: re-sending it back to
     // Node 3 is a replay, not a new decision.
-    publish_report(shared, outbox, report, false).await;
+    publish_report(shared, sink, report, false).await;
 }
 
 /// Ask the venue to reconcile an unclear write, then publish the result.
 ///
 /// A failed reconciliation leaves the recorded `unknown` result in place: Node 4
 /// never turns an unclear write into a fresh order.
-async fn reconcile_unknown(
-    shared: LinkShared,
-    outbox: mpsc::Sender<Outgoing>,
-    intent: TradeIntent,
-) {
+async fn reconcile_unknown(shared: LinkShared, sink: ReportSink, intent: TradeIntent) {
     for delay in RECONCILE_DELAYS_MS {
         tokio::time::sleep(Duration::from_millis(delay as u64)).await;
         let Some(outcome) = shared.manager.reconcile(&intent).await else {
@@ -712,7 +772,7 @@ async fn reconcile_unknown(
             outcome.source
         );
         // Persisted inside the reconciliation record above.
-        publish_report(&shared, &outbox, report, false).await;
+        publish_report(&shared, &sink, report, false).await;
         return;
     }
     warn!(
@@ -733,7 +793,7 @@ fn refusal_report(intent: &TradeIntent, venue: &str, code: &str, message: &str) 
 /// Persist (optionally) and enqueue one report for Node 3.
 async fn publish_report(
     shared: &LinkShared,
-    outbox: &mpsc::Sender<Outgoing>,
+    sink: &ReportSink,
     report: ExecutionReport,
     persist: bool,
 ) {
@@ -751,30 +811,43 @@ async fn publish_report(
         }
     }
 
-    let Some(text) = report.to_frame() else {
-        warn!("cannot serialise a report for {}", report.intent_id);
-        return;
-    };
-    if let Ok(mut pending) = shared.pending.lock() {
-        pending.insert(
-            report.intent_id.clone(),
-            PendingReport {
-                text: text.clone(),
-                attempts: 1,
-                last_sent_ms: now_ms(),
-            },
-        );
-    }
-    if outbox.send(Outgoing { text }).await.is_err() {
-        // The link is down; the ledger keeps the truth and the report is
-        // re-sent on the next connection from the pending map.
-        debug!(
-            "report for {} queued locally while the Node 3 link is down",
-            report.intent_id
-        );
+    match sink {
+        ReportSink::Node3 { outbox, pending } => {
+            let Some(text) = report.to_frame() else {
+                warn!("cannot serialise a report for {}", report.intent_id);
+                return;
+            };
+            if let Ok(mut pending) = pending.lock() {
+                pending.insert(
+                    report.intent_id.clone(),
+                    PendingReport {
+                        text: text.clone(),
+                        attempts: 1,
+                        last_sent_ms: now_ms(),
+                    },
+                );
+            }
+            if outbox.send(Outgoing { text }).await.is_err() {
+                // The link is down; the ledger keeps the truth and the report
+                // is re-sent on the next connection from the pending map.
+                debug!(
+                    "report for {} queued locally while the Node 3 link is down",
+                    report.intent_id
+                );
+            }
+            shared.hub.record_report_sent().await;
+        }
+        ReportSink::Local => {
+            // No upstream peer: the ledger recorded the report and
+            // `/diagnostics` renders it below.
+            debug!(
+                "local intent {} recorded with status {}",
+                report.intent_id,
+                report.status.as_str()
+            );
+        }
     }
     shared.hub.record_report(&report).await;
-    shared.hub.record_report_sent().await;
 }
 
 #[cfg(test)]
@@ -823,6 +896,7 @@ mod tests {
             order_gate: Arc::new(tokio::sync::Mutex::new(())),
             pending: Arc::new(std::sync::Mutex::new(HashMap::new())),
             last_frame_ms: Arc::new(AtomicI64::new(0)),
+            local_feed: None,
         }
     }
 
@@ -890,7 +964,11 @@ mod tests {
         filled.filled_price = Some(2_650.5);
         state.last_report = Some(filled.clone());
 
-        replay_duplicate(&shared, &tx, &intent, &state).await;
+        let sink = ReportSink::Node3 {
+            outbox: tx,
+            pending: shared.pending.clone(),
+        };
+        replay_duplicate(&shared, &sink, &intent, &state).await;
 
         let outgoing = rx.recv().await.expect("a replay is sent");
         let value: serde_json::Value = serde_json::from_str(&outgoing.text).unwrap();

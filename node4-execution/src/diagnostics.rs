@@ -20,10 +20,13 @@ use crate::config::{Config, EXECUTION_PROTOCOL_VERSION};
 use crate::execution_mt5::Mt5BridgeLink;
 use crate::intent::{ExecutionReport, ExecutionStatus, IntentRejection, TradeIntent};
 use crate::ledger::ExecutionLedger;
+use crate::node1::MarketFeed;
+use crate::strategy_runner::StrategyHandle;
 use crate::types::{
     ActivityLogEntry, DerivAccountSnapshot, DerivOpenContract, ExecutionSnapshot, ExecutionTrade,
-    ExecutionWorkDiagnostics, Mt5AccountSnapshot, Mt5BridgeStatus, Mt5Diagnostics,
-    Mt5HistorySnapshot, Mt5PositionsSnapshot, Node3LinkStatus, OpenTradesSnapshot, WsFrame,
+    ExecutionWorkDiagnostics, FeedSnapshot, Mt5AccountSnapshot, Mt5BridgeStatus, Mt5Diagnostics,
+    Mt5HistorySnapshot, Mt5PositionsSnapshot, Node3LinkStatus, OpenTradesSnapshot,
+    StrategySnapshot, WsFrame,
 };
 
 const MAX_RECENT_EVENTS: usize = 50;
@@ -56,6 +59,11 @@ pub struct DiagnosticsHub {
     mt5: Arc<Mt5BridgeLink>,
     ledger: Arc<RwLock<Option<Arc<ExecutionLedger>>>>,
     ledger_cache: Arc<RwLock<LedgerCache>>,
+    /// Attached only when the Node 1 feed runs (always in `node1_strategy`
+    /// mode, optionally as a monitor in `node3` mode).
+    market_feed: Arc<std::sync::RwLock<Option<MarketFeed>>>,
+    /// Attached by `main` for both sources; disabled in `node3` mode.
+    strategy: Arc<std::sync::RwLock<Option<StrategyHandle>>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -194,7 +202,45 @@ impl DiagnosticsHub {
             mt5,
             ledger: Arc::new(RwLock::new(None)),
             ledger_cache: Arc::new(RwLock::new(LedgerCache::default())),
+            market_feed: Arc::new(std::sync::RwLock::new(None)),
+            strategy: Arc::new(std::sync::RwLock::new(None)),
         }
+    }
+
+    /// Attach the Node 1 feed handle so `/diagnostics` reports its live state.
+    pub fn attach_market_feed(&self, feed: MarketFeed) {
+        let mut guard = self
+            .market_feed
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *guard = Some(feed);
+    }
+
+    /// Attach the local strategy state (disabled in `node3` mode).
+    pub fn attach_strategy(&self, strategy: StrategyHandle) {
+        let mut guard = self
+            .strategy
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *guard = Some(strategy);
+    }
+
+    fn feed_snapshot(&self) -> FeedSnapshot {
+        self.market_feed
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .map(MarketFeed::snapshot)
+            .unwrap_or_default()
+    }
+
+    fn strategy_snapshot(&self) -> StrategySnapshot {
+        self.strategy
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .map(StrategyHandle::snapshot)
+            .unwrap_or_default()
     }
 
     /// Shared MT5 bridge link (session registry + snapshot cache).
@@ -301,6 +347,8 @@ impl DiagnosticsHub {
         inner: &DiagnosticsInner,
         ws_clients: usize,
         ledger: &LedgerCache,
+        market_feed: FeedSnapshot,
+        strategy: StrategySnapshot,
     ) -> ExecutionSnapshot {
         let ts = now_ms();
         // Link age is derived from the last accepted handshake, so an operator
@@ -321,6 +369,8 @@ impl DiagnosticsHub {
         ExecutionSnapshot {
             timestamp: ts,
             node3,
+            market_feed,
+            strategy,
             work,
             open_trades: Self::build_open_trades_locked(inner, ts),
             deriv_account: inner.deriv_account.clone(),
@@ -331,8 +381,16 @@ impl DiagnosticsHub {
 
     pub async fn snapshot(&self) -> ExecutionSnapshot {
         let ledger = self.ledger_stats().await;
+        let market_feed = self.feed_snapshot();
+        let strategy = self.strategy_snapshot();
         let inner = self.inner.read().await;
-        Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
+        Self::build_snapshot_locked(
+            &inner,
+            self.connected_clients(),
+            &ledger,
+            market_feed,
+            strategy,
+        )
     }
 
     pub async fn open_trades_snapshot(&self) -> OpenTradesSnapshot {
