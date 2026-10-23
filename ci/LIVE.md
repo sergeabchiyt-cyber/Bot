@@ -1,13 +1,13 @@
 # Live engine probe
 
-generated: 2026-10-23T18:52:18Z
+generated: 2026-10-23T18:58:41Z
 
 ## /status
 
 * version `0.3.0` service `market-data`
 * feeds connected: 8 / 12
 * **candles: interval='15m' seed_bars=2000**
-* history edge: 2026-10-23 18:30 UTC (**21 min behind now**) over 2000 bars
+* history edge: 2026-10-23 18:30 UTC (**27 min behind now**) over 2000 bars
 * volume profile: row_mode=rows rows=128 bin=0.5 va=70.0 input=tv
 
 ## /candles
@@ -16,7 +16,7 @@ generated: 2026-10-23T18:52:18Z
 * deltas (min): [(15.0, 1987), (60.0, 2), (30.0, 2), (165.0, 2), (135.0, 1)]  -> **15m**
 * open==close bars: 385 (19%) in 64 runs; longest 65 bars
 * price range: 3975.87 .. 4225.10
-* newest bar is **22 minutes behind now**
+* newest bar is **29 minutes behind now**
 
 ## /levels
 
@@ -45,23 +45,23 @@ generated: 2026-10-23T18:52:18Z
   range 4073.64..4217.33 input=5m (1438 bars) volume=3012721.0000000014 va=0.7
   poc=4158.014999999999 (row 37) val=4141.139999999999 (row 30) vah=4183.889999999999 (row 48) histogram rows in payload: 64
 * `vp-6h`: window=CUSTOM rows=128 row_height=0.45 row_mode=rows
-  range 3975.87..4033.33 input=1m (359 bars) volume=156186.99999993568 va=0.7
-  poc=3999.0449999999996 (row 51) val=3992.97 (row 38) vah=4004.6699999999996 (row 63) histogram rows in payload: 128
+  range 3975.87..4033.33 input=1m (359 bars) volume=156339.99999993568 va=0.7
+  poc=3999.0449999999996 (row 51) val=3993.42 (row 39) vah=4004.6699999999996 (row 63) histogram rows in payload: 128
 * `vp-24h`: window=CUSTOM rows=128 row_height=0.45 row_mode=rows
-  range 3975.87..4033.38 input=1m (1439 bars) volume=534409.9999997831 va=0.7
-  poc=4024.245 (row 107) val=4010.0699999999997 (row 76) vah=4032.12 (row 124) histogram rows in payload: 128
+  range 3975.87..4033.33 input=1m (1439 bars) volume=536032.9999997823 va=0.7
+  poc=4024.245 (row 107) val=4009.62 (row 75) vah=4032.12 (row 124) histogram rows in payload: 128
 * `vp-bad`: http 404 -> {"error": "no profile computed for this window yet", "window": "NOPE"}
 * `vp-bad-range`: http 400 -> {"error": "start and end must both be epoch milliseconds"}
 
 ## WebSocket sample
 
-* frames: {'probe': 1, 'heartbeat': 2, 'levels': 4, 'candle': 362, 'tick_volume': 1865, 'calendar': 1, 'status': 1}
-* **live `candle` frames: 362, deltas (min) [(0.0, 346), (15.0, 15)] -> no bars**
+* frames: {'probe': 1, 'heartbeat': 2, 'levels': 4, 'candle': 203, 'tick_volume': 1706, 'calendar': 1, 'status': 1}
+* **live `candle` frames: 203, deltas (min) [(0.0, 187), (15.0, 15)] -> no bars**
 * first frame: {"time": 1792767600000, "open": 4000.28, "high": 4003.54, "low": 3993.08, "close": 3995.92, "volume": 6329.0, "source": "sifting"}
-* live `tick_volume` deltas (min): [(15.0, 1508), (0.0, 346), (30.0, 2), (165.0, 2), (90.0, 1)] -> 15m
+* live `tick_volume` deltas (min): [(15.0, 1508), (0.0, 187), (30.0, 2), (165.0, 2), (90.0, 1)] -> 15m
 * `levels` frames carrying `meta`: **True**
 
 ## Verdict
 
 * the deployed engine serves **15m** chart candles (2000 bars, 2026-10-02 00:45 UTC -> 2026-10-23 18:30 UTC)
-* `/status` reports the chart edge: 2000 bars, last 2026-10-23 18:30 UTC, **21 min behind now**
+* `/status` reports the chart edge: 2000 bars, last 2026-10-23 18:30 UTC, **27 min behind now**
