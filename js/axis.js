@@ -162,7 +162,7 @@
 
     /**
      * Display time of the candle a real instant belongs to, in seconds.
-     * Timestamps inside a bucket (order-flow events, a trade at 12:37) resolve
+     * Timestamps inside a bucket (a trade at 12:37) resolve
      * to that candle's column; instants inside a dropped closed-market run, or
      * older than the loaded window, resolve to null.
      */

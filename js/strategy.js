@@ -1,526 +1,475 @@
 /* ============================================================
- * Node 3 strategy dashboard.
- * Strategy intents/projections live here; nothing in this module places or
- * controls trades or participates in the private intent/report link.
+ * XAUUSD Terminal — Strategy panel (Node 1 built-in evaluator).
+ *
+ * Reads `GET /strategy` once on mount, then trusts the `strategy` WS frames.
+ * State is one reducer keyed on `decision.ts`: a reconnect replay replaces
+ * the matching history entry instead of duplicating it (see strategy-math).
+ *
+ * Read-only: the engine evaluates and trades the demo account itself. There
+ * is no control here — no enable toggle, no order ticket, no sizing input.
  * ============================================================ */
 (function (App) {
   "use strict";
 
-  const { $, escapeHtml, numberOrNull, fmtNumber, fmtPrice, fmtDateTime, fetchPublicJson } = App.utils;
-  const Normalise = App.normalize;
-  const endpoints = App.config.endpoints;
-  const settings = App.config.strategy;
-  const MAX_ROWS = 100;
-  const revisions = Normalise.createRevisionGuard();
-  let started = false;
-  let refreshTimer = null;
-  let countdownTimer = null;
-  let refreshInProgress = false;
+  const { $, escapeHtml } = App.utils;
+  const format = App.format;
+  const math = App.strategyMath;
+  const normalise = App.normalize;
+  const cfg = App.config.strategy;
+
+  const EMPTY_TEXT = "Waiting for the first evaluation\u2026";
 
   const state = {
-    scanning: null,
-    signals: null,
-    work: null,
-    events: [],
-    timestamp: null,
-    snapshotError: "",
+    symbol: "XAUUSD",
+    enabled: null, // unknown until /strategy or a status frame says otherwise
+    params: Object.assign({}, cfg.defaultParams),
+    last: null,
+    history: [],
   };
 
-  const record = (value) => Normalise.isRecord(value) ? value : null;
-  const has = (value, key) => record(value) !== null && Normalise.own(value, key);
-  const text = (value, fallback = "—") =>
-    value === null || value === undefined || value === "" ? fallback : String(value);
-  const numeric = (value, digits = 0) => fmtNumber(value, digits);
-  const price = (value) => fmtPrice(value, 2);
-  const timestamp = (value) => fmtDateTime(value, true);
-  const sourceData = (payload) => {
-    if (Array.isArray(payload)) return payload;
-    return Normalise.unwrapFrame(payload);
-  };
+  let wsRevision = 0;
+  let lastFrameAt = null;
+  let lastError = "";
+  let fetchInProgress = false;
+  let mounted = false;
+  let started = false;
+  const updateListeners = new Set();
 
-  function sortNewest(items, getTimestamp) {
-    return items.slice().sort((left, right) => {
-      const a = Normalise.timestampMs(getTimestamp(left));
-      const b = Normalise.timestampMs(getTimestamp(right));
-      return (b ?? 0) - (a ?? 0);
-    });
+  const html = (value) => escapeHtml(value);
+
+  function finite(value) {
+    return math.finite(value);
   }
 
-  function replaceEvents(events) {
-    const list = (Array.isArray(events) ? events : []).map(record).filter(Boolean);
-    state.events = Normalise.dedupeBy(
-      sortNewest(list, (event) => event.timestamp),
-      Normalise.eventId,
-      MAX_ROWS,
-    );
-  }
-
-  function prependEvent(event) {
-    const item = record(event);
-    if (!item) return;
-    state.events = Normalise.dedupeBy(
-      [item, ...state.events],
-      Normalise.eventId,
-      MAX_ROWS,
-    );
-  }
-
-  function applyValue(key, value, source, token) {
-    if (source === "rest") {
-      return revisions.applyRest(key, token, () => { state[key] = value; });
-    }
-    revisions.mark(key);
-    state[key] = value;
-    return true;
-  }
-
-  function applyEvents(events, source, token) {
-    if (!Array.isArray(events)) return false;
-    const apply = () => replaceEvents(events);
-    if (source === "rest") return revisions.applyRest("events", token, apply);
-    revisions.mark("events");
-    apply();
-    return true;
-  }
-
-  function applyDiagnostics(payload, source = "ws", tokens = {}) {
-    const data = sourceData(payload);
-    if (!record(data)) return false;
-    let changed = false;
-
-    for (const key of ["scanning", "signals", "work"]) {
-      if (!has(data, key)) continue;
-      changed = applyValue(key, data[key], source, tokens[key]) || changed;
-      if (key === "signals" && (source !== "rest" || revisions.current(key) !== tokens[key])) {
-        notifyReportConsumer(state.signals);
+  function normalizedParams(raw) {
+    const params = Object.assign({}, cfg.defaultParams);
+    if (normalise.isRecord(raw)) {
+      for (const key of Object.keys(cfg.defaultParams)) {
+        if (raw[key] !== undefined && raw[key] !== null) params[key] = raw[key];
       }
     }
-    if (has(data, "recent_events")) {
-      changed = applyEvents(data.recent_events, source, tokens.events) || changed;
-    }
-    if (has(data, "timestamp")) {
-      changed = applyValue("timestamp", data.timestamp, source, tokens.timestamp) || changed;
-    }
-    if (changed) {
-      state.snapshotError = "";
-      render();
-    }
-    return changed;
+    return params;
   }
 
-  function notifyReportConsumer(signals) {
-    if (App.execution && typeof App.execution.setStrategySignals === "function") {
-      App.execution.setStrategySignals(signals);
-    }
-  }
-
-  function applyScanning(payload, source = "ws", token) {
-    let data = sourceData(payload);
-    if (record(data) && has(data, "scanning")) data = data.scanning;
-    if (!record(data)) return false;
-    const changed = applyValue("scanning", data, source, token);
-    if (changed) render();
-    return changed;
-  }
-
-  function applySignals(payload, source = "ws", token) {
-    let data = sourceData(payload);
-    if (record(data) && has(data, "signals")) data = data.signals;
-    if (!record(data)) return false;
-    const changed = applyValue("signals", data, source, token);
-    if (changed) {
-      notifyReportConsumer(state.signals);
-      render();
-    }
-    return changed;
-  }
-
-  function applyFrame(frame) {
-    if (!record(frame) || typeof frame.type !== "string") return;
-    switch (frame.type) {
-      case "diagnostics":
-        applyDiagnostics(frame, "ws");
-        break;
-      case "scanning":
-        applyScanning(frame, "ws");
-        break;
-      case "signals":
-        applySignals(frame, "ws");
-        break;
-      case "diagnostic_event":
-        prependEvent(sourceData(frame));
-        revisions.mark("events");
-        render();
-        break;
-      case "heartbeat":
-        break;
-      default:
-        // The public Node 3 /ws contract intentionally has no execution intent
-        // or report transport frames.
-        break;
-    }
-  }
-
-  async function requestJson(url) {
-    return fetchPublicJson(url, 12000);
-  }
-
-  async function refreshSnapshots() {
-    if (refreshInProgress) return;
-    const configured = !!endpoints.strategyDiagnostics || !!endpoints.strategyScanning || !!endpoints.strategySignals;
-    if (!configured) {
-      state.snapshotError = "Node 3 public endpoint is not configured.";
-      render();
-      return;
-    }
-    refreshInProgress = true;
-    const diagTokens = revisions.capture(["scanning", "signals", "work", "events", "timestamp"]);
-    let diagnosticsOk = false;
-    try {
-      const snapshot = await requestJson(endpoints.strategyDiagnostics);
-      diagnosticsOk = !!record(sourceData(snapshot));
-      if (diagnosticsOk) {
-        applyDiagnostics(snapshot, "rest", diagTokens);
-        state.snapshotError = "";
-      } else {
-        state.snapshotError = "Node 3 diagnostics snapshot returned no compatible data";
-      }
-    } catch (error) {
-      state.snapshotError = error && error.message ? error.message : "Node 3 diagnostics snapshot unavailable";
-    }
-
-    const fallbacks = [];
-    // A WebSocket frame can arrive while the diagnostics request is in flight.
-    // Do not start an older REST fallback for a domain that is now populated;
-    // if it arrives after a fallback starts, the revision guard rejects it.
-    if (!state.scanning) {
-      fallbacks.push({ key: "scanning", url: endpoints.strategyScanning, apply: applyScanning });
-    }
-    if (!state.signals) {
-      fallbacks.push({ key: "signals", url: endpoints.strategySignals, apply: applySignals });
-    }
-
-    await Promise.all(fallbacks.map(async ({ key, url, apply }) => {
-      if (!url) return;
-      const token = revisions.current(key);
-      try {
-        const payload = await requestJson(url);
-        if (!record(sourceData(payload))) throw new Error(`Node 3 ${key} snapshot returned no compatible data`);
-        apply(payload, "rest", token);
-        state.snapshotError = "";
-      } catch (error) {
-        state.snapshotError = error && error.message ? error.message : `Node 3 ${key} snapshot unavailable`;
-      }
-    }));
-    refreshInProgress = false;
-    render();
-  }
-
-  function metric(label, value, tone = "") {
-    return `<div class="dash-stat">
-      <span class="dash-stat-label">${escapeHtml(label)}</span>
-      <strong class="dash-stat-value ${tone}">${value}</strong>
-    </div>`;
-  }
-
-  function badge(label, tone = "muted", extraClass = "") {
-    const safeTone = ["live", "blue", "amber", "warn", "muted", "unknown", "complete"].includes(tone)
-      ? tone : "muted";
-    return `<span class="state-badge is-${safeTone}${extraClass ? ` ${extraClass}` : ""}">${escapeHtml(label)}</span>`;
-  }
-
-  function renderServiceHealth(work) {
-    const streamState = App.strategy.stream.getState();
-    const node1Connected = work.node1_connected === true;
-    const node1State = text(work.node1_state, node1Connected ? "connected" : "offline");
-    const node4Connected = work.node4_connected === true;
-    const tokenConfigured = work.node4_token_configured === true;
-    const statusTone = node1Connected ? "live" : node1State === "connecting" || node1State === "reconnecting" ? "amber" : "warn";
-    const node4Tone = node4Connected ? "live" : tokenConfigured ? "warn" : "muted";
-    const error = work.last_error || streamState.lastError || state.snapshotError;
-    const emptyState = !state.work && !state.scanning && !state.signals
-      ? `<div class="empty">${streamState.status === "not-configured" ? "Node 3 is not configured. Set STRATEGY_HOST in the runtime override." : "Waiting for Node 3 strategy diagnostics; REST snapshots will fill this panel when available."}</div>`
-      : "";
-
-    return `<section class="dash-section">
-      <header class="dash-section-head">
-        <div><span class="dash-kicker">Node 3</span><h2>Strategy service health</h2></div>
-        ${badge(streamState.status.toUpperCase(), streamState.status === "live" ? "live" : streamState.status === "stale" ? "amber" : "muted")}
-      </header>
-      ${emptyState}
-      <div class="dash-grid">
-        ${metric("Node 1 market link", `${badge(node1State, statusTone)}`)}
-        ${metric("Node 4 execution link", `${badge(node4Connected ? "connected" : "disconnected", node4Tone)}`)}
-        ${metric("Node 4 link configured", tokenConfigured ? "Yes" : "No")}
-        ${metric("Service uptime", escapeHtml(formatUptime(work.uptime_secs)))}
-        ${metric("Candles / levels received", `${numeric(work.candles_received)} / ${numeric(work.levels_received)}`)}
-        ${metric("Node 1 reconnects", numeric(work.node1_reconnect_count))}
-        ${metric("Last candle", escapeHtml(timestamp(work.last_candle_ts)))}
-        ${metric("Last levels", escapeHtml(timestamp(work.last_levels_ts)))}
-      </div>
-      ${error ? `<p class="inline-error"><b>Last error</b> · ${escapeHtml(error)}</p>` : ""}
-    </section>`;
-  }
-
-  function formatUptime(value) {
-    const seconds = numberOrNull(value);
-    if (seconds === null) return "—";
-    const total = Math.floor(seconds);
-    const hours = Math.floor(total / 3600);
-    const minutes = Math.floor((total % 3600) / 60);
-    return hours ? `${hours}h ${String(minutes).padStart(2, "0")}m` : `${minutes}m ${String(total % 60).padStart(2, "0")}s`;
-  }
-
-  function renderScanner(scanning, work) {
-    if (!scanning) {
-      return `<section class="dash-section">
-        <header class="dash-section-head"><div><span class="dash-kicker">Node 3</span><h2>Scanner summary</h2></div></header>
-        <div class="empty">No scanner snapshot yet. Check the STRATEGY service connection and public /scanning endpoint.</div>
-      </section>`;
-    }
-    const activeCount = numberOrNull(scanning.active_setups_count);
-    const currentVolume = numberOrNull(scanning.current_volume) ?? numberOrNull(work.last_candle_volume);
-    const volumeThreshold = numberOrNull(scanning.volume_threshold) ?? numberOrNull(work.volume_threshold);
-    const volumeConfirmed = scanning.volume_confirmed === true;
-    const projection = [
-      `SL ${numeric(work.current_sl_pips, 0)} pips`,
-      `TP ${numeric(work.current_tp_pips, 0)} pips`,
-      `${numeric(work.current_rr, 2)}R`,
-    ].join(" · ");
-    return `<section class="dash-section">
-      <header class="dash-section-head">
-        <div><span class="dash-kicker">Node 3</span><h2>Scanner summary</h2></div>
-        ${badge(`${numeric(activeCount)} armed`, activeCount > 0 ? "amber" : "muted")}
-      </header>
-      <div class="dash-grid">
-        ${metric("Active armed setups", numeric(activeCount))}
-        ${metric("Tracked levels", numeric(scanning.total_levels_tracked))}
-        ${metric("Current price", escapeHtml(price(scanning.last_price)))}
-        ${metric("Current volume", numeric(currentVolume))}
-        ${metric("Volume threshold", numeric(volumeThreshold))}
-        ${metric("Volume confirmation", badge(volumeConfirmed ? "confirmed" : "waiting", volumeConfirmed ? "live" : "muted"))}
-        ${metric("ATR", `${numeric(scanning.atr, 2)} · ${numeric(scanning.atr_pips, 0)} pips`)}
-        ${metric("Projected risk / reward", escapeHtml(projection))}
-      </div>
-      <p class="dash-footnote">Scanner values and projections are strategy observations only; they are not fills or broker positions.</p>
-    </section>`;
-  }
-
-  function projectionMarkup(label, order, active) {
-    if (!record(order)) return `<div class="projection-line"><b>${escapeHtml(label)}</b><span>Not available</span></div>`;
-    const side = text(order.side, label.toLowerCase());
-    const sideClass = String(side).toLowerCase() === "buy" ? "is-buy" : String(side).toLowerCase() === "sell" ? "is-sell" : "";
-    return `<div class="projection-line ${active ? "is-active-projection" : ""}">
-      <b>${escapeHtml(label)} ${badge(side, sideClass === "is-buy" ? "live" : sideClass === "is-sell" ? "warn" : "muted")}</b>
-      <span class="tnum">Entry ${escapeHtml(price(order.entry))} · SL ${escapeHtml(price(order.stop_loss))} · TP ${escapeHtml(price(order.take_profit))} · RR ${escapeHtml(numeric(order.risk_reward, 2))}</span>
-    </div>`;
-  }
-
-  function renderSetup(setup) {
-    const stateLabel = text(setup.state_label, text(setup.state, "unknown").replace(/_/g, " "));
-    const pendingSide = text(setup.pending_side, "none");
-    const armed = ["broken_above", "broken_below"].includes(String(setup.state || "").toLowerCase());
-    const active = record(setup.active_projection);
-    const activeSide = active ? String(active.side || "").toLowerCase() : "";
-    const breakTime = setup.broken_at === null || setup.broken_at === undefined ? "—" : timestamp(setup.broken_at);
-    const confirmed = setup.volume_confirmed === true;
-
-    return `<article class="setup-card${armed ? " is-armed" : ""}">
-      <header class="setup-card-head">
-        <div><strong>${escapeHtml(text(setup.name, text(setup.id, "Strategy level")))}</strong><span class="setup-window">${escapeHtml(text(setup.window))}</span></div>
-        ${badge(stateLabel, armed ? "amber" : "muted")}
-      </header>
-      <div class="setup-primary tnum">Level ${escapeHtml(price(setup.level_price))} · Pending side ${escapeHtml(pendingSide)}</div>
-      <div class="setup-facts">
-        <span>Distance <b>${escapeHtml(price(setup.distance_dollars))} dollars / ${escapeHtml(numeric(setup.distance_pips, 1))} pips</b></span>
-        <span>Retest zone <b>${escapeHtml(price(setup.retest_zone_low))} – ${escapeHtml(price(setup.retest_zone_high))}</b></span>
-        <span>Invalidation <b>${escapeHtml(price(setup.invalidation_price))}</b></span>
-        <span>Volume required / current <b>${numeric(setup.volume_required)} / ${numeric(setup.current_volume)}</b> ${badge(confirmed ? "confirmed" : "waiting", confirmed ? "live" : "muted")}</span>
-        <span>Break time / price <b>${escapeHtml(breakTime)} / ${escapeHtml(price(setup.broken_price))}</b></span>
-      </div>
-      <div class="projection-list">
-        ${projectionMarkup("Projected buy", setup.projected_buy, activeSide === "buy")}
-        ${projectionMarkup("Projected sell", setup.projected_sell, activeSide === "sell")}
-        <div class="active-projection-label">Active projection: ${active ? escapeHtml(activeSide || "available") : "none"}</div>
-      </div>
-      <p class="setup-note"><b>Latest note</b> · ${escapeHtml(text(setup.last_note, "No note yet"))}</p>
-    </article>`;
-  }
-
-  function renderSetups(scanning) {
-    const setups = scanning && Array.isArray(scanning.setups)
-      ? scanning.setups.map(record).filter(Boolean).slice(0, MAX_ROWS)
+  function normalizedDecision(raw) {
+    if (!normalise.isRecord(raw)) return null;
+    const ts = normalise.timestampMs(raw.ts);
+    if (ts === null) return null;
+    const reasons = Array.isArray(raw.reasons)
+      ? raw.reasons.filter(normalise.isRecord).map((reason) => ({
+          name: String(reason.name == null ? "" : reason.name),
+          value: finite(reason.value),
+          weight: finite(reason.weight),
+          contribution: finite(reason.contribution),
+          detail: String(reason.detail == null ? "" : reason.detail),
+        }))
       : [];
-    return `<section class="dash-section">
-      <header class="dash-section-head">
-        <div><span class="dash-kicker">Node 3</span><h2>Break / retest setups</h2></div>
-        ${badge(`${setups.length} shown`, "muted")}
-      </header>
-      ${setups.length ? setups.map(renderSetup).join("") : '<div class="empty">No strategy setup yet. Waiting for Node 1 levels and candle volume.</div>'}
-    </section>`;
+    return {
+      ts,
+      symbol: String(raw.symbol == null ? "XAUUSD" : raw.symbol),
+      action: math.actionOf(raw),
+      score: finite(raw.score),
+      confidence: finite(raw.confidence),
+      price: finite(raw.price),
+      atr: finite(raw.atr),
+      regime: String(raw.regime == null ? "" : raw.regime),
+      volatility: String(raw.volatility == null ? "" : raw.volatility),
+      stop_loss: finite(raw.stop_loss),
+      take_profit: finite(raw.take_profit),
+      reward_risk: finite(raw.reward_risk),
+      lots: finite(raw.lots),
+      risk_usd: finite(raw.risk_usd),
+      reasons,
+      notes: Array.isArray(raw.notes) ? raw.notes.map((note) => String(note == null ? "" : note)).filter(Boolean) : [],
+      next_event_ts: normalise.timestampMs(raw.next_event_ts),
+    };
   }
 
-  function intentExpiry(intent) {
-    const expires = Normalise.timestampMs(intent.expires_at);
-    if (expires === null) return { text: "expiry unavailable", tone: "muted", expired: false };
-    if (expires <= Date.now()) return { text: "expired", tone: "warn", expired: true };
-    const remaining = Math.max(0, Math.ceil((expires - Date.now()) / 1000));
-    const minutes = Math.floor(remaining / 60);
-    const seconds = remaining % 60;
-    return { text: `expires in ${minutes}:${String(seconds).padStart(2, "0")}`, tone: "amber", expired: false };
-  }
-
-  function renderIntent(intent, pendingIds) {
-    const id = text(intent.intent_id, "intent ID unavailable");
-    const side = text(intent.side, "unknown").toUpperCase();
-    const sideTone = String(intent.side || "").toLowerCase() === "buy" ? "live" : String(intent.side || "").toLowerCase() === "sell" ? "warn" : "muted";
-    const expiry = intentExpiry(intent);
-    const delivery = pendingIds.has(String(intent.intent_id || ""))
-      ? badge("pending Node 4 acknowledgement", "amber")
-      : badge("strategy intent", "blue");
-    return `<article class="intent-card${expiry.expired ? " is-expired" : ""}">
-      <header class="intent-card-head">
-        <div><span class="intent-side">${badge(side, sideTone)}</span><strong>${escapeHtml(id)}</strong></div>
-        ${badge(expiry.text, expiry.tone, "intent-expiry")}
-      </header>
-      <div class="intent-facts">
-        <span>Strategy <b>${escapeHtml(text(intent.strategy))}</b></span>
-        <span>Symbol <b>${escapeHtml(text(intent.symbol))}</b></span>
-        <span>Reference <b>${escapeHtml(price(intent.reference_price))}</b></span>
-        <span>Stop loss <b>${escapeHtml(price(intent.stop_loss))}</b></span>
-        <span>Take profit <b>${escapeHtml(price(intent.take_profit))}</b></span>
-        <span>Risk / reward <b>${escapeHtml(numeric(intent.risk_reward, 2))}R</b></span>
-        <span>Source level <b>${escapeHtml(text(intent.level_name))}</b></span>
-        <span>Created <b>${escapeHtml(timestamp(intent.created_at))}</b></span>
-        <span>Expires <b>${escapeHtml(timestamp(intent.expires_at))}</b></span>
-      </div>
-      <footer class="intent-card-foot">${delivery}<span>Node 3 intent only — not an execution or fill.</span></footer>
-    </article>`;
-  }
-
-  function renderSignals(signals) {
-    if (!signals) {
-      return `<section class="dash-section">
-        <header class="dash-section-head"><div><span class="dash-kicker">Node 3</span><h2>Pending and recent intents</h2></div></header>
-        <div class="empty">No strategy signal snapshot yet.</div>
-      </section>`;
+  function notify() {
+    for (const listener of updateListeners) {
+      try { listener(getState()); } catch (error) { console.error("Strategy update listener failed:", error); }
     }
-    const pending = Array.isArray(signals.pending) ? signals.pending.map(record).filter(Boolean).slice(0, MAX_ROWS) : [];
-    const recent = Array.isArray(signals.recent) ? signals.recent.map(record).filter(Boolean).slice(0, 12) : [];
-    const pendingIds = new Set(pending.map((intent) => String(intent.intent_id || "")));
-    const reports = Array.isArray(signals.execution_reports) ? signals.execution_reports.length : 0;
-    const pendingCount = numberOrNull(signals.pending_count) ?? pending.length;
-    return `<section class="dash-section">
-      <header class="dash-section-head">
-        <div><span class="dash-kicker">Node 3</span><h2>Pending and recent intents</h2></div>
-        ${badge(`${numeric(pendingCount)} pending`, pendingCount > 0 ? "amber" : "muted")}
-      </header>
-      <div class="dash-callout is-neutral">Intent records are strategy output. Broker-authoritative execution outcomes are shown separately in the Node 4 panel.</div>
-      <div class="dash-grid compact-grid">
-        ${metric("Node 4 connected", signals.node4_connected === true ? "Yes" : "No")}
-        ${metric("Node 4 link configured", signals.node4_token_configured === true ? "Yes" : "No")}
-        ${metric("Reports mirrored from Node 4", numeric(reports))}
-        ${metric("Snapshot time", escapeHtml(timestamp(signals.timestamp)))}
+  }
+
+  function getState() {
+    return {
+      symbol: state.symbol,
+      enabled: state.enabled,
+      params: state.params,
+      last: state.last,
+      history: state.history,
+      lastFrameAt,
+      lastError,
+    };
+  }
+
+  /**
+   * Replace the seed.
+   *
+   * The decision data is guarded by the WS revision: a REST response that
+   * started before a newer `strategy` frame must not rewind the panel. The
+   * evaluator's configuration (enabled + params) is not carried by decision
+   * frames, so it is seeded even when the decision data is stale.
+   */
+  function applySnapshot(raw, source = "rest", startRevision = wsRevision) {
+    const snapshot = normalise.isRecord(raw) ? raw : {};
+    const stale = source === "rest" && startRevision !== wsRevision;
+    state.symbol = snapshot.symbol ? String(snapshot.symbol) : state.symbol;
+    if (typeof snapshot.enabled === "boolean") state.enabled = snapshot.enabled;
+    state.params = normalizedParams(snapshot.params);
+
+    if (!stale) {
+      const history = Array.isArray(snapshot.history) ? snapshot.history : [];
+      let merged = { last: state.last, history: state.history };
+      for (const item of history) {
+        const decision = normalizedDecision(item);
+        if (decision) merged = math.mergeDecision(merged, decision, cfg.historyLimit);
+      }
+      const last = normalizedDecision(snapshot.last);
+      if (last) merged = math.mergeDecision(merged, last, cfg.historyLimit);
+      state.last = merged.last;
+      state.history = merged.history;
+    }
+
+    render();
+    notify();
+    return !stale;
+  }
+
+  /** One `{type:"strategy", data: StrategyDecision}` frame. */
+  function applyDecision(raw, source = "ws") {
+    const decision = normalizedDecision(raw);
+    if (!decision) return false;
+    if (source === "ws") {
+      wsRevision += 1;
+      lastFrameAt = Date.now();
+      lastError = "";
+    }
+    const merged = math.mergeDecision(state, decision, cfg.historyLimit);
+    state.last = merged.last;
+    state.history = merged.history;
+    render();
+    notify();
+    return true;
+  }
+
+  async function load() {
+    if (fetchInProgress) return false;
+    fetchInProgress = true;
+    const startRevision = wsRevision;
+    try {
+      const snapshot = await App.api.fetchStrategy();
+      return applySnapshot(snapshot, "rest", startRevision);
+    } catch (error) {
+      lastError = error && error.message ? error.message : "strategy snapshot unavailable";
+      console.warn("Strategy snapshot unavailable:", error);
+      if (!state.last && mounted) render();
+      return false;
+    } finally {
+      fetchInProgress = false;
+    }
+  }
+
+  // ---------- Rendering ----------
+
+  function actionBadge(decision) {
+    const action = math.actionOf(decision);
+    return `<span class="action-badge is-${action}">${html(action.toUpperCase())}</span>`;
+  }
+
+  function scoreHtml(decision) {
+    const bar = math.scoreBar(decision.score);
+    const label = bar.sign === "bull" ? "bullish" : bar.sign === "bear" ? "bearish" : "neutral";
+    const style = bar.sign === "zero"
+      ? ""
+      : `width:${bar.widthPct.toFixed(2)}%;left:${(bar.sign === "bull" ? 50 : 50 - bar.widthPct).toFixed(2)}%`;
+    return `
+      <div class="score-block">
+        <div class="score-row">
+          <span class="muted">Score</span>
+          <b class="score-value is-${bar.sign}">${html(format.signedNumber(bar.value, 2))}</b>
+        </div>
+        <div class="score-track" role="img" aria-label="Score ${html(format.signedNumber(bar.value, 2))}, ${label}">
+          <span class="score-zero" aria-hidden="true"></span>
+          ${bar.sign === "zero" ? "" : `<span class="score-fill is-${bar.sign}" style="${style}"></span>`}
+        </div>
+        <div class="score-scale" aria-hidden="true"><span>\u22121</span><span>0</span><span>+1</span></div>
+      </div>`;
+  }
+
+  function confidenceHtml(decision) {
+    const pct = math.confidencePct(decision.confidence);
+    const threshold = math.confidencePct(state.params.min_confidence);
+    const safePct = pct === null ? 0 : pct;
+    const safeThreshold = threshold === null ? null : threshold;
+    return `
+      <div class="gauge-block">
+        <div class="meter" role="meter" aria-label="Confidence" aria-valuemin="0" aria-valuemax="100"
+             aria-valuenow="${safePct.toFixed(1)}" aria-valuetext="${html(format.confidence(decision.confidence))}">
+          <span class="meter-fill" style="width:${safePct.toFixed(2)}%"></span>
+          ${safeThreshold === null ? "" : `<span class="meter-tick" style="left:${math.clamp(safeThreshold, 0, 100).toFixed(2)}%" title="Minimum confidence ${html(format.percent(safeThreshold))}"></span>`}
+        </div>
+        <div class="meter-legend">
+          <span>Confidence <b>${html(format.confidence(decision.confidence))}</b></span>
+          <span class="muted">min ${html(safeThreshold === null ? format.DASH : format.percent(safeThreshold))}</span>
+        </div>
+      </div>`;
+  }
+
+  function chipsHtml(decision) {
+    const regime = String(decision.regime || "");
+    const volatility = String(decision.volatility || "");
+    return `
+      <div class="strat-chips">
+        <span class="chip-static regime-${html(regime)}"><span class="chip-k">Regime</span>${html(math.regimeLabel(regime))}</span>
+        <span class="chip-static vol-${html(volatility)}"><span class="chip-k">Vol</span>${html(math.volatilityLabel(volatility))}</span>
+      </div>`;
+  }
+
+  function reasonsHtml(decision) {
+    const reasons = math.sortReasons(decision.reasons);
+    if (!reasons.length) {
+      return `<div class="subhead">Reasons</div><div class="empty inline">No factor breakdown in this decision.</div>`;
+    }
+    const rows = reasons.map((reason) => {
+      const value = finite(reason.value) ?? 0;
+      const clamped = math.clamp(value, -1, 1);
+      const width = Math.abs(clamped) * 50;
+      const left = clamped >= 0 ? 50 : 50 - width;
+      const weight = finite(reason.weight);
+      const contribution = finite(reason.contribution);
+      const weightText = weight === null ? format.DASH : format.percent(weight * 100, 1);
+      const valueText = format.signedNumber(value, 2);
+      const title = `${math.factorLabel(reason.name)}: value ${valueText}, weight ${weightText}, contribution ${format.signedNumber(contribution, 2)}` +
+        (reason.detail ? ` \u2014 ${reason.detail}` : "");
+      return `
+        <div class="reason" title="${html(title)}">
+          <div class="reason-head">
+            <span class="reason-name">${html(math.factorLabel(reason.name))}</span>
+            <span class="reason-val is-${clamped > 0 ? "bull" : clamped < 0 ? "bear" : "flat"}">${html(valueText)}</span>
+            <span class="reason-weight">${html(weightText)}</span>
+          </div>
+          <div class="reason-bar" role="img" aria-label="${html(title)}">
+            <span class="reason-zero" aria-hidden="true"></span>
+            <span class="reason-fill is-${clamped > 0 ? "bull" : clamped < 0 ? "bear" : "flat"}"
+                  style="width:${width.toFixed(2)}%;left:${left.toFixed(2)}%"></span>
+          </div>
+          ${reason.detail ? `<div class="reason-detail">${html(reason.detail)}</div>` : ""}
+        </div>`;
+    });
+    return `<div class="subhead">Reasons <span class="muted">by contribution</span></div><div class="reasons">${rows.join("")}</div>`;
+  }
+
+  function eventText(ts) {
+    const remaining = finite(ts) - Date.now();
+    if (remaining <= 0) return "";
+    const minutes = Math.ceil(remaining / 60000);
+    return `event in ${minutes} min \u2014 standing aside`;
+  }
+
+  function notesHtml(decision) {
+    const flat = math.actionOf(decision) === "flat";
+    const notes = decision.notes.slice();
+    const nextTs = finite(decision.next_event_ts);
+    const event = nextTs !== null && nextTs > Date.now() ? eventText(nextTs) : "";
+    if (!notes.length && !event) return "";
+    return `
+      <div class="notes${flat ? " is-flat" : ""}" aria-label="Decision notes">
+        ${notes.map((note) => `<div class="note">${html(note)}</div>`).join("")}
+        ${event ? `<div class="note" id="strat-event" data-ts="${nextTs}">${html(event)}</div>` : ""}
+      </div>`;
+  }
+
+  function historyHtml() {
+    const items = state.history.slice(-cfg.stripSize);
+    if (!items.length) {
+      return `<div class="subhead">Recent decisions</div><div class="empty inline">No decisions yet.</div>`;
+    }
+    const width = 300;
+    const height = 42;
+    const slot = width / cfg.stripSize;
+    // Newest decision sits at the right edge, so a short history grows leftward
+    // instead of being stranded in the first pixels of the strip.
+    const offset = width - items.length * slot;
+    const bars = [];
+    const points = [];
+    items.forEach((decision, index) => {
+      const action = math.actionOf(decision);
+      const ratio = math.confidencePct(decision.confidence);
+      const conf = ratio === null ? 0 : ratio / 100;
+      const barHeight = Math.max(3, conf * 26);
+      const x = offset + index * slot + 1.5;
+      const y = height - 4 - barHeight;
+      bars.push(
+        `<rect class="hist-${action}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${Math.max(2, slot - 3).toFixed(2)}" height="${barHeight.toFixed(2)}">` +
+        `<title>${html(`${format.time(decision.ts)} \u00b7 ${action.toUpperCase()} \u00b7 ${format.confidence(decision.confidence)}`)}</title></rect>`
+      );
+      points.push(`${(offset + index * slot + slot / 2).toFixed(2)},${y.toFixed(2)}`);
+    });
+    return `
+      <div class="subhead">Recent decisions <span class="muted">last ${items.length}</span></div>
+      <svg class="history-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none"
+           role="img" aria-label="${items.length} recent decisions: ${html(items.map((d) => math.actionOf(d)).join(", "))}">
+        ${bars.join("")}
+        <polyline class="hist-line" points="${points.join(" ")}" fill="none"></polyline>
+      </svg>
+      <div class="hist-legend">
+        <span><i class="hist-dot is-buy"></i>Buy</span>
+        <span><i class="hist-dot is-sell"></i>Sell</span>
+        <span><i class="hist-dot is-flat"></i>Flat</span>
+        <span class="muted">line = confidence</span>
+      </div>`;
+  }
+
+  function skeletonHtml(message) {
+    return `
+      <div class="strat-skeleton" aria-busy="true">
+        <div class="skeleton-line w40"></div>
+        <div class="skeleton-line w70"></div>
+        <div class="skeleton-line w55"></div>
       </div>
-      <h3 class="dash-subtitle">Pending delivery · ${numeric(pendingCount)}</h3>
-      ${pending.length ? pending.map((intent) => renderIntent(intent, pendingIds)).join("") : '<div class="empty">No pending strategy intent.</div>'}
-      <h3 class="dash-subtitle">Recent strategy intents · not fills</h3>
-      ${recent.length ? recent.map((intent) => renderIntent(intent, pendingIds)).join("") : '<div class="empty">No strategy signal yet.</div>'}
-    </section>`;
-  }
-
-  function eventTone(level) {
-    const value = String(level || "").toLowerCase();
-    if (value === "error" || value === "warn" || value === "warning") return "warn";
-    if (value === "signal" || value === "success") return "live";
-    return "muted";
-  }
-
-  function renderActivity(events) {
-    const rows = Array.isArray(events) ? events.slice(0, 30) : [];
-    return `<section class="dash-section">
-      <header class="dash-section-head"><div><span class="dash-kicker">Node 3</span><h2>Strategy activity log</h2></div>${badge(`${rows.length} recent`, "muted")}</header>
-      ${rows.length ? `<div class="activity-list">${rows.map((event) => `
-        <article class="activity-row">
-          <time>${escapeHtml(timestamp(event.timestamp))}</time>
-          ${badge(text(event.category, text(event.level, "event")), eventTone(event.level))}
-          <span>${escapeHtml(text(event.message, ""))}</span>
-        </article>`).join("")}</div>` : '<div class="empty">No scanner, signal, queue, or connection events yet.</div>'}
-    </section>`;
+      <div class="empty">${html(message)}</div>`;
   }
 
   function render() {
     const body = $("strategy-body");
     if (!body) return;
-    const scanning = record(state.scanning);
-    const signals = record(state.signals);
-    const work = record(state.work) || {};
-    const setupCount = scanning && Array.isArray(scanning.setups) ? scanning.setups.length : 0;
-    const pendingCount = signals && numberOrNull(signals.pending_count) !== null
-      ? numberOrNull(signals.pending_count)
-      : signals && Array.isArray(signals.pending) ? signals.pending.length : 0;
-    const count = $("strategy-count");
-    if (count) count.textContent = String(setupCount + pendingCount);
-    body.innerHTML = [
-      renderServiceHealth(work),
-      renderScanner(scanning, work),
-      renderSetups(scanning),
-      renderSignals(signals),
-      renderActivity(state.events),
-    ].join("");
+    mounted = true;
+
+    if (!state.last) {
+      const failed = lastError && !fetchInProgress;
+      body.innerHTML = skeletonHtml(failed ? "Strategy snapshot unavailable \u2014 waiting for the stream\u2026" : EMPTY_TEXT);
+      paintStatus();
+      return;
+    }
+
+    const decision = state.last;
+    const action = math.actionOf(decision);
+    const lots = finite(decision.lots);
+    const risk = finite(decision.risk_usd);
+    const engine = state.enabled === true
+      ? `<span class="engine-chip is-on" title="Built-in strategy evaluator enabled">ENGINE ON</span>`
+      : state.enabled === false
+        ? `<span class="engine-chip is-off" title="Built-in strategy evaluator disabled">ENGINE OFF</span>`
+        : `<span class="engine-chip" title="Evaluator state not reported yet">ENGINE ?</span>`;
+
+    body.innerHTML = `
+      <div class="strat-top">
+        ${actionBadge(decision)}
+        <span class="strat-symbol">${html(decision.symbol || state.symbol)}</span>
+        ${engine}
+        <span class="strat-age" id="strat-age" title="Decision timestamp">${html(format.age(decision.ts))}</span>
+      </div>
+      ${chipsHtml(decision)}
+      ${confidenceHtml(decision)}
+      ${scoreHtml(decision)}
+      <dl class="kv-grid">
+        <div><dt>Price</dt><dd class="tnum">${html(format.price(decision.price))}</dd></div>
+        <div><dt>ATR</dt><dd class="tnum">${html(format.price(decision.atr))}</dd></div>
+        <div><dt>Stop</dt><dd class="tnum">${html(format.price(decision.stop_loss))}</dd></div>
+        <div><dt>Target</dt><dd class="tnum">${html(format.price(decision.take_profit))}</dd></div>
+        <div class="kv-wide"><dt>Size</dt><dd class="tnum">${lots !== null && lots > 0
+          ? `${html(format.lots(lots))} lots <span class="muted">\u00b7 ${html(format.money(risk))} at risk</span>`
+          : `<span class="muted">no position \u2014 flat</span>`}</dd></div>
+      </dl>
+      ${reasonsHtml(decision)}
+      ${notesHtml(decision)}
+      ${historyHtml()}
+      <div class="strat-conn" id="strat-conn" hidden></div>`;
+
+    paintStatus();
+    tick();
   }
 
-  const stream = App.createServiceStream({
-    service: "strategy",
-    endpoint: endpoints.strategyWs,
-    topics: settings.topics,
-    reconnectMinMs: settings.reconnectMinMs,
-    reconnectMaxMs: settings.reconnectMaxMs,
-    staleAfterMs: settings.staleAfterMs,
-    heartbeatIntervalMs: settings.heartbeatIntervalMs,
-    heartbeatTimeoutMs: settings.heartbeatTimeoutMs,
-    refreshSnapshots,
-    onFrame: applyFrame,
-    onState: render,
-  });
+  function socketLabel() {
+    const socketState = App.socket && App.socket.getState ? App.socket.getState() : null;
+    const polling = !!(App.runtime && App.runtime.polling);
+    if (polling) return { text: "DELAYED", tone: "warn" };
+    if (!socketState) return { text: "OFFLINE", tone: "bad" };
+    if (socketState.status === "live") return { text: "LIVE", tone: "live" };
+    if (socketState.status === "stale") return { text: "STALE", tone: "warn" };
+    if (socketState.status === "connecting") return { text: "CONNECTING", tone: "warn" };
+    if (socketState.status === "not-configured") return { text: "NOT CONFIGURED", tone: "bad" };
+    return { text: "RECONNECTING", tone: "warn" };
+  }
+
+  /** Panel header state + stale dimming. Cheap enough to run every second. */
+  function paintStatus() {
+    const panel = $("panel-strategy");
+    const stateEl = $("strategy-state");
+    const label = socketLabel();
+    if (stateEl) {
+      stateEl.textContent = label.text;
+      stateEl.dataset.tone = label.tone;
+    }
+    const decisionTs = finite(state.last && state.last.ts);
+    const stale = decisionTs !== null && math.isStale(decisionTs, Date.now(), cfg.staleAfterMs);
+    if (panel && panel.classList) panel.classList.toggle("is-stale", stale);
+
+    const conn = $("strat-conn");
+    if (!conn) return;
+    let message = "";
+    if (App.runtime && App.runtime.polling) {
+      message = "Socket down \u2014 polling /strategy every 5 s (delayed).";
+    } else if (stale && label.text !== "LIVE") {
+      message = `No evaluation for ${format.age(decisionTs).replace(" ago", "")} \u00b7 stream ${label.text.toLowerCase()}.`;
+    } else if (label.tone === "bad") {
+      message = `Stream ${label.text.toLowerCase()} \u2014 showing the last received decision.`;
+    }
+    conn.hidden = !message;
+    conn.textContent = message;
+  }
+
+  /** Per-second light updates: age, staleness, connection line, countdown. */
+  function tick() {
+    const ageEl = $("strat-age");
+    const decisionTs = finite(state.last && state.last.ts);
+    if (ageEl) {
+      ageEl.textContent = decisionTs === null ? format.DASH : format.age(decisionTs);
+      if (ageEl.classList) ageEl.classList.toggle("is-stale", decisionTs !== null && math.isStale(decisionTs, Date.now(), cfg.staleAfterMs));
+    }
+    const eventEl = $("strat-event");
+    if (eventEl) {
+      const nextTs = finite(eventEl.dataset && eventEl.dataset.ts);
+      if (nextTs !== null) {
+        const text = eventText(nextTs);
+        if (!text) {
+          eventEl.hidden = true;
+          const container = eventEl.parentNode;
+          if (container && container.querySelectorAll) {
+            const otherNotes = Array.from(container.querySelectorAll(".note"))
+              .some((node) => node !== eventEl && !node.hidden && node.textContent.trim());
+            if (!otherNotes) container.hidden = true;
+          }
+        } else {
+          eventEl.textContent = text;
+        }
+      }
+    }
+    paintStatus();
+  }
 
   function start() {
     if (started) return;
     started = true;
     render();
-    stream.start();
-    refreshTimer = setInterval(refreshSnapshots, settings.snapshotRefreshMs);
-    countdownTimer = setInterval(render, 1000);
-    if (!state.signals && App.execution && typeof App.execution.setStrategySignals === "function") {
-      App.execution.setStrategySignals(null);
-    }
+    load();
+    setInterval(tick, 1000);
   }
 
   App.strategy = {
     start,
-    stop() {
-      stream.stop();
-      if (refreshTimer !== null) clearInterval(refreshTimer);
-      if (countdownTimer !== null) clearInterval(countdownTimer);
-      refreshTimer = null;
-      countdownTimer = null;
-      started = false;
-    },
-    applyFrame,
-    applyDiagnostics,
-    applyScanning,
-    applySignals,
-    refreshSnapshots,
+    load,
+    poll: load,
+    applySnapshot,
+    applyDecision,
     render,
-    getSignals: () => state.signals,
-    getState: () => ({
-      scanning: state.scanning,
-      signals: state.signals,
-      work: state.work,
-      events: state.events.slice(),
-      timestamp: state.timestamp,
-      snapshotError: state.snapshotError,
-    }),
-    stream,
+    tick,
+    getState,
+    onUpdate(listener) {
+      if (typeof listener !== "function") return () => {};
+      updateListeners.add(listener);
+      return () => updateListeners.delete(listener);
+    },
   };
 })((window.App = window.App || {}));

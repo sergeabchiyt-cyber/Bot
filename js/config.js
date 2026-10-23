@@ -1,15 +1,14 @@
 /* ============================================================
- * XAUUSD Terminal — browser-safe endpoint configuration
+ * XAUUSD Terminal — browser-safe Node 1 endpoint configuration.
  *
- * Runtime overrides may be supplied before this file is loaded:
- *   window.XAUUSD_CONFIG = {
- *     MARKET_HOST: "https://market.example",
- *     STRATEGY_HOST: "https://strategy.example",
- *     EXECUTION_HOST: "https://execution.example"
- *   };
+ * Node 2 is a static, read-only client of the Node 1 service:
+ *   market data + built-in strategy evaluator + demo (paper) account.
  *
- * An explicitly empty host disables that service. Only origins are accepted;
- * documented public paths are fixed below. No credentials belong here.
+ * Runtime override, installed before this file is loaded:
+ *   window.XAUUSD_CONFIG = { MARKET_HOST: "https://market.example" };
+ *
+ * Only an origin is accepted; the documented public paths are fixed below.
+ * No credentials, tokens, or authorization headers belong here.
  * ============================================================ */
 (function (App) {
   "use strict";
@@ -19,13 +18,8 @@
     : {};
   const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
-  // These hosts are taken from the checked-in Node deployment documentation:
-  // Node 1's market URL, Node 4's NODE3_WS_URL, and Node 4's frontend resource
-  // guide respectively. They can all be replaced at runtime without a build.
   const DEFAULTS = {
     MARKET_HOST: "https://engine-southeastasia-sng-main.onrender.com",
-    STRATEGY_HOST: "https://strategy-southeastasia-sng-main.onrender.com",
-    EXECUTION_HOST: "https://execution-southeastasia-sng-main.onrender.com",
   };
 
   function normaliseHost(value) {
@@ -44,94 +38,67 @@
     }
   }
 
-  function resolveHost(name) {
-    const value = own(runtime, name) ? runtime[name] : DEFAULTS[name];
-    return normaliseHost(value);
-  }
-
-  function websocketBase(host) {
-    if (!host) return "";
-    return host.replace(/^https:/i, "wss:").replace(/^http:/i, "ws:");
-  }
-
-  const MARKET_HOST = resolveHost("MARKET_HOST");
-  const STRATEGY_HOST = resolveHost("STRATEGY_HOST");
-  const EXECUTION_HOST = resolveHost("EXECUTION_HOST");
-
-  function endpoint(host, path, websocket) {
-    if (!host) return "";
-    const base = websocket ? websocketBase(host) : host;
-    return `${base}${path}`;
-  }
+  const MARKET_HOST = normaliseHost(own(runtime, "MARKET_HOST") ? runtime.MARKET_HOST : DEFAULTS.MARKET_HOST);
+  const websocketBase = MARKET_HOST.replace(/^https:/i, "wss:").replace(/^http:/i, "ws:");
+  const endpoint = (path, websocket) => (MARKET_HOST ? `${websocket ? websocketBase : MARKET_HOST}${path}` : "");
 
   const endpoints = {
-    // Node 1 — market data only.
-    marketWs: endpoint(MARKET_HOST, "/ws", true),
-    candles: endpoint(MARKET_HOST, "/candles", false),
-    tickVolume: endpoint(MARKET_HOST, "/tick-volume", false),
-    levels: endpoint(MARKET_HOST, "/levels", false),
-    calendar: endpoint(MARKET_HOST, "/calendar", false),
-
-    // Node 3 — public strategy diagnostics only; the private intent/report link is not used here.
-    strategyWs: endpoint(STRATEGY_HOST, "/ws", true),
-    strategyDiagnostics: endpoint(STRATEGY_HOST, "/diagnostics", false),
-    strategyScanning: endpoint(STRATEGY_HOST, "/scanning", false),
-    strategySignals: endpoint(STRATEGY_HOST, "/signals", false),
-
-    // Node 4 — public, read-only execution and broker snapshots.
-    executionWs: endpoint(EXECUTION_HOST, "/ws", true),
-    executionDiagnostics: endpoint(EXECUTION_HOST, "/diagnostics", false),
-    executionOpenTrades: endpoint(EXECUTION_HOST, "/open-trades", false),
-    executionAccount: endpoint(EXECUTION_HOST, "/account", false),
-    executionDeriv: endpoint(EXECUTION_HOST, "/deriv", false),
-    mt5Account: endpoint(EXECUTION_HOST, "/mt5/account", false),
-    mt5Positions: endpoint(EXECUTION_HOST, "/mt5/positions", false),
-    mt5History: endpoint(EXECUTION_HOST, "/mt5/history", false),
-    mt5Status: endpoint(EXECUTION_HOST, "/mt5/status", false),
+    ws: endpoint("/ws", true),
+    candles: endpoint("/candles", false),
+    tickVolume: endpoint("/tick-volume", false),
+    levels: endpoint("/levels", false),
+    calendar: endpoint("/calendar", false),
+    strategy: endpoint("/strategy", false),
+    demo: endpoint("/demo", false),
+    status: endpoint("/status", false),
   };
 
   App.config = {
     MARKET_HOST,
-    STRATEGY_HOST,
-    EXECUTION_HOST,
     endpoints,
 
-    market: {
-      topics: ["levels", "candle", "bubbles", "trades", "calendar", "tick_volume", "sentiment"],
+    // Exactly the Node 1 topics the dashboard renders, and nothing else.
+    socket: {
+      topics: ["levels", "candle", "tick_volume", "strategy", "demo", "calendar", "status"],
       reconnectMinMs: 1000,
       reconnectMaxMs: 30000,
-      staleAfterMs: 90000,
-      heartbeatIntervalMs: 20000,
+      heartbeatEveryMs: 30000,
       heartbeatTimeoutMs: 75000,
-      snapshotRefreshMs: 60000,
+      staleAfterMs: 90000,
+      pollFallbackMs: 5000,
     },
 
     strategy: {
-      topics: ["diagnostics", "scanning", "signals", "diagnostic_event"],
-      reconnectMinMs: 1000,
-      reconnectMaxMs: 30000,
-      staleAfterMs: 45000,
-      heartbeatIntervalMs: 20000,
-      heartbeatTimeoutMs: 75000,
-      snapshotRefreshMs: 20000,
+      staleAfterMs: 60000,
+      historyLimit: 120,
+      stripSize: 30,
+      // Shape only: every value is unknown until /strategy (or the status
+      // frame) supplies it. Rendering shows — rather than inventing defaults.
+      defaultParams: {
+        enabled: null,
+        min_confidence: null,
+        risk_pct: null,
+        atr_period: null,
+        atr_stop_mult: null,
+        reward_risk: null,
+        min_lots: null,
+        max_lots: null,
+        lot_step: null,
+        fast_ema: null,
+        slow_ema: null,
+        momentum_bars: null,
+        tick_pressure_bars: null,
+        event_blackout_secs: null,
+        leverage: null,
+        max_margin_pct: null,
+      },
     },
 
-    execution: {
-      // `trades` is the Node 4 subscription topic. Its wire frame type is
-      // `trade` (the exact public WsFrame schema).
-      topics: [
-        "diagnostics", "open_trades", "trades", "deriv_account",
-        "mt5_account", "mt5_positions", "mt5_history", "bridge_status",
-        "bridge_event", "diagnostic_event", "heartbeat",
-      ],
-      reconnectMinMs: 1000,
-      reconnectMaxMs: 30000,
-      staleAfterMs: 45000,
-      heartbeatIntervalMs: 20000,
-      heartbeatTimeoutMs: 75000,
-      snapshotRefreshMs: 30000,
-      brokerFreshMs: 15000,
-      maxRows: 100,
+    demo: {
+      maxTrades: 50,
+      profitFactorCap: 99,
+      marginWarnPct: 200,
+      marginDangerPct: 100,
     },
 
     calendar: {
@@ -142,16 +109,8 @@
     },
 
     levelsRefreshMs: 60 * 1000,
-    marketSnapshotRefreshMs: 60 * 1000,
-
-    bubbles: {
-      maxOnChart: 60,
-      maxRows: 40,
-      scaleCap: 5000,
-      scaleFloor: 100,
-      decayEveryMs: 30000,
-      decayFactor: 0.95,
-    },
+    candlesRefreshMs: 60 * 1000,
+    statusRefreshMs: 30 * 1000,
 
     levels: {
       PW: {

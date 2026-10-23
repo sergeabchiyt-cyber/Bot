@@ -1,142 +1,137 @@
 # Node 2 service architecture
 
-Node 2 is a static read-only client. The deployed data and write boundaries are:
+Node 2 is a static, read-only browser client of **one** service: Node 1.
 
 ```text
-Node 1 (market) ── public candles / levels / flow / calendar ──┐
-Node 3 (strategy) ── public scanner / intents / diagnostics ───┼─► Node 2
-Node 4 (execution) ── public broker / account / bridge state ──┘
-
-Node 3 ── authenticated trade_intent / execution_report protocol ── Node 4
+                    ┌─────────────────────────────┐
+   REST (GET only)  │  Node 1                     │
+  ─────────────────►│  market data                │
+                    │  built-in strategy evaluator│
+   WS /ws           │  demo (paper) account       │
+  ◄────────────────►│                             │
+                    └─────────────────────────────┘
+                                 ▲
+                                 │ public GET + WS
+                          ┌──────┴──────┐
+                          │   Node 2    │  static HTML/CSS/JS
+                          │  dashboard  │  no backend, no proxy
+                          └─────────────┘
 ```
 
-The Node 2 browser never participates in the authenticated Node 3 ↔ Node 4 link. Node 3 decides strategy meaning; Node 4 is authoritative for venue acceptance and broker outcomes. Node 2 labels these as different data domains.
+Node 2 has no database, no proxy, no server-side rendering and no write path.
+It renders what Node 1 publishes and never places, modifies or closes orders.
+The demo engine trades itself.
 
-## Runtime endpoint map
+## Endpoint map
 
-`js/config.js` defines `MARKET_HOST`, `STRATEGY_HOST`, `EXECUTION_HOST` and derives these explicit browser endpoints:
+`js/config.js` defines `MARKET_HOST` and derives:
 
 ```text
-Node 1
-  marketWs, candles, tickVolume, levels, calendar
-Node 3
-  strategyWs, strategyDiagnostics, strategyScanning, strategySignals
-Node 4
-  executionWs, executionDiagnostics, executionOpenTrades,
-  executionAccount, executionDeriv, mt5Account, mt5Positions,
-  mt5History, mt5Status
+GET  /candles        chart history
+GET  /tick-volume    volume / TPS snapshot
+GET  /levels         volume-profile levels
+GET  /calendar       USD economic calendar
+GET  /strategy       StrategySnapshot seed
+GET  /demo           DemoSnapshot seed
+GET  /status         status + feeds
+WS   /ws             levels · candle · tick_volume · strategy · demo · calendar · status
 ```
 
-The checked-in Node 4 frontend contract documents `execution-southeastasia-sng-main.onrender.com`; this is the source for the default Node 4 host. Node 4's service configuration supplies the Node 3 host used by its private link; Node 2 uses only that same host's public resources. Node 1's public market host is configured in the existing Node 2 market client and Node 3's market URL configuration.
+Every path is fixed in code. The runtime override (`window.XAUUSD_CONFIG`)
+accepts an origin only — never a path, credential, query or fragment. An empty
+host disables the service and is reported as `NOT CONFIGURED`.
 
-For another environment, inject `window.XAUUSD_CONFIG` before `js/config.js`:
-
-```js
-window.XAUUSD_CONFIG = {
-  MARKET_HOST: "https://market.example",
-  STRATEGY_HOST: "https://strategy.example",
-  EXECUTION_HOST: "https://execution.example"
-};
-```
-
-An explicitly empty host disables the corresponding service and its badge reads “NOT CONFIGURED”. Overrides accept only an HTTP(S)/WS(S) origin; endpoint paths remain fixed in code to the documented public routes. Values with credentials, query strings, fragments, or custom paths are rejected. Runtime configuration has no credential, header, token, or account fields.
-
-## Endpoint and topic ownership
-
-### Node 1 — market
-
-Node 2 connects to public `WS /ws` and reads public REST `/candles`, `/tick-volume`, `/levels`, and `/calendar`. Market topics used by the dashboard are `levels`, `candle`, `tick_volume`, `bubbles`, `trades`, `calendar`, and `sentiment`; heartbeat frames are handled by the shared connection lifecycle.
-
-The market chart and its existing chart/volume-profile logic remain in the Node 1 adapter. Node 3 also consumes Node 1 `candle` and `levels`, but the browser's market chart does not depend on the Node 3 stream.
-
-### Node 3 — strategy
-
-Public HTTP:
-
-- `GET /diagnostics` and `GET /status` → `DiagnosticsSnapshot`
-- `GET /scanning` → `ScanningSnapshot`
-- `GET /signals` → `SignalSnapshot`
-
-Public WS topics subscribed by Node 2: `diagnostics`, `scanning`, `signals`, `diagnostic_event`.
-
-The renderer uses the contract fields in `node3-strategy/src/types.rs`:
-
-- `StrategyWorkDiagnostics`: Node 1 state/reconnects, candle/level counters and timestamps, Node 4 connection state, uptime, current projected risk, and last error.
-- `ScanningSnapshot` / `ScannedLevelSetup`: active setup/level counts, price/volume/ATR, scanner state, pending side, distances, retest and invalidation levels, volume confirmation, projected buy/sell orders, active projection, break time/price, and latest note.
-- `SignalSnapshot`: `pending`, `recent`, `execution_reports`, `pending_count`, `node4_connected`, `node4_token_configured`, `timestamp`.
-- `ActivityLogEntry`: scanner, signal, queue, and connection messages.
-
-Intent cards show the exact strategy intent fields, including expiration countdown. They explicitly say “intent only — not an execution or fill.”
-
-### Node 4 — execution and broker monitoring
-
-Public HTTP:
-
-- `GET /diagnostics` (`/status` alias) → `ExecutionSnapshot`
-- `GET /open-trades` (`/trades` alias) → `OpenTradesSnapshot`
-- `GET /deriv` (`/account` alias) → `DerivAccountSnapshot`
-- `GET /mt5/account` → `Mt5AccountSnapshot`
-- `GET /mt5/positions` → `Mt5PositionsSnapshot`
-- `GET /mt5/history` → `Mt5HistorySnapshot`
-- `GET /mt5/status` → `Mt5BridgeStatus`
-
-Node 2 subscribes to public `/ws` topics implemented by Node 4:
+## Module graph
 
 ```text
-diagnostics, open_trades, trades, deriv_account,
-mt5_account, mt5_positions, mt5_history, bridge_status,
-bridge_event, diagnostic_event, heartbeat
+config ─┬─ normalize ─┬─ utils ─┬─ api
+        │             │         ├─ levels
+        │             │         ├─ calendar
+        │             │         └─ strategy, demo, status
+        ├─ format ────┴─ socket, chart, strategy, demo, overlays, status
+        ├─ strategy-math ── strategy, demo, overlays, status
+        └─ axis ── chart ── (levels, overlays)
 ```
 
-The Node 4 Rust `WsFrame::Trades` variant serializes as `type: "trade"`, while its topic filter matches the subscription name `trades`. `bridge_event` is the event/data envelope from the bridge; bridge/authentication and acknowledgement frames are private and are not requested.
+Only `js/app.js` wires frame types to modules. The strategy, demo, chart,
+levels and calendar modules never talk to a service directly except through
+`App.api` / `App.utils.fetchPublicJson` and never construct their own socket.
 
-Node 4 has no public structured execution-report frame or endpoint in the deployed `WsFrame` / route contract. It does publish structured `ExecutionReport` values to Node 3 over their private service link. Node 3's public `SignalSnapshot.execution_reports` is therefore the browser's structured report mirror. Node 2 joins each report to a recent/pending Node 3 intent only to display the original `reference_price`; report status/fill/quantity/error fields come from the Node 4 report mirror. Execution IDs are displayed when present; report ticket fields are shown only if a public payload includes the actual typed fields.
+## State
 
-Node 4's `ExecutionSnapshot` also drives venue/ledger counters and its Node 3 link health. `OpenTradesSnapshot` fields are exactly `node4_open_trades`, `deriv_open_trades`, `mt5_open_positions`, `recent_trades`, `total_open_count`, `mt5_open_count`, and `timestamp`; Node 2 does not look for an assumed `node3_open_trades` field.
+| Topic | Owner | Semantics |
+|---|---|---|
+| `strategy` | `js/strategy.js` | one reducer keyed on `decision.ts`; `last` moves forward, history ascending, capped at 120 |
+| `demo` | `js/demo.js` | complete snapshot replaces the previous one; guarded against an older `ts` |
+| `levels` | `js/levels.js` | per-window upsert; array payload is authoritative |
+| candles | `js/chart.js` | upsert by bucket; REST snapshots guarded by a WS revision |
+| `calendar` | `js/calendar.js` | sorted USD events, impact filter |
+| `status` | `js/status.js` | last status snapshot, feeds rendered generically |
 
-## Quantity and freshness rules
+The REST payload is only a seed. A REST response whose decision data started
+before a newer WebSocket frame is discarded (`wsRevision` guard); the evaluator
+configuration (enabled + params) is still seeded because decision frames do not
+carry it. `strategy.ts` dedupes replayed decisions, so a reconnect cannot
+duplicate history.
 
-- Deriv options `buy_price` is the contract stake in account currency; `total_open_stake` is also currency.
-- MT5 `Mt5Position.volume` and `Mt5Deal.volume` are lots. MT5 PnL is denominated in the public MT5 account currency. These are never added to Deriv currency stake.
-- Node 4 `ExecutionReport.quantity_unit` is shown beside its `quantity`; the browser does not infer a unit.
-- Generic `ExecutionTrade.size` has no unit and its `unrealized_pnl` has no currency in its public type. It is shown in a separate table as a Node 4 service record and is not aggregated with venue-specific quantities or PnL.
-- Node 4's public `Mt5BridgeStatus` does not contain bridge reconnect/frame/request counters or a last-bridge-frame field. Node 2 displays the fields the contract exposes (protocol/version, links, heartbeat/snapshot ages, order counters, positions/history counts, halt/error, and uptime) and does not invent missing counters.
-- Account margin level is not a serialized Node 4 field. If equity and non-zero margin are available, Node 2 labels `equity ÷ margin × 100` as derived.
-- Closed `Mt5Deal` records expose one `price`; an open price is only displayed when an `entry: in` deal for the same position is present in the loaded snapshot. Otherwise it remains unavailable rather than being guessed.
+## WebSocket lifecycle (`js/socket.js`)
 
-## Independent stream lifecycle
+- exactly one socket, created from `endpoints.ws`;
+- on every open: send the full `{"type":"subscribe","topics":[…]}` payload —
+  the server replay is what reseeds the panels after a reconnect;
+- heartbeat sent every 30 s; 75 s of silence forces a reconnect;
+- bounded exponential backoff, 1 s → 30 s, reset on a successful open;
+- watchdog republishes state every 5 s so `STALE` appears without a frame;
+- returns to a prompt reconnect when the tab becomes visible.
 
-`js/stream.js` is one reusable lifecycle manager instantiated separately for Market, Strategy, and Execution. Each instance owns its own:
+State published to the header badge: `LIVE`, `CONNECTING`, `RECONNECTING`,
+`STALE`, `OFFLINE`, `NOT CONFIGURED`.
 
-- WebSocket connection and public subscription
-- reconnect timer and bounded 1–30 second exponential backoff
-- JSON heartbeat send/receive handling and silence timeout
-- last message/data timestamps, error state, and stale badge
-- visibility-change recovery and snapshot refresh callback
+## Polling fallback
 
-REST polling is owned by each service module. Strategy refreshes diagnostics/scanning/signals, and Execution refreshes diagnostics plus standalone public resources when the diagnostics snapshot is missing/incomplete. Market uses its existing chart/levels/calendar readers. A per-domain revision guard rejects REST data if a newer WS frame arrived in-flight. Snapshot fields and activity arrays are normalized before rendering, capped, deduplicated, and escaped.
+`js/app.js` watches `App.socket.onState`. If the socket is configured but not
+connected for more than 1.5 s, it:
 
-Topbar values are `LIVE`, `RECONNECTING`, `STALE`, or `OFFLINE`. A configured-but-unreachable service keeps retrying without changing the other badges. An empty host disables only that service.
+1. sets `App.runtime.polling = true`;
+2. shows the `DELAYED` badge;
+3. polls `GET /strategy` and `GET /demo` every 5 s.
 
-## Node 2 security boundary
+A reconnect clears the badge, stops the poller and lets the replay take over.
+While the socket is healthy there is no polling of those routes.
 
-Browser code may issue only public `GET` snapshots and public diagnostics WebSocket subscriptions. It must not include or transmit credentials or authorization headers; it must not connect to the private strategy/execution transport, the MT5 bridge session, any operator control route, or any broker write method. Safety state is informational and has no operator action control.
+## Rendering domains
 
-Unknown outcomes remain visually distinct and prominent. They mean an order write may have reached the broker and require reconciliation; Node 2 never labels them rejected or safe to retry.
+- **Strategy panel** — action, confidence, score, regime, volatility, price/ATR,
+  stop/target, size/risk, reasons sorted by `|contribution|`, flat notes,
+  blackout countdown, 30-decision history strip.
+- **Demo strip** — mode, leverage, spread, balance, equity, free margin, margin
+  level, open PnL. Values come from `demo.account` / `demo.params`.
+- **Open position** — entry/SL/TP, lots, floating PnL, margin, risk, reason,
+  stop→target progress with bid/ask marker.
+- **Performance** — the six `demo.stats` figures, profit factor capped at `99+`.
+- **Trade history** — last 50 closed trades, newest first, exit-reason chips.
+- **Chart** — candles and volume on the compacted `axis.js` timeline, levels,
+  position lines, action marker, optional ATR band.
+- **Drawer** — read-only connection, strategy/demo blocks, parameters, feeds.
 
-## Run and troubleshoot
+All money is USD and all prices are XAUUSD price units. There is no pip or
+contract-size conversion in the browser.
 
-Run without a bundler:
+## Formatting boundary
 
-```bash
-python3 -m http.server 8080 --bind 0.0.0.0
-```
+`js/format.js` is the only place that turns a number into visible text:
+price 2 dp with grouping, lots 2 dp, money 2 dp with `$`, PnL signed, percent
+1 dp, R multiple 2 dp signed, local `HH:mm:ss` / `DD MMM`, confidence as a
+0–100 % value. Nulls render as `—`.
 
-Then open `http://localhost:8080`. For a hosted/static preview, public Node services must allow the page origin for REST CORS and WebSocket `Origin` checks. CORS failures do not justify adding browser credentials. For independent offline/stale diagnosis, check the corresponding badge tooltip, that service's diagnostics panel, and browser Network/Console. A live heartbeat with no current data becomes `STALE`; REST snapshots can keep sections populated while a stream reconnects.
+## Failure modes
 
-Run validation:
-
-```bash
-npm run lint
-npm test
-```
+| Failure | Behaviour |
+|---|---|
+| REST unreachable on mount | skeletons with an explanatory empty state; socket keeps retrying |
+| socket down | `DELAYED` badge + 5 s REST polling |
+| socket open but silent | `STALE` badge after 90 s; strategy panel dims after 60 s without a decision |
+| malformed JSON frame | logged, ignored; connection stays up |
+| chart library missing | chart area empty; strategy/demo/levels/calendar still render |
+| older REST snapshot | discarded by the revision / `ts` guard |
+| demo engine disabled | dimmed account strip + "demo engine off" |

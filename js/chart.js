@@ -5,7 +5,8 @@
 (function (App) {
   "use strict";
 
-  const { $, setStatus, fmtPrice, toSec, numberOrNull, fetchPublicJson } = App.utils;
+  const { $, setStatus, toSec, numberOrNull, fetchPublicJson } = App.utils;
+  const format = App.format;
   const cfg = App.config;
 
   const el = $("chart");
@@ -130,6 +131,8 @@
   });
 
   const series = chart.addCandlestickSeries({
+    // Price units, 2 dp. No pip/point conversion happens in the client.
+    priceFormat: { type: "price", precision: 2, minMove: 0.01 },
     upColor: "#26A69A",
     downColor: "#EF5350",
     borderUpColor: "#26A69A",
@@ -159,9 +162,25 @@
   // capture these WS revisions and are discarded if newer market data arrived
   // while the request was in flight.
   const candlesByTime = new Map();
+  const resetListeners = new Set();
+  const candleListeners = new Set();
   let wsCandleRevision = 0;
   let wsTickVolumeRevision = 0;
   let historyFetchInProgress = false;
+
+  /** Notified after a full `setData` reload, so overlays can re-apply markers
+   *  and price lines that a history snapshot replaces. */
+  function onReset(listener) {
+    if (typeof listener === "function") resetListeners.add(listener);
+    return () => resetListeners.delete(listener);
+  }
+
+  /** Notified after a live candle is drawn, so overlays can place a marker
+   *  on a brand-new bucket without waiting for the next history reload. */
+  function onCandleUpdate(listener) {
+    if (typeof listener === "function") candleListeners.add(listener);
+    return () => candleListeners.delete(listener);
+  }
 
   // ---------- Top bar price & TPS ----------
   let lastClose = null;
@@ -170,7 +189,7 @@
     if (price === null) return;
     const priceEl = $("last-price");
     if (!priceEl) return;
-    priceEl.textContent = fmtPrice(price);
+    priceEl.textContent = format.price(price);
     if (lastClose != null && price !== lastClose) {
       priceEl.dataset.dir = price > lastClose ? "up" : "down";
     }
@@ -180,7 +199,7 @@
   function updateTps(rate) {
     const val = numberOrNull(rate);
     if (val === null) return;
-    const text = val.toFixed(1);
+    const text = format.number(val, 1);
     const tpsSec = $("ticks-per-sec");
     if (tpsSec) tpsSec.textContent = text;
     const tpsVal = $("tps-value");
@@ -293,6 +312,9 @@
         series.setData(view.bars);
         if (wsTickVolumeRevision === requestTickVolumeRevision) volumeSeries.setData(volumeData);
         chart.timeScale().fitContent();
+        for (const listener of resetListeners) {
+          try { listener(); } catch (error) { console.error("Chart reset listener failed:", error); }
+        }
         const newest = view.bars.length ? view.bars[view.bars.length - 1] : data[data.length - 1];
         updateLastPrice(newest.close);
 
@@ -361,6 +383,9 @@
 
     series.update({ ...candle, time: displaySec });
     updateLastPrice(candle.close);
+    for (const listener of candleListeners) {
+      try { listener(displaySec, candle); } catch (error) { console.error("Chart candle listener failed:", error); }
+    }
   }
 
   /** Live tick volume bar from Node 1, or a guarded /tick-volume snapshot. */
@@ -419,7 +444,7 @@
         ? LightweightCharts.LineStyle.Dashed
         : LightweightCharts.LineStyle.Solid,
       axisLabelVisible: true,
-      title: isNarrow() ? "" : style.title, // axis label only on mobile
+      title: isNarrow() ? (style.compactTitle || "") : style.title,
     });
   }
 
@@ -428,20 +453,6 @@
     if (!priceLines[key]) return;
     series.removePriceLine(priceLines[key]);
     delete priceLines[key];
-  }
-
-  function clearPriceLines() {
-    for (const k of Object.keys(priceLines)) {
-      series.removePriceLine(priceLines[k]);
-      delete priceLines[k];
-    }
-  }
-
-  /** Force the primitive layer to repaint. */
-  function repaint() {
-    chart.applyOptions({});
-    series.applyOptions({});
-    volumeSeries.applyOptions({});
   }
 
   new ResizeObserver(() => chart.applyOptions(size())).observe(el);
@@ -457,7 +468,7 @@
     updateTps,
     upsertPriceLine,
     removePriceLine,
-    clearPriceLines,
-    repaint,
+    onReset,
+    onCandleUpdate,
   };
 })((window.App = window.App || {}));

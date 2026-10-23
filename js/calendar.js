@@ -16,7 +16,8 @@
 (function (App) {
   "use strict";
 
-  const { $, escapeHtml, toMs, fmtClock, dayKey, fmtDayLabel, fmtCountdown, fetchPublicJson } = App.utils;
+  const { $, escapeHtml, toMs, fetchPublicJson } = App.utils;
+  const format = App.format;
   const normalisePayload = App.normalize;
   const cfg = App.config.calendar;
 
@@ -96,14 +97,13 @@
       `impact-${e.impact}`,
       past ? "is-past" : "",
       isNext ? "is-next" : "",
-      e.gold ? "is-gold" : "",
     ].join(" ");
 
     return `
       <div class="${classes}">
         <div class="ev-time">
-          <span class="ev-clock">${fmtClock(e.ms)}</span>
-          ${isNext ? `<span class="ev-countdown">${fmtCountdown(e.ms)}</span>` : ""}
+          <span class="ev-clock">${format.clock(e.ms)}</span>
+          ${isNext ? `<span class="ev-countdown">${format.countdown(e.ms)}</span>` : ""}
         </div>
         <div class="ev-main">
           <div class="ev-title">
@@ -125,7 +125,8 @@
     const list = $("calendar-list");
     const count = $("calendar-count");
     const events = visible();
-    count.textContent = events.length;
+    if (count) count.textContent = events.length;
+    if (!list) return;
 
     const nextEvt = allEvents.find((e) => e.ms > Date.now() && e.rank >= 1);
     renderNextBanner(nextEvt);
@@ -140,15 +141,15 @@
     let html = "";
     let currentDay = null;
     for (const e of events) {
-      const k = dayKey(e.ms);
+      const k = format.dayKey(e.ms);
       if (k !== currentDay) {
         currentDay = k;
-        html += `<div class="day-head">${fmtDayLabel(e.ms)}</div>`;
+        html += `<div class="day-head">${format.dayLabel(e.ms)}</div>`;
       }
       html += eventRow(e, e === nextVisible);
     }
     if (updatedAt) {
-      html += `<div class="cal-foot">Updated ${fmtClock(updatedAt)}</div>`;
+      html += `<div class="cal-foot">Updated ${format.clock(updatedAt)}</div>`;
     }
     list.innerHTML = html;
   }
@@ -165,7 +166,7 @@
     el.className = `next-event impact-${e.impact}`;
     el.innerHTML = `<i class="impact-bar"></i>
       <span class="ne-name">${escapeHtml(e.name)}</span>
-      <span class="ne-when">${fmtCountdown(e.ms)}</span>`;
+      <span class="ne-when">${format.countdown(e.ms)}</span>`;
   }
 
   // ---------- Impact filter chips ----------
