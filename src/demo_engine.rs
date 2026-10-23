@@ -670,19 +670,19 @@ mod tests {
 
     #[test]
     fn lot_size_is_forced_onto_the_0_01_to_1_range() {
-        let mut engine = engine();
-        engine.apply(
+        let mut capped = engine();
+        capped.apply(
             &decision(Action::Buy, 5.0, 3400.0, Some(3395.0), Some(3410.0)),
             1_700_000_000_000,
         );
-        assert!((engine.position().unwrap().lots - 1.0).abs() < 1e-9);
+        assert!((capped.position().unwrap().lots - 1.0).abs() < 1e-9);
 
-        let mut engine = engine();
-        engine.apply(
+        let mut floored = engine();
+        floored.apply(
             &decision(Action::Buy, 0.001, 3400.0, Some(3395.0), Some(3410.0)),
             1_700_000_000_000,
         );
-        assert!((engine.position().unwrap().lots - 0.01).abs() < 1e-9);
+        assert!((floored.position().unwrap().lots - 0.01).abs() < 1e-9);
     }
 
     #[test]
