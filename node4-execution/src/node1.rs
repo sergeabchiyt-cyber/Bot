@@ -922,6 +922,9 @@ mod tests {
         mpsc::Receiver<FeedEvent>,
     ) {
         let feed = MarketFeed::new(&config());
+        // `run()` calls this when the socket is established; the frame handlers
+        // are exercised directly here.
+        feed.connected();
         let (tx, rx) = mpsc::channel(64);
         (feed, tx, rx)
     }
