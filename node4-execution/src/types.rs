@@ -125,7 +125,9 @@ impl Default for Node3LinkStatus {
 pub struct ExecutionWorkDiagnostics {
     pub service: String,
     pub version: String,
-    /// Always `execution_only` — this service never makes strategy decisions.
+    /// `execution_only` unless `NODE4_INTENT_SOURCE=node1_strategy` selects the
+    /// local strategy source; the value names the execution boundary, not the
+    /// origin of the decision.
     pub role: String,
     pub venue: String,
     pub started_at: i64,

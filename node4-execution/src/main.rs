@@ -1,9 +1,10 @@
 //! Node 4 — the execution service.
 //!
-//! Node 4 is an outbound **client** of Node 3's strategy engine: it receives
-//! `trade_intent` frames on `NODE3_WS_URL` (`wss://<node3-host>/execution`),
-//! validates them, durably records the `intent_id`, then places **at most one**
-//! broker order and reports the broker-authoritative result back.
+//! By default Node 4 is an outbound **client** of Node 3's strategy engine: it
+//! receives `trade_intent` frames on `NODE3_WS_URL`
+//! (`wss://<node3-host>/execution`), validates them, durably records the
+//! `intent_id`, then places **at most one** broker order and reports the
+//! broker-authoritative result back.
 //!
 //! It owns all execution concerns — venue selection, stake/lot size, account
 //! risk, the Deriv options adapter, the Chelsea MCP adapter, the MT5 demo

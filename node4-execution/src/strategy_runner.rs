@@ -305,6 +305,61 @@ mod tests {
         assert_eq!(snapshot.intents_emitted, 0);
     }
 
+    #[tokio::test]
+    async fn a_replayed_strategy_event_cannot_place_a_second_order() {
+        let mut config = config();
+        config.execution_ledger_file = std::env::temp_dir()
+            .join(format!(
+                "node4-strategy-dedupe-{}.jsonl",
+                std::process::id()
+            ))
+            .display()
+            .to_string();
+        let feed = MarketFeed::new(&config);
+        let hub = DiagnosticsHub::new(&config);
+        let manager = Arc::new(ExecutionManager::new(&config, hub.mt5()));
+        let ledger = Arc::new(ExecutionLedger::open(&config.execution_ledger_file));
+        let shared = crate::node3::LinkShared::for_local(
+            config.clone(),
+            hub.clone(),
+            manager,
+            ledger.clone(),
+            feed,
+        );
+
+        let trigger = Trigger {
+            symbol: "XAUUSD".into(),
+            interval: "15m".into(),
+            side: "buy".into(),
+            level_id: "PW_POC".into(),
+            level_name: "PW PoC".into(),
+            level_price: 2_650.0,
+            reference_price: 2_650.5,
+            source_candle_time: 1_700_000_000_000,
+        };
+        let risk = RiskProjector::new(RiskParams::default());
+        let intent = build_intent(
+            &trigger,
+            &risk,
+            config.strategy_ttl_secs,
+            chrono::Utc::now().timestamp_millis(),
+        );
+
+        // The same strategy event replayed (a reconnect, a resubscribe or a
+        // duplicate feed frame) must resolve to the same durable key.
+        crate::node3::handle_local_intent(shared.clone(), intent.clone()).await;
+        crate::node3::handle_local_intent(shared.clone(), intent.clone()).await;
+
+        let snapshot = hub.snapshot().await;
+        assert_eq!(snapshot.work.intents_received, 2);
+        assert_eq!(snapshot.work.intents_duplicate, 1);
+        assert_eq!(
+            snapshot.work.orders_placed, 0,
+            "the default venue is an explicit dry run"
+        );
+        assert!(ledger.state(&intent.intent_id).await.is_some());
+    }
+
     #[test]
     fn the_handle_reports_a_monitor_mode_when_node3_is_the_source() {
         let mut config = config();
