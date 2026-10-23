@@ -1,0 +1,12 @@
+[1m[92m    Checking[0m xauusd-node4-execution v1.0.0 (/home/runner/work/Bot/Bot/node4-execution)
+[1m[91merror[0m[1m: manual `RangeInclusive::contains` implementation[0m
+   [1m[94m--> [0msrc/strategy.rs:741:17
+    [1m[94m|[0m
+[1m[94m741[0m [1m[94m|[0m         assert!(rr >= 2.0 && rr <= 3.0);
+    [1m[94m|[0m                 [1m[91m^^^^^^^^^^^^^^^^^^^^^^[0m [1m[91mhelp: use: `(2.0..=3.0).contains(&rr)`[0m
+    [1m[94m|[0m
+    [1m[94m= [0m[1mhelp[0m: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.94.0/index.html#manual_range_contains
+    [1m[94m= [0m[1mnote[0m: `-D clippy::manual-range-contains` implied by `-D warnings`
+    [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(clippy::manual_range_contains)]`
+
+[1m[91merror[0m: could not compile `xauusd-node4-execution` (bin "xauusd-node4-execution" test) due to 1 previous error
