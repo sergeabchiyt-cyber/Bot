@@ -33,12 +33,13 @@ the stop-loss or take-profit Node 3 sends.
 | `node4-execution/` | The execution service (intent link, venue policy, ledger, adapters, resources, kill switch). |
 | `node4-execution/.env.example` | Every environment variable the service reads, with defaults. |
 | `mt5-bridge/` | Terminal-side bridge: runs next to the MT5 terminal, dials **out** to Node 4 at `WS /mt5/bridge`, routes orders to the EA over loopback. |
+| `node2/` | Read-only demo dashboard (static browser app): Node 1 market data + Node 4 execution state over the published contracts; no strategy, no order submission. See `node2/README.md`. |
 | `docs/mt5/EXECUTION_ARCHITECTURE.md` | MT5 demo topology, the layered guards, the fail-closed order path and the integration gate. |
 | `docs/mt5/FRONTEND_RESOURCES.md` | Field-by-field reference for the JSON/WS resources a frontend can render. |
 | `ci/mt5/protocol_lint.py` | Build gate: fails if the EA ⇄ bridge ⇄ Node 4 contract drifts (methods, params, fields, frames). |
 | `ci/deriv_probe.py`, `ci/deriv/DERIV.md` | Execution-side Deriv probe/report (which contract shapes are actually tradable). |
 | `Dockerfile` | Builds the execution service image only. |
-| `.github/workflows/build.yml` | CI: `node4-execution` (check, fmt, clippy `-D warnings`, tests, release) + `mt5-bridge` (protocol lint, check, contract tests). |
+| `.github/workflows/build.yml` | CI: `node4-execution` (check, fmt, clippy `-D warnings`, tests, release) + `mt5-bridge` (protocol lint, check, contract tests) + `node2` (dashboard test suite). |
 
 ## What Node 4 guarantees
 
