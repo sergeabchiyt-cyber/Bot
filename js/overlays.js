@@ -180,6 +180,4 @@
 
   if (typeof chart.onReset === "function") chart.onReset(refresh);
   if (typeof chart.onCandleUpdate === "function") chart.onCandleUpdate(applyMarker);
-
-  App.overlays = { refresh };
 })((window.App = window.App || {}));

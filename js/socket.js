@@ -336,7 +336,6 @@
     start,
     stop,
     getState,
-    isConnected: () => isOpen(socket),
     sendHeartbeat,
   };
 })((window.App = window.App || {}));

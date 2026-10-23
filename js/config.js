@@ -86,8 +86,6 @@
         lot_step: null,
         fast_ema: null,
         slow_ema: null,
-        momentum_bars: null,
-        tick_pressure_bars: null,
         event_blackout_secs: null,
         leverage: null,
         max_margin_pct: null,

@@ -83,17 +83,6 @@
 
   App.socket.onState(handleSocketState);
 
-  // ---------- Timeframes ----------
-
-  document.querySelectorAll(".tf").forEach((button) => {
-    button.addEventListener("click", () => {
-      if (button.dataset.tf !== "15m" || button.classList.contains("active")) return;
-      if (App.levels) App.levels.reset();
-      if (App.chart) App.chart.loadHistory();
-      if (App.levels) App.levels.fetchAll();
-    });
-  });
-
   // ---------- Boot ----------
 
   setStatus("dashboard starting", "busy");

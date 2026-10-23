@@ -222,8 +222,7 @@
   }
 
   return {
-    DASH, MINUS,
-    num,
+    DASH,
     number, price, lots, money, signedMoney, signedNumber,
     percent, confidence, rMultiple, count,
     time, clock, date, dateTime,

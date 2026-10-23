@@ -57,10 +57,8 @@
   <div id="next-event" class="next-event" hidden aria-live="polite"></div>
 
   <nav class="tfbar" aria-label="Chart timeframe and level legend">
-    <div class="tf-tabs" role="tablist" aria-label="Timeframe">
-      <button class="tf active" data-tf="15m" role="tab" aria-controls="chart" aria-selected="true" tabindex="0">15M</button>
-      <button class="tf" data-tf="1h" role="tab" aria-controls="chart" aria-selected="false" tabindex="-1" disabled title="Coming soon">1H</button>
-      <button class="tf" data-tf="1d" role="tab" aria-controls="chart" aria-selected="false" tabindex="-1" disabled title="Coming soon">1D</button>
+    <div class="tf-tabs" aria-label="Timeframe">
+      <span class="tf active tf-static" aria-current="true">15M</span>
     </div>
     <div class="legend" aria-label="Chart legend">
       <span class="legend-item"><i class="swatch poc"></i>PW PoC</span>

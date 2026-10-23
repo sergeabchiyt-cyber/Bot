@@ -458,14 +458,11 @@
   new ResizeObserver(() => chart.applyOptions(size())).observe(el);
 
   App.chart = {
-    chart,
     series,
-    volumeSeries,
     axis,
     loadHistory,
     updateCandle,
     updateTickVolume,
-    updateTps,
     upsertPriceLine,
     removePriceLine,
     onReset,

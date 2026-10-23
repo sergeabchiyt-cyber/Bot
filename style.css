@@ -323,6 +323,7 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
 .tfbar::-webkit-scrollbar { display: none; }
 
 .tf-tabs { display: flex; gap: 4px; flex: 0 0 auto; }
+.tf-static { cursor: default; }
 
 .tf {
   background: transparent;

@@ -256,13 +256,5 @@
     load();
   }
 
-  App.status = {
-    start,
-    load,
-    ingest,
-    render,
-    isOpen: () => open,
-    setOpen,
-    getState: () => status,
-  };
+  App.status = { start, ingest, render };
 })((window.App = window.App || {}));

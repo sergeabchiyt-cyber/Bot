@@ -242,11 +242,5 @@
     }
   }
 
-  /** Drop only the level lines; position lines belong to overlays.js. */
-  function reset() {
-    for (const w of cfg.levelWindows) clearWindow(w);
-    render();
-  }
-
-  App.levels = { apply, fetchAll, reset };
+  App.levels = { apply, fetchAll };
 })((window.App = window.App || {}));

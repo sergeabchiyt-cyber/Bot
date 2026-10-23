@@ -481,7 +481,6 @@
     load,
     poll: load,
     applySnapshot,
-    render,
     getState,
     onUpdate(listener) {
       if (typeof listener !== "function") return () => {};
