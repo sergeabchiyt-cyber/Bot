@@ -35,6 +35,7 @@ the stop-loss or take-profit Node 3 sends.
 | `mt5-bridge/` | Terminal-side bridge: runs next to the MT5 terminal, dials **out** to Node 4 at `WS /mt5/bridge`, routes orders to the EA over loopback. |
 | `docs/mt5/EXECUTION_ARCHITECTURE.md` | MT5 demo topology, the layered guards, the fail-closed order path and the integration gate. |
 | `docs/mt5/FRONTEND_RESOURCES.md` | Field-by-field reference for the JSON/WS resources a frontend can render. |
+| `docs/node1/` | Read-only audit of the Node 1 market-data boundary and the draft v1 feed contract (documentation only — Node 4 is **not** a consumer of that feed; the code lives on the `Node1` branch). |
 | `ci/mt5/protocol_lint.py` | Build gate: fails if the EA ⇄ bridge ⇄ Node 4 contract drifts (methods, params, fields, frames). |
 | `ci/deriv_probe.py`, `ci/deriv/DERIV.md` | Execution-side Deriv probe/report (which contract shapes are actually tradable). |
 | `Dockerfile` | Builds the execution service image only. |
