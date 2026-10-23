@@ -137,6 +137,11 @@ impl MarketFeed {
         snapshot
     }
 
+    /// True only while every contract, freshness and age condition holds.
+    pub fn is_trading_ready(&self) -> bool {
+        self.snapshot().trading_ready
+    }
+
     /// The execution gate. A local strategy intent is refused unless every
     /// contract, sequence, freshness and age condition still holds.
     pub fn gate_check(&self) -> Result<(), IntentRejection> {
