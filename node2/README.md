@@ -114,6 +114,17 @@ Notes:
   `/strategy` and `/demo`; the panels degrade to explicit
   "endpoint unavailable" states instead of failing.
 
+## Relationship to the earlier Node 1-only dashboard
+
+The `Node2` branch carries an earlier, mature Node 1-only dashboard (plain
+scripts, `MARKET_HOST` override, its own test suite). It was inspected per the
+handoff: it is already read-only by construction (no `POST`/`PUT`/`DELETE`, no
+order ticket, no broker credentials) and its `strategy-math` is presentation
+math only — no local trading decisions. This implementation supersedes it by
+adding the Node 4 execution surface (items 3–4 of the handoff), the lifecycle
+rendering rules, the security scan, and the dev/mock server, while keeping the
+same read-only posture and demo indicators.
+
 ## Security constraints (enforced by tests)
 
 - No tokens/credentials in browser code: `tests/security.test.js` scans
