@@ -355,9 +355,7 @@ impl DemoEngine {
     }
 
     fn check_exits(&mut self, ts: i64) -> Option<DemoTrade> {
-        let Some(position) = self.position.as_ref() else {
-            return None;
-        };
+        let position = self.position.as_ref()?;
         let side = position.side;
         let stop = position.stop_loss;
         let target = position.take_profit;
