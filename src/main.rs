@@ -1,14 +1,13 @@
 mod ai_cache;
-mod binance_ws;
 mod calendar;
 mod config;
+mod demo_engine;
 mod econ_monitor;
 mod mcp_client;
-mod multi_exchange;
-mod order_flow;
 mod sifting_rest;
 mod sifting_ws;
 mod status;
+mod strategy;
 mod tick_volume;
 mod types;
 mod volume_profile;
@@ -22,8 +21,9 @@ use tracing_subscriber::EnvFilter;
 
 use ai_cache::AiCache;
 use config::Config;
-use order_flow::OrderFlowAnalyzer;
+use demo_engine::{DemoEngine, DemoParams};
 use status::FeedStatus;
+use strategy::{StrategyEngine, StrategyInput, StrategyParams};
 use tick_volume::TickVolumeStore;
 use types::{VpCandle, WsFrame};
 use volume_profile::VolumeProfileEngine;
@@ -83,6 +83,28 @@ fn level_changed(previous: &[types::VpLevels], next: &types::VpLevels) -> bool {
         .is_none_or(|old| !same_level_values(old, next))
 }
 
+/// Nearest high-impact USD event in the cached calendar snapshot, in epoch ms.
+/// Feeds the strategy's news blackout so the engine stands aside either side of
+/// a print instead of paying the spread into it.
+fn nearest_high_impact_event(calendar: &serde_json::Value, now_ms: i64) -> Option<i64> {
+    let events = calendar.get("events")?.as_array()?;
+    events
+        .iter()
+        .filter(|event| {
+            let flagged = event
+                .get("gold_relevant")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            let high_impact = event
+                .get("impact")
+                .and_then(|value| value.as_str())
+                .is_some_and(|impact| impact.eq_ignore_ascii_case("high"));
+            flagged || high_impact
+        })
+        .filter_map(|event| event.get("timestamp").and_then(|value| value.as_i64()))
+        .min_by_key(|ts| (ts - now_ms).abs())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -97,9 +119,8 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let (bc_tx, _) = broadcast::channel(4096);
-    let (tick_tx, mut tick_rx) = mpsc::channel(8192);
-    // Sifting is the sole live price/candle source. Binance remains on the
-    // separate aggTrade channel below for order flow only.
+    // SiftingIO is the sole live price, candle and tick-volume source, so the
+    // chart, the profiles and the strategy all read one price series.
     let (sifting_candle_tx, mut sifting_candle_rx) = mpsc::channel::<VpCandle>(256);
     // Fine 1m bars feed PW/PS/CW. The chart and swing detector stay on 15m.
     let (sifting_profile_candle_tx, mut sifting_profile_candle_rx) =
@@ -297,7 +318,9 @@ async fn main() -> anyhow::Result<()> {
                 seeded = true;
             }
             Err(e) => {
-                warn!("SiftingIO REST history fetch failed; refusing Binance price fallback: {e}")
+                warn!(
+                    "SiftingIO REST history fetch failed; the chart/profile seed is unavailable: {e}"
+                )
             }
         }
     } else {
@@ -305,7 +328,7 @@ async fn main() -> anyhow::Result<()> {
     }
     // CI / air-gapped fallback: upstream history is unavailable on hosted
     // runners, so allow deterministic synthetic candles only when explicitly
-    // requested. This is never enabled by default and is not a Binance path.
+    // requested. This is never enabled by default.
     if !seeded && config.seed_synthetic_candles {
         let candles = synthetic_history(chrono::Utc::now().timestamp_millis());
         warn!(
@@ -358,134 +381,6 @@ async fn main() -> anyhow::Result<()> {
         });
     } else {
         status.set("sifting", "off (no key)");
-    }
-
-    // ---------- Binance order flow (kept deliberately) ----------
-    // Binance aggTrade is used for directional order flow only. It must not
-    // feed candles or volume-profile prices, which all come from SiftingIO.
-    if config.feed_binance {
-        let url = config.binance_ws_url.clone();
-        let tx = tick_tx.clone();
-        let st = status.clone();
-        tokio::spawn(async move {
-            if let Err(e) = binance_ws::run_agg_trade_stream(url, tx, st).await {
-                tracing::error!("aggTrade stream terminated: {e}");
-            }
-        });
-    } else {
-        status.set("binance", "off");
-    }
-
-    // ---------- Additional order flow sources ----------
-    if config.feed_bybit {
-        let tx = tick_tx.clone();
-        let st = status.clone();
-        tokio::spawn(async move {
-            if let Err(e) = multi_exchange::run_bybit_stream(tx, st).await {
-                tracing::error!("Bybit stream terminated: {e}");
-            }
-        });
-    } else {
-        status.set("bybit", "off");
-    }
-
-    if config.feed_okx {
-        let tx = tick_tx.clone();
-        let st = status.clone();
-        tokio::spawn(async move {
-            if let Err(e) = multi_exchange::run_okx_stream(tx, st).await {
-                tracing::error!("OKX stream terminated: {e}");
-            }
-        });
-    } else {
-        status.set("okx", "off");
-    }
-
-    if config.feed_bitget {
-        let tx = tick_tx.clone();
-        let symbol = config.bitget_symbol.clone();
-        let st = status.clone();
-        tokio::spawn(async move {
-            if let Err(e) = multi_exchange::run_bitget_stream(tx, symbol, st).await {
-                tracing::error!("Bitget stream terminated: {e}");
-            }
-        });
-    } else {
-        status.set("bitget", "off");
-    }
-
-    if config.feed_gate {
-        let tx = tick_tx.clone();
-        let symbol = config.gate_symbol.clone();
-        let st = status.clone();
-        tokio::spawn(async move {
-            if let Err(e) = multi_exchange::run_gate_stream(tx, symbol, st).await {
-                tracing::error!("Gate stream terminated: {e}");
-            }
-        });
-    } else {
-        status.set("gate", "off");
-    }
-
-    if config.feed_kraken {
-        let tx = tick_tx.clone();
-        let product = config.kraken_product.clone();
-        let st = status.clone();
-        tokio::spawn(async move {
-            if let Err(e) = multi_exchange::run_kraken_stream(tx, product, st).await {
-                tracing::error!("Kraken stream terminated: {e}");
-            }
-        });
-    } else {
-        status.set("kraken", "off");
-    }
-
-    if config.feed_alltick {
-        let tx = tick_tx.clone();
-        let url = config.alltick_ws_url.clone();
-        let code = config.alltick_code.clone();
-        let st = status.clone();
-        tokio::spawn(async move {
-            if let Err(e) = multi_exchange::run_alltick_stream(tx, url, code, st).await {
-                tracing::error!("AllTick stream terminated: {e}");
-            }
-        });
-    } else {
-        status.set("alltick", "off (no token)");
-    }
-
-    if config.feed_itick {
-        let tx = tick_tx.clone();
-        let url = config.itick_ws_url.clone();
-        let symbol = config.itick_symbol.clone();
-        let st = status.clone();
-        tokio::spawn(async move {
-            if let Err(e) = multi_exchange::run_itick_stream(tx, url, symbol, st).await {
-                tracing::error!("iTick stream terminated: {e}");
-            }
-        });
-    } else {
-        status.set("itick", "off (no token)");
-    }
-
-    // ---------- Tick consumer (order flow) ----------
-    {
-        let vp = vp.clone();
-        let bc = bc_tx.clone();
-        let st = status.clone();
-        let mut analyzer = OrderFlowAnalyzer::new(20_000);
-        tokio::spawn(async move {
-            while let Some(trade) = tick_rx.recv().await {
-                st.mark_msg("orderflow");
-                analyzer.ingest(&trade);
-                let vp_read = vp.read().await;
-                let events = analyzer.detect_events(&vp_read, trade.price_f64(), 0.90, 0.97);
-                drop(vp_read);
-                for ev in events {
-                    let _ = bc.send(WsFrame::Bubbles { data: ev });
-                }
-            }
-        });
     }
 
     // ---------- Sifting 15m candle consumer (chart + swing) ----------
@@ -650,6 +545,136 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // ---------- Strategy evaluator + demo (paper) execution ----------
+    // Order flow is gone: the allocation is decided from the price series, the
+    // volume profiles and the tick-volume bars. The demo engine is a local
+    // simulator only — no credential, no socket, no order route. Node4 remains
+    // the only real execution path.
+    let start_price = cached_candles
+        .read()
+        .await
+        .last()
+        .map(|candle| candle.close)
+        .unwrap_or(0.0);
+    let boot_ms = chrono::Utc::now().timestamp_millis();
+    let strategy = Arc::new(RwLock::new(StrategyEngine::new(StrategyParams {
+        enabled: config.strategy_enabled,
+        min_confidence: config.strategy_min_confidence,
+        risk_pct: config.strategy_risk_pct,
+        atr_period: config.strategy_atr_period,
+        atr_stop_mult: config.strategy_atr_stop_mult,
+        reward_risk: config.strategy_reward_risk,
+        min_lots: config.demo_min_lots,
+        max_lots: config.demo_max_lots,
+        lot_step: config.demo_lot_step,
+        fast_ema: 9,
+        slow_ema: 21,
+        momentum_bars: 8,
+        tick_pressure_bars: 8,
+        event_blackout_secs: config.strategy_event_blackout_secs,
+        leverage: config.demo_leverage,
+        max_margin_pct: 50.0,
+    })));
+    let demo = Arc::new(RwLock::new(DemoEngine::new(
+        DemoParams {
+            enabled: config.demo_enabled && config.strategy_enabled,
+            start_balance: config.demo_start_balance,
+            leverage: config.demo_leverage,
+            spread: config.demo_spread,
+            min_lots: config.demo_min_lots,
+            max_lots: config.demo_max_lots,
+            lot_step: config.demo_lot_step,
+            stop_out_pct: config.demo_stop_out_pct,
+            cooldown_secs: config.demo_cooldown_secs,
+        },
+        start_price,
+        boot_ms,
+    )));
+    info!(
+        "Strategy + demo: XAUUSD 15m, 1:{:.0} leverage, spread {:.2}, {:.2}-{:.2} lots, balance {:.2}, eval every {}s",
+        config.demo_leverage,
+        config.demo_spread,
+        config.demo_min_lots,
+        config.demo_max_lots,
+        config.demo_start_balance,
+        config.strategy_eval_secs
+    );
+
+    // Mark the demo account to every live candle frame. Sifting broadcasts the
+    // in-progress candle on every accepted tick, so stops, targets and the
+    // stop-out fill against the same price series the chart draws.
+    {
+        let mut rx = bc_tx.subscribe();
+        let demo = demo.clone();
+        let bc = bc_tx.clone();
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(WsFrame::Candle { data }) => {
+                        let closed = demo.write().await.set_price(data.close, data.time);
+                        if closed.is_some() {
+                            let snapshot = demo.read().await.snapshot();
+                            let _ = bc.send(WsFrame::Demo { data: snapshot });
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        });
+    }
+
+    // Evaluate on a timer over *closed* 15m bars, so a decision cannot flicker
+    // on every tick and the demo fills against a stable signal.
+    if config.strategy_enabled {
+        let bc = bc_tx.clone();
+        let demo = demo.clone();
+        let strategy = strategy.clone();
+        let candles = cached_candles.clone();
+        let levels = cached_levels.clone();
+        let ticks = tick_volume.clone();
+        let calendar = cached_calendar.clone();
+        let interval_secs = config.strategy_eval_secs.max(1);
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+            loop {
+                tick.tick().await;
+                let now = chrono::Utc::now().timestamp_millis();
+                let quote = demo.read().await.quote();
+                if quote.mid <= 0.0 {
+                    continue;
+                }
+                let closed_candles = candles.read().await.clone();
+                let profile_levels = levels.read().await.clone();
+                let tick_bars = ticks.snapshot();
+                let calendar_value = calendar.read().await.clone();
+                let equity = demo.read().await.equity();
+
+                let input = StrategyInput {
+                    now_ms: now,
+                    price: quote.mid,
+                    candles: &closed_candles,
+                    levels: &profile_levels,
+                    tick_bars: &tick_bars,
+                    equity,
+                    next_high_impact_event: nearest_high_impact_event(&calendar_value, now),
+                };
+                let decision = strategy.write().await.evaluate(&input);
+
+                let report = demo.write().await.apply(&decision, now);
+                if report.changed() {
+                    info!("demo: {}", report.note);
+                }
+                if let Ok(value) = serde_json::to_value(&decision) {
+                    let _ = bc.send(WsFrame::Strategy { data: value });
+                }
+                let snapshot = demo.read().await.snapshot();
+                let _ = bc.send(WsFrame::Demo { data: snapshot });
+            }
+        });
+    }
+
     // ---------- HTTP + WS server ----------
     let state = AppState {
         tx: bc_tx.clone(),
@@ -661,11 +686,13 @@ async fn main() -> anyhow::Result<()> {
         status: status.clone(),
         config: config.clone(),
         ai: Arc::new(AiCache::new()),
+        strategy: strategy.clone(),
+        demo: demo.clone(),
     };
     let app = ws_server::router(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port)).await?;
     info!(
-        "Listening on 0.0.0.0:{} — /health /status /levels /candles /tick-volume /calendar /ai /ws",
+        "Listening on 0.0.0.0:{} — /health /status /levels /candles /tick-volume /calendar /ai /strategy /demo /ws",
         config.port
     );
     axum::serve(listener, app).await?;

@@ -1,7 +1,9 @@
-# Node1 — market data + volume profile only.
+# Node1 — market data + volume profile + built-in strategy + demo simulator.
 # This image builds the single Node1 crate (`xauusd-engine`). It contains no
-# broker credential, no execution service and no MT5 bridge: Node3 (strategy)
-# and Node4 (execution/MT5) are separate deployments on separate branches.
+# broker credential, no execution service and no MT5 bridge: the demo account
+# (1:1000, 0.10 spread, 0.01-1.00 lots) fills locally and can never reach a
+# broker. Node3 (AI strategy) and Node4 (live execution/MT5) are separate
+# deployments on separate branches.
 FROM rust:1.94-slim AS builder
 WORKDIR /app
 COPY Cargo.toml ./

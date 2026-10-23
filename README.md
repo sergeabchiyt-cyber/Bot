@@ -1,17 +1,28 @@
 # XAUUSD Market Data & Volume Profile Engine — **Node 1**
 
-Node 1 is the **market-data and volume-profile service** for the XAUUSD desk.
+Node 1 is the **market-data, volume-profile and strategy service** for the
+XAUUSD desk.
 
-It ingests live trades from multiple venues, counts tick volume, detects
-order-flow events (bubbles / absorption), computes rolling volume-profile
-levels (PW / PS / CW / swing), pulls the economic calendar straight from the
-ForexFactory weekly feed (browser MCP optional), captures economic-news audio,
-and exposes all of it over a JSON HTTP API and a WebSocket stream.
+It ingests the live SiftingIO spot stream, counts tick volume, computes rolling
+volume-profile levels (PW / PS / CW / swing), pulls the economic calendar
+straight from the ForexFactory weekly feed (browser MCP optional), captures
+economic-news audio, evaluates a built-in strategy from price + profile +
+tick-volume data, and books that strategy in a local **demo (paper) account**
+with **1:1000 leverage, a 0.10 spread and 0.01–1.00 lot sizing** — all exposed
+over a JSON HTTP API and a WebSocket stream.
 
-**Node 1 does not trade.** It holds no broker credential, has no execution
-venue, no order path, and no MT5 bridge. It cannot place, modify or close an
+**Node 1 does not trade live.** It holds no broker credential, has no execution
+venue, no order path, and no MT5 bridge. The demo engine is a simulator: it
+fills against its own prices, offline, and cannot place, modify or close a real
 order. There is no fallback or hidden execution path — the capability is not
 present in this branch at all.
+
+**Order flow was removed.** There is no exchange aggTrade adapter, no
+delta/absorption analyzer and no `bubbles` topic any more. The strategy is
+evaluated from what the engine still owns (candles, volume profiles and
+tick-volume bars) and the result is published on `/strategy` and `/demo`. What
+the dashboard still has to build for these endpoints is spelled out in
+[FRONTEND_NEXT.md](FRONTEND_NEXT.md).
 
 The engine ships no frontend and serves no static files — point any external
 client (dashboard, charting app, script, strategy service) at the endpoints
@@ -23,38 +34,41 @@ below.
 
 | Node | What it is | Where it lives |
 |------|------------|----------------|
-| **Node 1** (this branch) | Market data, tick volume, exchange order flow, volume profile (PW/PS/CW/swing), economic calendar, econ-news audio capture. **Read-only market service.** | `Node1` branch |
-| **Node 2** | Read-only browser dashboard (static site). Consumes Node 1's REST API and market WS topics. | `Node2` branch |
-| **Node 3** | External **strategy** service. Subscribes to Node 1's `candle` and `levels`, runs the AI/sentiment models, decides *whether* to trade. | `Node3` branch |
-| **Node 4** | External **execution / MT5** service. Owns broker credentials, the MT5 bridge and the order path. | `Node-4` branch |
+| **Node 1** (this branch) | Market data, tick volume, volume profile (PW/PS/CW/swing), economic calendar, econ-news audio capture, the built-in **strategy evaluator** and the **demo (paper) engine** (1:1000, 0.10 spread, 0.01–1.00 lots). **No live order path.** | `Node1` branch |
+| **Node 2** | Read-only browser dashboard (static site). Consumes Node 1's REST API and market/strategy/demo WS topics. | `Node2` branch |
+| **Node 3** | External **AI strategy** service. Subscribes to Node 1's `candle` and `levels`, runs the AI/sentiment models. | `Node3` branch |
+| **Node 4** | External **live execution / MT5** service. Owns broker credentials, the MT5 bridge and the real order path. | `Node-4` branch |
 
 Node 1 never depends on Node 3 or Node 4 being available. If either is down,
-Node 1 keeps ingesting feeds, computing profiles and serving market data.
+Node 1 keeps ingesting feeds, computing profiles, evaluating the strategy and
+running the demo account.
 
 ```
                        ┌──────────────────────────────────────────┐
-  upstream feeds  ───► │                NODE 1                    │
-  SiftingIO            │  market data · tick volume · order flow  │
-  Binance / Bybit      │  volume profile (PW/PS/CW/swing)         │
-  OKX / Bitget / Gate  │  economic calendar · econ-news audio     │
-  Kraken / AllTick     │                                          │
-  iTick                │  no broker credential · no order path    │
+  upstream feed   ───► │                NODE 1                    │
+  SiftingIO spot       │  market data · tick volume               │
+                       │  volume profile (PW/PS/CW/swing)         │
+                       │  strategy evaluator (price/VP/ticks)     │
+                       │  demo account 1:1000 · 0.10 · 0.01-1 lot │
+                       │  economic calendar · econ-news audio     │
+                       │  no broker credential · no order path    │
                        └───┬──────────────┬──────────────┬────────┘
                            │              │              │
               market WS    │              │ REST         │ audio_chunk
               candle       │              │ /health      │ learn
               levels       │              │ /status      │
               tick_volume  │              │ /levels /vp  │
-              bubbles      │              │ /candles     │
-              calendar     │              │ /tick-volume │
-              status       │              │ /calendar    │
+              strategy     │              │ /candles     │
+              demo         │              │ /calendar    │
+              calendar     │              │ /strategy    │
+              status       │              │ /demo        │
                            ▼              ▼              ▼
                      ┌──────────┐   ┌──────────┐   ┌──────────┐
                      │  NODE 3  │   │  NODE 2  │   │  NODE 3  │
-                     │ strategy │   │ read-only│   │ AI / NLP │
-                     │ (external)│  │ dashboard│   │(external)│
+                     │ AI model │   │ read-only│   │ AI / NLP │
+                     │(external)│   │ dashboard│   │(external)│
                      └────┬─────┘   └──────────┘   └────┬─────┘
-                          │  decides to trade           │ transcript
+                          │  (operator decides)         │ transcript
                           │                             │ sentiment
                           ▼                             ▼
                      ┌──────────┐                  (back to Node 1
@@ -64,6 +78,7 @@ Node 1 keeps ingesting feeds, computing profiles and serving market data.
                      │ broker    │
                      └──────────┘
 
+  Node 1 ──► Node 2 : market + strategy + demo (read-only)
   Node 1 ──► Node 3 : market data only (candle, levels, audio_chunk, learn)
   Node 3 ──► Node 1 : AI results only (transcript, sentiment, health,
                       prediction) — cached for GET /ai
@@ -75,15 +90,20 @@ Node 1 keeps ingesting feeds, computing profiles and serving market data.
 
 | Node 1 owns | Node 1 does **not** own |
 |---|---|
-| Upstream market / feed adapters | Strategy or signal decisions |
-| Sifting candles and tick volume | Broker execution or fills |
-| Exchange order flow (bubbles) | Account / balance monitoring |
+| The SiftingIO market / feed adapter | Broker execution or real fills |
+| Sifting candles and tick volume | Real account / balance monitoring |
 | Volume-profile calculations | Broker credentials of any kind |
 | PW / PS / CW / swing levels | MT5 bridge or terminal link |
 | Economic calendar + econ-news audio | Execution venues or venue selection |
-| Market REST endpoints | Stake / lot sizing, SL / TP / R:R |
-| Market WebSocket topics | Execution controls (halt, kill switch, …) |
-| Market diagnostics and probes | Order routing, reconciliation |
+| The built-in strategy evaluation | Broker order routing or reconciliation |
+| The demo account (simulated fills, PnL, margin) | Execution controls (halt, kill switch, …) |
+| Market + strategy REST endpoints | Real-money stake / lot sizing on Node 4 |
+| Market WebSocket topics | Order submission of any kind |
+
+The demo engine sizes its own paper position (0.01–1.00 lots, SL/TP from ATR)
+because that is the product being demonstrated. It is still not execution:
+every fill is local, synthetic and priced by the engine, and the sizing never
+leaves Node 1.
 
 ---
 
@@ -98,8 +118,7 @@ There is no `/` route — the engine is API-only.
 
 Node 1 starts with **no broker or execution environment variable set**. Every
 configuration value below is optional; the only credential it ever reads is
-the SiftingIO market-data API key (and the optional AllTick / iTick market-data
-tokens).
+the SiftingIO market-data API key.
 
 ## HTTP endpoints
 
@@ -113,7 +132,9 @@ tokens).
 | `/tick-volume` | Live tick-volume bars built since boot (up/down/flat split, tick rate); newest may be in progress |
 | `/calendar`| Latest economic calendar snapshot (`source`, `count`, `events`) |
 | `/ai`      | What the econ news delivered today: Node 3's `transcript`/`sentiment` frames (+ last health), filtered to the current UTC day |
-| `/ws`      | WebSocket stream — send `{"type":"subscribe","topics":["candle","tick_volume","levels","bubbles","calendar","status","audio_chunk","learn","transcript","sentiment","health","prediction"]}` |
+| `/strategy`| Latest strategy evaluation: `params`, the current `action` (`buy`/`sell`/`flat`), `score`, `confidence`, `atr`, `regime`, `stop_loss`/`take_profit`, `lots` and the `reasons` that produced them, plus the last 120 decisions |
+| `/demo`    | Demo (paper) account: `leverage` (1000), `quote` (bid/ask/mid/spread), `account` (balance/equity/margin/free margin/margin level), the open `position`, `stats` and the last 50 `recent_trades` |
+| `/ws`      | WebSocket stream — send `{"type":"subscribe","topics":["candle","tick_volume","levels","strategy","demo","calendar","status","audio_chunk","learn","transcript","sentiment","health","prediction"]}` |
 
 Every route is **read-only**. There is no `POST`/`PUT`/`PATCH`/`DELETE` route
 anywhere in this service — nothing here accepts an order, a fill or any other
@@ -123,24 +144,29 @@ WebSocket frames are tagged with `type`:
 
 | Direction | Frames |
 |---|---|
-| Node 1 → clients (market) | `candle`, `tick_volume`, `levels`, `bubbles`, `calendar`, `status`, `heartbeat` |
+| Node 1 → clients (market) | `candle`, `tick_volume`, `levels`, `calendar`, `status`, `heartbeat` |
+| Node 1 → clients (strategy + demo) | `strategy` (one evaluation), `demo` (account snapshot) |
 | Node 1 → Node 3 (market/audio) | `audio_chunk`, `learn`, plus the market frames above |
 | Node 3 → Node 1 (AI results) | `transcript`, `sentiment`, `health`, `prediction` |
 | Node 1 → Node 3 (requests) | `sentiment_req`, `predict_req` |
 
-The four order-flow colors: `BUY_BUBBLE` green, `SELL_BUBBLE` red, `ABS_BUY`
-blue, `ABS_SELL` orange.
+**Order flow is no longer published.** The `bubbles` topic and its four event
+kinds (`BUY_BUBBLE`, `SELL_BUBBLE`, `ABS_BUY`, `ABS_SELL`) were removed
+together with the exchange aggTrade adapters and the delta/absorption
+analyzer. A client that subscribes to `bubbles` gets no frames — it is not an
+error, but nothing will ever arrive.
 
 There is **no `trades` topic**. Node 1 does not accept, parse or forward a
 trade/execution/fill frame — orders are Node 4's job, and Node 4 is not
-reachable from Node 1. Exchange *trade ticks* (`AggTrade`) are unaffected:
-they are inbound market data from the upstream venues and are what the
-order-flow `bubbles` are computed from.
+reachable from Node 1. The demo fills are internal bookkeeping, not frames:
+`demo` reports the account, it never accepts an order.
 
 Subscribing to `levels` replays the cached profiles. Subscribing to `candle`
 replays the latest 15 cached 15-minute OHLC bars (enough for Node 3 to seed
 ATR(14)); `/candles` remains the full chart-history endpoint. Subscribing to
-`tick_volume` replays the live bars built since boot.
+`tick_volume` replays the live bars built since boot. Subscribing to `strategy`
+replays the latest evaluation, and `demo` replays the current account
+snapshot (same shapes as `/strategy`'s `last` and `/demo`).
 
 ### Tick volume
 
@@ -172,14 +198,94 @@ frame for the same 15m bucket:
 * Subscribing to `tick_volume` replays the live bars built since boot, the
   same list as `GET /tick-volume`.
 
+### Strategy and demo trading (order flow removed)
+
+The strategy no longer reads order flow. It is evaluated every
+`STRATEGY_EVAL_SECS` (default 15 s) from three things Node 1 already owns:
+
+| Input | Where it comes from | How it is used |
+|---|---|---|
+| Closed 15m bars | `/candles` cache (SiftingIO) | EMA(9)/EMA(21) trend, momentum, ATR(14) |
+| Volume profiles | `PW` → `PS` → `CW`, swing | value-area location, POC/VAH/VAL reactions |
+| Tick-volume bars | `/tick-volume` | up/down tick pressure (tick rule, never delta) |
+
+Six weighted factors produce a score in `-1..1`; the sign is the direction and
+`confidence = |score| × (0.55 + 0.45 × agreement)`. Each factor is published in
+`reasons` with its `value`, `weight`, `contribution` and a human-readable
+`detail`, so the dashboard can show *why* the engine did (or did not) take the
+trade. A high-impact USD event inside `STRATEGY_EVENT_BLACKOUT_SECS` (default
+15 min) forces `flat` instead of trading into the print.
+
+Sizing is risk-based and always lands on the 0.01 lot grid:
+
+```
+stop distance   = ATR(14) × STRATEGY_ATR_STOP_MULT   (default 1.5)
+risk budget     = equity × STRATEGY_RISK_PCT / 100   (default 0.5 %)
+lots            = risk budget / (stop distance × 100 oz per lot)
+lots            = floor to 0.01, clamped to [0.01, 1.00] and to a 50 % margin cap
+take profit     = entry ± stop distance × STRATEGY_REWARD_RISK   (default 2.0)
+```
+
+The demo engine books that decision on the desk's contract:
+
+| Parameter | Value |
+|---|---|
+| Instrument | XAUUSD, 100 oz per lot |
+| Leverage | **1:1000** (margin = notional / 1000) |
+| Spread | **0.10** price units — buy fills at the ask, exits at the bid |
+| Size | **0.01 – 1.00 lots**, 0.01 step |
+| Starting balance | `DEMO_START_BALANCE` (default 10,000 USD) |
+| Exits | stop loss, take profit, opposite signal, or margin stop-out at `DEMO_STOP_OUT_PCT` |
+| Re-entry | after a stop-driven exit the simulator waits `DEMO_COOLDOWN_SECS` (default 60 s) so it cannot re-enter at the price that just stopped it out |
+
+`GET /strategy` and the `strategy` WS topic carry one evaluation:
+
+```json
+{"ts":1758874500000,"symbol":"XAUUSD","action":"buy","score":0.77,"confidence":0.77,
+ "price":3419.80,"atr":1.80,"regime":"trend_up","volatility":"normal",
+ "stop_loss":3417.10,"take_profit":3425.20,"reward_risk":2.0,
+ "lots":0.18,"risk_usd":48.60,
+ "reasons":[{"name":"trend","value":1.0,"weight":0.3,"contribution":0.3,
+             "detail":"EMA9 3415.10 vs EMA21 3409.32"}],
+ "notes":[],"next_event_ts":null}
+```
+
+`GET /demo` and the `demo` WS topic carry the account:
+
+```json
+{"enabled":true,"mode":"demo","symbol":"XAUUSD","leverage":1000,
+ "quote":{"bid":3419.75,"ask":3419.85,"mid":3419.80,"spread":0.1,"ts":1758874500000},
+ "account":{"currency":"USD","balance":10000.0,"equity":10001.5,"margin":615.57,
+            "free_margin":9385.93,"margin_level":1624.7,"unrealized_pnl":1.5,
+            "peak_equity":10001.5,"max_drawdown_pct":0.0},
+ "position":{"id":1,"side":"buy","lots":0.18,"entry":3419.85,"stop_loss":3417.1,
+             "take_profit":3425.2,"opened_at":1758874500000,"risk_usd":49.5,
+             "margin":615.57,"unrealized_pnl":1.5,"reason":"trend + value_location + momentum"},
+ "params":{"start_balance":10000.0,"leverage":1000.0,"spread":0.1,"min_lots":0.01,
+           "max_lots":1.0,"lot_step":0.01,"stop_out_pct":50.0,"cooldown_secs":60},
+ "stats":{"closed_trades":0,"wins":0,"losses":0,"win_rate":0.0,"gross_profit":0.0,
+          "gross_loss":0.0,"net_pnl":0.0,"profit_factor":0.0,"avg_r":0.0,
+          "max_drawdown_pct":0.0},
+ "recent_trades":[],"note":"opened buy 0.18 lot(s) at 3419.85","ts":1758874500000}
+```
+
+Both routes are `GET` only: there is no way to submit, modify or close anything
+from a client. The demo is a local simulator — the same code path would have to
+be rewritten as a network client before it could reach a broker, and
+`ci/check_node1_boundary.py` fails the build if a socket, a broker credential or
+a write route appears in either module.
+
+What the dashboard still has to build for these payloads is written up in
+[FRONTEND_NEXT.md](FRONTEND_NEXT.md).
+
 ### CORS (browser clients)
 
 The dashboard (Node 2, `https://static-dash-frontend.onrender.com`) is a static
 site on its own origin, so it reads these routes cross-origin. `CorsLayer` is
 applied to the whole router and allows **exactly one origin**, `CORS_ALLOWED_ORIGIN`:
 
-* `GET /health|/levels|/vp|/candles|/tick-volume|/calendar|/status|/ai` from
-  that origin get `access-control-allow-origin: <origin>`, plus
+* `GET /health|/levels|/vp|/candles|/tick-volume|/calendar|/status|/ai|/strategy|/demo`
+  from that origin get `access-control-allow-origin: <origin>`, plus
   `vary: origin, ...` so a shared cache can never hand our grant to a different
   requester.
 * Any other `Origin` (and requests with no `Origin`, e.g. curl or another
@@ -200,50 +306,49 @@ the layer simply never matches.
 
 ## Data sources
 
-| Feed    | What it provides | Needs |
-|---------|------------------|-------|
-| `binance` | XAUUSDT Futures aggTrade (order flow only) | — |
-| `bybit`   | XAUUSDT linear trades (order flow) | — |
-| `okx`     | XAU-USDT-SWAP trades (order flow) | — |
-| `bitget`  | XAUTUSDT trades (order flow) | — |
-| `gate`    | XAUT_USDT futures trades (order flow) | — |
-| `kraken`  | PF_XAUTUSD trade feed (order flow) | — |
-| `alltick` | Spot XAUUSD ticks | `ALLTICK_TOKEN` |
-| `itick`   | Spot XAUUSD ticks | `ITICK_TOKEN` |
-| `sifting` | Spot XAUUSD REST history + live chart candles | `SIFTING_API_KEY` |
+| Feed      | What it provides | Needs |
+|-----------|------------------|-------|
+| `sifting` | Spot XAUUSD REST history + live chart candles + ticks (tick volume, profiles and the strategy all read it) | `SIFTING_API_KEY` |
 
-Every feed auto-reconnects with status broadcasting; feeds without taker-side
-data count toward volume but never toward delta.
+One feed, one price domain. The exchange aggTrade adapters (`binance`, `bybit`,
+`okx`, `bitget`, `gate`, `kraken`) and the spot-tick adapters (`alltick`,
+`itick`) existed only to feed the order-flow analyzer and were removed with it.
+SiftingIO is the sole market-data source, so the chart, every profile and the
+strategy cannot disagree about the price.
 
-All of these are **market data** feeds. None of them is a broker, an execution
-venue or an order route.
+The feed auto-reconnects with status broadcasting. It is a **market data**
+feed: not a broker, not an execution venue, not an order route.
 
 ## Environment variables (all optional)
 
 Every variable below is owned by Node 1. There is no Deriv, Chelsea, MT5,
-execution-venue, stake, lot-size or SL/TP/R:R variable in this service — those
-live on Node 4 and are not read here.
+execution-venue or broker order variable in this service — those live on Node 4
+and are not read here. The `DEMO_*` variables configure the paper simulator
+(1:1000, 0.10 spread, 0.01–1.00 lots); they can never reach a broker.
 
 ```
 # ---- Server ----
 PORT=3000
 
 # ---- Market data / feeds ----
-BINANCE_SYMBOL=XAUUSDT                      # builds BINANCE_WS_URL
-BINANCE_WS_URL=                             # default wss://fstream.binance.com/ws/<symbol>@aggTrade
 SIFTING_API_KEY=                            SIFTING_SYMBOL=XAUUSD
 SIFTING_WS_URL=wss://stream.sifting.io/ws/v1
 SIFTING_HIST_URL=https://api.sifting.io
 
-# Feed switches: on | off | auto   (auto = on for keyless public feeds, and for
-# tokened feeds only when the token exists)
-FEED_BINANCE=auto     FEED_BYBIT=auto      FEED_OKX=auto
-FEED_BITGET=auto      FEED_GATE=auto       FEED_KRAKEN=auto
-FEED_ALLTICK=auto     FEED_ITICK=auto      FEED_SIFTING=auto
+# Feed switch: on | off | auto   (auto = on only when SIFTING_API_KEY exists)
+FEED_SIFTING=auto
 
-BITGET_SYMBOL=XAUTUSDT      GATE_SYMBOL=XAUT_USDT       KRAKEN_PRODUCT=PF_XAUTUSD
-ALLTICK_TOKEN=              ALLTICK_WS_URL=             ALLTICK_CODE=XAUUSD
-ITICK_TOKEN=                ITICK_WS_URL=               ITICK_SYMBOL=XAUUSD
+# ---- Strategy evaluator (price + volume profile + tick volume) ----
+STRATEGY_ENABLED=true        STRATEGY_EVAL_SECS=15
+STRATEGY_MIN_CONFIDENCE=0.55 STRATEGY_RISK_PCT=0.5
+STRATEGY_ATR_PERIOD=14       STRATEGY_ATR_STOP_MULT=1.5   STRATEGY_REWARD_RISK=2.0
+STRATEGY_EVENT_BLACKOUT_SECS=900   # stand aside either side of a high-impact USD print
+
+# ---- Demo (paper) engine: XAUUSD, 1:1000, 0.10 spread, 0.01-1.00 lots ----
+DEMO_ENABLED=true            DEMO_START_BALANCE=10000
+DEMO_LEVERAGE=1000           DEMO_SPREAD=0.10
+DEMO_MIN_LOTS=0.01           DEMO_MAX_LOTS=1.00          DEMO_LOT_STEP=0.01
+DEMO_STOP_OUT_PCT=50         DEMO_COOLDOWN_SECS=60
 
 # ---- Browser MCP (calendar fallback + econ coverage discovery) ----
 MCP_BROWSER_URL=http://localhost:3001     MCP_BROWSER_TOKEN=
@@ -306,7 +411,7 @@ Tool names are discovered via `tools/list` (`browser_navigate` +
 
 The chart and swing seed is one SiftingIO REST request for **exactly 2,000**
 latest 15m candles; a short or invalid page is rejected rather than padded or
-replaced with Binance prices. SiftingIO's REST history can lag its own live
+replaced with another venue's prices. SiftingIO's REST history can lag its own live
 stream (measured: the newest seeded bar was 15 hours behind the live bucket),
 and the live stream only ever appends from *now*, so the boot path also asks
 for the tail explicitly (`order=asc` from the seed's edge) and merges it —
@@ -320,8 +425,8 @@ the PW start through the most recently completed minute, so weekly profiles
 don't smear each 15m candle's entire volume across its full wick range. Live
 Sifting ticks are folded into completed 1m profile bars and 15m chart/swing
 bars. If the 1m history does not cover the PW window, the engine logs a warning
-and falls back to the 15m profile input; Binance remains isolated to the
-aggTrade order-flow analyzer.
+and falls back to the 15m profile input, disclosing the coarser resolution in
+`meta.input_interval`.
 
 `PS` describes the last session that **traded**. SiftingIO keeps publishing a
 bodyless bar (`open == close`) for every bucket the venue is shut, and those
@@ -466,10 +571,16 @@ seeds Wilder ATR(14) from those 15 bars; duplicate updates for the current
 the exact Sunday 18:00 New York start candle when that candle exists in the
 history (`PW.start` remains the boundary timestamp).
 
-That is the whole market-data contract. Node 3 decides what to do with it;
-Node 1 does not evaluate a strategy, and Node 3 cannot publish an order back
-through Node 1 (there is no `trades` topic and no order route — orders go to
-Node 4).
+That is the whole market-data contract for Node 3. Node 3 can publish AI
+results back (`transcript`, `sentiment`, `health`, `prediction`, cached for
+`GET /ai`) but cannot publish an order through Node 1: there is no `trades`
+topic and no order route — real orders go to Node 4.
+
+Node 1 also runs its **own** built-in strategy over the same market state. That
+evaluator is local and deterministic (no AI model, no network) and it only ever
+feeds the demo account described above; it never publishes an order to Node 3
+or Node 4, and Node 3 is free to keep its own model — the two are independent
+readers of the same candles, levels and ticks.
 
 For lowest latency, point Node 3's `NODE1_WS_URL` at Node 1's direct secure
 WebSocket endpoint (`wss://<node1-host>/ws`), using provider-private
@@ -537,16 +648,24 @@ bash ci/smoke.sh                     # boots the release binary and asserts:
                                      #   /vp histogram (contiguous rows, volume conservation,
                                      #   POC = heaviest row, VAL <= POC <= VAH),
                                      #   /candles + /tick-volume payload shape, the CORS allow-list,
+                                     #   /strategy + /demo (score/confidence, 0.01-1.00 lot grid,
+                                     #   1:1000 margin, 0.10 spread, equity = balance + PnL),
                                      #   the econ audio pipeline (audio_chunk/learn on /ws, /ai digest)
-                                     #   and that /ws replays levels/15 candles and accepts no
+                                     #   and that /ws replays levels/15 candles, replays strategy+demo,
+                                     #   keeps the removed `bubbles` topic silent and accepts no
                                      #   execution/fill frame
 ```
 
 CI runs all of these on every push. The CORS probes in `ci/smoke.sh` are the
 authoritative proof of the allow-list, since they run against the real release
 binary; `ci/verify_ws.py` does the WebSocket handshake on a raw socket so no
-websocket client library is needed. `ci/check_node1_boundary.py` is the guard
-that keeps execution, broker credentials and MT5 from creeping back in.
+websocket client library is needed. `ci/verify_demo.py` checks the strategy
+payload (brackets on the right side, lot grid, factor maths) and the demo
+account (`equity = balance + PnL`, `free = equity - margin`, margin at 1:1000,
+trade PnL recomputed from entry/exit/lots). `ci/check_node1_boundary.py` is the
+guard that keeps execution, broker credentials and MT5 from creeping back in,
+keeps the removed order-flow path removed, and pins the demo contract
+(1:1000, 0.10, 0.01–1.00).
 
 Live market probes live in `ci/live-probe.sh` (REST payloads + a WebSocket
 sample recorded into `ci/live/`, digested into `ci/LIVE.md`) and run from the
