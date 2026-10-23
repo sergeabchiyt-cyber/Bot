@@ -629,7 +629,7 @@ async fn send_event(
 
 async fn handle_text(
     text: &str,
-    config: &Config,
+    _config: &Config,
     feed: &MarketFeed,
     tx: &mpsc::Sender<FeedEvent>,
 ) -> Result<(), String> {

@@ -215,7 +215,7 @@ async fn main() -> anyhow::Result<()> {
                 "Node 4 ready: local strategy on {} (dry-run unless a venue is configured)",
                 config.node1_ws_url
             );
-            tokio::spawn(node1::run(config.clone(), feed, tx));
+            tokio::spawn(node1::run(config.clone(), feed.clone(), tx));
             strategy_runner::run(config.clone(), feed, shared, strategy_handle, rx).await;
         }
     }
