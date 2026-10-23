@@ -90,13 +90,6 @@ pub enum IntentSource {
 }
 
 impl IntentSource {
-    pub fn label(&self) -> &'static str {
-        match self {
-            IntentSource::Node3 => "node3",
-            IntentSource::Node1Strategy => "node1_strategy",
-        }
-    }
-
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "node3" | "node_3" | "remote" => Some(IntentSource::Node3),

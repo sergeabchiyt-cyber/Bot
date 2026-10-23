@@ -253,6 +253,7 @@ mod tests {
     use crate::execution::ExecutionManager;
     use crate::ledger::ExecutionLedger;
     use crate::node1::MarketFeed;
+    use crate::strategy::Trigger;
     use std::sync::Arc;
 
     fn config() -> Config {

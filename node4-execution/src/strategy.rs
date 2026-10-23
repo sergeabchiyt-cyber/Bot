@@ -144,7 +144,6 @@ enum BreakState {
 #[derive(Debug, Clone)]
 struct LevelTarget {
     name: String,
-    window: String,
     price: f64,
 }
 
@@ -187,23 +186,23 @@ impl StrategyEngine {
     pub fn update_levels(&mut self, level: &Level) {
         match level.window.as_str() {
             "PW" => {
-                self.upsert_level("PW_POC", "PW PoC", "PW", level.poc);
-                self.upsert_level("PW_VAH", "PW VaH", "PW", level.vah);
-                self.upsert_level("PW_VAL", "PW VaL", "PW", level.val);
+                self.upsert_level("PW_POC", "PW PoC", level.poc);
+                self.upsert_level("PW_VAH", "PW VaH", level.vah);
+                self.upsert_level("PW_VAL", "PW VaL", level.val);
             }
             "PS" => {
-                self.upsert_level("PS_POC", "PS PoC", "PS", level.poc);
+                self.upsert_level("PS_POC", "PS PoC", level.poc);
             }
             "CW" => {
-                self.upsert_level("CW_POC", "CW PoC", "CW", level.poc);
-                self.upsert_level("CW_VAH", "CW VaH", "CW", level.vah);
-                self.upsert_level("CW_VAL", "CW VaL", "CW", level.val);
+                self.upsert_level("CW_POC", "CW PoC", level.poc);
+                self.upsert_level("CW_VAH", "CW VaH", level.vah);
+                self.upsert_level("CW_VAL", "CW VaL", level.val);
             }
             _ => {}
         }
     }
 
-    fn upsert_level(&mut self, id: &str, name: &str, window: &str, price: f64) {
+    fn upsert_level(&mut self, id: &str, name: &str, price: f64) {
         if !price.is_finite() || price <= 0.0 {
             return;
         }
@@ -211,7 +210,6 @@ impl StrategyEngine {
             id.to_string(),
             LevelTarget {
                 name: name.to_string(),
-                window: window.to_string(),
                 price,
             },
         );

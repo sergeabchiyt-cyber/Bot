@@ -66,7 +66,6 @@ struct FeedRules {
     stale_ms: i64,
     max_candle_age_ms: i64,
     min_closed_candles: u64,
-    auth: String,
 }
 
 /// Shared, cheap-to-clone feed handle. Diagnostics and the execution gate read
@@ -95,7 +94,6 @@ impl MarketFeed {
             stale_ms: config.node1_stale_ms,
             max_candle_age_ms: config.node1_max_candle_age_ms,
             min_closed_candles: config.node1_min_closed_candles,
-            auth: auth.clone(),
         });
         let mut snapshot = FeedSnapshot {
             enabled: rules.enabled,
