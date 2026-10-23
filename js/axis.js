@@ -220,11 +220,8 @@
   }
 
   App.axis = {
-    BUCKET_SEC: BUCKET_SEC,
-    MIN_FILLER_RUN: MIN_FILLER_RUN,
     create: create,
     isClosedMarketBar: isClosedMarketBar,
-    dropClosedMarketRuns: dropClosedMarketRuns,
     utcClock: utcClock,
   };
 })((window.App = window.App || {}));

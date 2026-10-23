@@ -209,5 +209,5 @@
     setInterval(render, 30000); // keep countdowns / past-dimming fresh
   }
 
-  App.calendar = { ingest, fetchAll, start };
+  App.calendar = { ingest, start };
 })((window.App = window.App || {}));
