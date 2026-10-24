@@ -452,8 +452,35 @@ impl MarketFeed {
     }
 }
 
+fn validate_feed_config(config: &Config) -> Result<(), String> {
+    if !config.node1_feed_enabled {
+        return Err("NODE1_FEED_ENABLED is not set".into());
+    }
+    config.node1_url_allowed()?;
+    config.node1_interval_ms()?;
+    if config.node1_feed_require_auth && config.node1_feed_token.is_none() {
+        return Err("NODE1_FEED_REQUIRE_AUTH=1 but NODE1_FEED_TOKEN is not set".into());
+    }
+    if config.node1_symbol.trim().is_empty() {
+        return Err("NODE1_SYMBOL must not be empty".into());
+    }
+    if config.node1_contract_version.trim().is_empty() {
+        return Err("NODE1_CONTRACT_VERSION must not be empty".into());
+    }
+    Ok(())
+}
+
 /// Run the feed forever with bounded exponential backoff.
 pub async fn run(config: Config, feed: MarketFeed, tx: mpsc::Sender<FeedEvent>) {
+    if let Err(error) = validate_feed_config(&config) {
+        warn!(
+            "Node 1 market feed configuration invalid ({error}); \
+             remaining in fail-closed offline state"
+        );
+        feed.failed(error);
+        futures_util::future::pending::<()>().await;
+        return;
+    }
     let mut backoff = config.node1_reconnect_min_ms.max(100);
     loop {
         feed.begin_connect();

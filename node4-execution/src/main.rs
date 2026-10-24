@@ -58,18 +58,19 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Config::from_env();
 
-    // Fail fast. A process that cannot authenticate to Node 3, or whose venue
-    // configuration contradicts itself, must not look healthy: Node 4 never
-    // guesses a peer, a venue or a fallback.
+    // Log any startup configuration issues up front, then start the HTTP/WS
+    // diagnostics surface in a strict fail-closed state: Node 4 never guesses
+    // a peer, a venue or a fallback, and refuses real-venue orders until every
+    // startup requirement is satisfied.
     let startup_errors = config.startup_errors();
     if !startup_errors.is_empty() {
         for err in &startup_errors {
             error!("startup configuration error: {err}");
         }
-        error!(
-            "refusing to start — Node 4 never guesses a venue and never falls back to another one"
+        warn!(
+            "starting in fail-closed mode — HTTP/WS diagnostics will serve, \
+             but order execution is refused until all startup configuration errors are resolved"
         );
-        std::process::exit(2);
     }
 
     info!("Starting Node 4 (Execution Service)");
