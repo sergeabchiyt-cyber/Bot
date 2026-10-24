@@ -1,13 +1,10 @@
-name: diagnostics-probe
-
-# Probes the deployed Node 4 service (/diagnostics + /ws) from a GitHub runner
-# and writes the report to `ci/DIAGNOSTICS-PROBE.md` on the branch (Actions log
-# downloads redirect off api.github.com, so committing the report is how it is
-# read from a checkout, matching `.github/workflows/deriv-probe.yml`).
+name: Diagnostics Probe
 
 on:
   workflow_dispatch:
   push:
+    branches:
+      - "arena/**"
     paths:
       - "ci/diagnostics_probe.py"
       - ".github/workflows/diagnostics-probe.yml"
@@ -15,58 +12,43 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: diagnostics-probe-${{ github.ref_name }}
-  cancel-in-progress: false
-
 jobs:
   probe:
+    name: Probe live & local Node 4 /diagnostics + /ws
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Install websockets
-        run: python3 -m pip install --quiet "websockets>=12,<16"
-      - name: Probe deployed services
-        run: |
-          set -o pipefail
-          {
-            echo "# Node 4 diagnostics probe"
-            echo
-            echo "Recorded by \`.github/workflows/diagnostics-probe.yml\` on $(date -u '+%Y-%m-%d %H:%M UTC')."
-            echo
-            echo '```'
-            python3 ci/diagnostics_probe.py \
-              "https://execution-southeastasia-sng-main.onrender.com" \
-              "https://strategy-southeastasia-sng-main.onrender.com" 2>&1 || true
-            echo "=== Node 2 deployed config.js ==="
-            curl -sS -m 20 "https://static-dash-frontend.onrender.com/js/config.js" | head -n 65 2>&1 || true
-            echo '```'
-          } | tee /tmp/diagnostics-probe.md
+          ref: ${{ github.ref_name }}
 
-      - name: Publish the report to the branch
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "node4-execution -> target"
+
+      - name: Build node4-execution binary
+        working-directory: node4-execution
+        run: cargo build --bin node4-execution
+
+      - name: Install websockets
+        run: pip install websockets
+
+      - name: Run HTTP + WS diagnostics probe
+        run: python3 ci/diagnostics_probe.py
+
+      - name: Publish probe report to branch
+        if: github.ref_name != ''
         run: |
-          set -u
-          for attempt in 1 2 3 4 5; do
-            git fetch origin "${{ github.ref_name }}"
-            git checkout -B "${{ github.ref_name }}" "origin/${{ github.ref_name }}"
-            git reset --hard "origin/${{ github.ref_name }}"
-            mkdir -p ci
-            cp /tmp/diagnostics-probe.md ci/DIAGNOSTICS-PROBE.md
-            git add -f ci/DIAGNOSTICS-PROBE.md
-            if git diff --cached --quiet; then
-              echo "no change since the last probe"
-              exit 0
-            fi
-            git config user.email ci@example.invalid
-            git config user.name ci
-            git commit -m "ci: node4 diagnostics probe report [skip ci]"
-            if git push origin "${{ github.ref_name }}"; then
-              exit 0
-            fi
-            echo "push lost a race (attempt $attempt); retrying"
-            sleep 5
-          done
-          exit 1
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ci/DIAGNOSTICS-PROBE.md
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "ci: record live and local /diagnostics HTTP + WS probe report [skip ci]"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
