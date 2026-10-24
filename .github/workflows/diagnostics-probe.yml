@@ -1,0 +1,29 @@
+name: diagnostics-probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "ci/diagnostics_probe.py"
+      - ".github/workflows/diagnostics-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install websockets
+        run: python3 -m pip install --quiet "websockets>=12,<16"
+      - name: Probe deployed services
+        run: |
+          python3 ci/diagnostics_probe.py \
+            "https://execution-southeastasia-sng-main.onrender.com" \
+            "https://strategy-southeastasia-sng-main.onrender.com"
+          echo "=== Node 2 deployed config.js ==="
+          curl -sS -m 20 "https://static-dash-frontend.onrender.com/js/config.js" | head -n 65 || true
