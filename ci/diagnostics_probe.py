@@ -212,7 +212,7 @@ async def main() -> int:
         except Exception as e:
             report["dashboard_configs"][url] = {"error": f"{type(e).__name__}: {e}"}
 
-    bin_path = os.environ.get("NODE4_BIN_PATH", "node4-execution/target/debug/node4-execution")
+    bin_path = os.environ.get("NODE4_BIN_PATH", "node4-execution/target/debug/xauusd-node4-execution")
     if os.path.exists(bin_path):
         report["local_binary"] = await probe_local_binary(bin_path)
 

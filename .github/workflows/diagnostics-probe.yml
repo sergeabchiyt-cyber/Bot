@@ -29,9 +29,9 @@ jobs:
         with:
           workspaces: "node4-execution -> target"
 
-      - name: Build node4-execution binary
+      - name: Build xauusd-node4-execution binary
         working-directory: node4-execution
-        run: cargo build --bin node4-execution
+        run: cargo build --bin xauusd-node4-execution
 
       - name: Install websockets
         run: pip install websockets
