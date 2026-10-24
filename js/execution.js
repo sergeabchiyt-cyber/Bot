@@ -225,14 +225,26 @@
    * `{type:"diagnostics",data:{…}}` frames, `{data:{…}}` wrappers and bare
    * REST bodies all normalise to the same shape. Anything else is ignored.
    * There is deliberately no merge with the previous snapshot.
+   *
+   * A Node 4 snapshot is recognised by the sections only Node 4 sends, not by
+   * a bare `timestamp`: a different service answering `/diagnostics` must not
+   * look like a build that forgot `market_feed`.
+   *
+   * `sections` records which additive keys this particular response carried.
+   * Node 4 >= 7f6f071 always sends both, so a `false` here is a build or
+   * transport fact about the service, not a reason to guess at the data.
    */
   function normaliseSnapshot(raw) {
     const record = normalise.unwrapFrame(raw);
     if (!isRecord(record)) return null;
-    const known = ["market_feed", "strategy", "work", "node3", "timestamp", "open_trades", "mt5", "recent_events", "deriv_account"];
-    if (!known.some((key) => own(record, key))) return null;
+    const identifying = ["market_feed", "strategy", "work", "node3", "open_trades", "mt5", "recent_events", "deriv_account"];
+    if (!identifying.some((key) => own(record, key))) return null;
     return {
       timestamp: stamp(record.timestamp),
+      sections: {
+        market_feed: own(record, "market_feed"),
+        strategy: own(record, "strategy"),
+      },
       market_feed: normaliseFeed(record.market_feed),
       strategy: normaliseStrategy(record.strategy),
       work: normaliseWork(record.work),
@@ -343,6 +355,7 @@
   function getState() {
     return {
       snapshot: state.snapshot,
+      sections: state.snapshot ? state.snapshot.sections : null,
       receivedAt: state.receivedAt,
       source: state.source,
       phase,
@@ -447,6 +460,50 @@
    * Before the first snapshot every card says the same calm thing. A failed
    * request is named; a pending one is not dressed up as an error.
    */
+  /** The endpoint an operator can curl to see the same bytes. */
+  function endpointText() {
+    return (cfg && cfg.diagnostics) || "GET /diagnostics";
+  }
+
+  function buildLine(snapshot) {
+    const work = snapshot ? snapshot.work : null;
+    if (!work) return "";
+    const parts = [work.service, work.version, work.role].filter(Boolean);
+    if (!parts.length) return "";
+    const sections = snapshot.sections
+      ? [
+        `market_feed ${snapshot.sections.market_feed ? "present" : "missing"}`,
+        `strategy ${snapshot.sections.strategy ? "present" : "missing"}`,
+      ].join(" \u00b7 ")
+      : "";
+    return `<div class="exec-meta">Node 4 build ${html(parts.join(" \u00b7 "))}${sections ? ` \u00b7 ${html(sections)}` : ""}</div>`;
+  }
+
+  /**
+   * A snapshot without one of the additive sections is never a data problem
+   * the UI can paper over. Node 4 always serialises both, so the card explains
+   * which layer is wrong instead of showing an empty panel.
+   */
+  function missingSection(snapshot, which) {
+    const other = which === "market_feed" ? "strategy" : "market_feed";
+    const label = which === "market_feed" ? "market_feed" : "strategy";
+    const title = which === "market_feed" ? "Market feed state unavailable" : "Local strategy state unavailable";
+    const endpoint = `<code class="exec-id">${html(endpointText())}</code>`;
+    const work = snapshot ? snapshot.work : null;
+    const build = work && (work.service || work.version)
+      ? ` Reported build: ${html([work.service, work.version, work.role && `role ${work.role}`].filter(Boolean).join(" \u00b7 "))}.`
+      : "";
+    const bothMissing = !snapshot || !snapshot.sections || !snapshot.sections[other];
+    const detail = bothMissing
+      ? `${endpoint} returned a snapshot with neither market_feed nor strategy. Node 4 from `
+        + "7f6f071 (PR #44) always serialises both, even in node3 mode, so this response comes from "
+        + `an older build \u2014 redeploy Node 4 from the Node-4 branch.${build}`
+      : `This snapshot has ${html(other)} but no ${html(label)}. Node 4 serialises both sections `
+        + "together, so either the build is older than 7f6f071 (PR #44) or something between the "
+        + `browser and ${endpoint} is dropping fields.${build}`;
+    return `${statusRow("warn", title)}<p class="exec-note">${detail}</p>`;
+  }
+
   function noSnapshot() {
     if (!cfg || !cfg.diagnostics) {
       return unavailable("Node 4 not configured",
@@ -475,11 +532,8 @@
     }).join("")}</div>`;
   }
 
-  function feedMarkup(feed, strategy) {
-    if (!feed) {
-      return unavailable("Market feed state unavailable",
-        "This Node 4 snapshot does not include market_feed. The rest of the dashboard is unaffected.");
-    }
+  function feedMarkup(feed, strategy, snapshot) {
+    if (!feed) return missingSection(snapshot, "market_feed");
     const view = describeFeed(feed);
     const reason = view.ready === false
       ? (view.reason
@@ -530,11 +584,8 @@
     return `<span class="action-badge is-unknown">${html(value ? value.toUpperCase() : DASH)}</span>`;
   }
 
-  function strategyMarkup(strategy) {
-    if (!strategy) {
-      return unavailable("Local strategy state unavailable",
-        "This Node 4 snapshot does not include strategy. The rest of the dashboard is unaffected.");
-    }
+  function strategyMarkup(strategy, snapshot) {
+    if (!strategy) return missingSection(snapshot, "strategy");
     const counters = [
       ["breaks detected", strategy.breaks_detected, "Breakouts detected by the state machine."],
       ["breaks invalidated", strategy.breaks_invalidated, "Breaks invalidated before a retest."],
@@ -587,10 +638,10 @@
       ${strategy.last_error ? note(`Last strategy error: ${strategy.last_error}`, "is-bad") : ""}`;
   }
 
-  function venueMarkup(work) {
+  function venueMarkup(work, snapshot) {
     if (!work) {
       return unavailable("Execution telemetry unavailable",
-        "This Node 4 snapshot does not include work.");
+        `This snapshot has no work block, so \`GET ${endpointText()}\` is not a Node 4 ExecutionSnapshot.`);
     }
     const dryRun = work.venue === "none";
     const known = work.venue !== null;
@@ -609,6 +660,7 @@
         ${cell("Duplicates rejected", countText(duplicates))}
         ${cell("Orders unknown", countText(work.orders_unknown))}
       </dl>
+      ${buildLine(snapshot)}
       ${duplicates ? note("Replayed intents are dropped by design; duplicates rejected is the expected count after a reconnect, not an error.") : ""}
       ${work.last_error ? note(`Last execution error: ${work.last_error}`, "is-bad") : ""}`;
   }
@@ -667,9 +719,9 @@
         snapshot.node3.connected === true ? "live" : "warn");
     } else paintState("exec-node3-mode", DASH, "");
 
-    paint("exec-feed-body", snapshot ? feedMarkup(feed, strategy) : noSnapshot());
-    paint("exec-strategy-body", snapshot ? strategyMarkup(strategy) : noSnapshot());
-    paint("exec-venue-body", snapshot ? venueMarkup(snapshot.work) : noSnapshot());
+    paint("exec-feed-body", snapshot ? feedMarkup(feed, strategy, snapshot) : noSnapshot());
+    paint("exec-strategy-body", snapshot ? strategyMarkup(strategy, snapshot) : noSnapshot());
+    paint("exec-venue-body", snapshot ? venueMarkup(snapshot.work, snapshot) : noSnapshot());
     paint("exec-node3-body", snapshot ? node3Markup(snapshot.node3, strategy) : noSnapshot());
 
     paintBanner(snapshot ? snapshot.work : null);
@@ -956,6 +1008,7 @@
     normaliseSnapshot,
     describeFeed,
     describeLink,
+    missingSection,
     modeLabel,
     isLocal,
   };

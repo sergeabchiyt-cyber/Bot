@@ -171,7 +171,8 @@ price 2 dp with grouping, lots 2 dp, money 2 dp with `$`, PnL signed, percent
 | socket open but silent | `STALE` badge after 90 s; strategy panel dims after 60 s without a decision |
 | malformed JSON frame | logged, ignored; connection stays up |
 | Node 4 unreachable | execution cards show a calm "waiting / not configured" state; `/diagnostics` polled every 5 s; market panels unaffected |
-| Node 4 older than `market_feed` / `strategy` | those cards read "unavailable"; all other panels render |
+| Node 4 older than `market_feed` / `strategy` | those cards name the endpoint, the reported build and the missing key, and recommend redeploying Node 4; all other panels render |
+| a non-Node-4 service answering `/diagnostics` | payload ignored; the cards keep waiting rather than blaming a missing section |
 | feed `state === "live"` but `trading_ready === false` | market card reads **not ready** in amber; `state` never drives colour |
 | diagnostics frame with cleared counters | the UI resets (replace, never merge) |
 | chart library missing | chart area empty; strategy/demo/levels/calendar still render |

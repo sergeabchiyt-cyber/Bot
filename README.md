@@ -171,9 +171,15 @@ Four read-only cards driven by `ExecutionSnapshot`:
   link state, authentication, last message age and report counters.
 
 When `strategy.mode !== "local"` both the market and strategy cards are
-labelled **monitor only**, even if the feed is `trading_ready`. Missing
-`market_feed` / `strategy` fields (older Node 4) render those cards as
-"unavailable" and never break the rest of the dashboard.
+labelled **monitor only**, even if the feed is `trading_ready`.
+
+**Missing `market_feed` / `strategy`** is a deployment fact, not a data gap:
+Node 4 from `7f6f071` (PR #44) always serialises both keys, so the cards name
+the `/diagnostics` endpoint that answered, the build that answered it and which
+key was absent, and the venue card ends with a one-line
+`market_feed present · strategy present` summary. The rest of the dashboard
+keeps working. Root-cause steps for the Node 4 owner are in
+[`docs/EXECUTION_SNAPSHOT.md`](docs/EXECUTION_SNAPSHOT.md#diagnosing-a-missing-section).
 
 ### Strategy (Node 1 evaluator)
 
@@ -252,8 +258,13 @@ Null, blank and non-finite values always render as `—`. Raw floats, `null` and
 - `closed_trades === 0` — win rate `0.0%`, profit factor `—`.
 - API unreachable — skeleton states, no crash; the socket keeps retrying.
 - malformed frames and hostile strings — rejected or HTML-escaped.
-- Node 4 older than the `market_feed` / `strategy` fields — those cards say
-  "unavailable"; every other panel keeps rendering.
+- Node 4 older than the `market_feed` / `strategy` fields — both cards say so,
+  name the responding build and endpoint, and recommend redeploying Node 4;
+  every other panel keeps rendering.
+- a proxy that drops unknown JSON fields — reported as a partial section
+  (one key present, one absent), because no Node 4 revision sends them apart.
+- `GET /diagnostics` answered by something that is not Node 4 (a bare
+  `timestamp` is not enough) — ignored, the cards keep waiting.
 - stale feed with `state === "live"` — the market card still reads **not
   ready**, driven by `trading_ready`.
 - `node3` mode with a dead link — red; `local` mode with the same link — grey
