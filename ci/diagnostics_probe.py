@@ -202,6 +202,28 @@ async def probe_local_binary(bin_path: str) -> dict:
     return results
 
 
+def probe_extra_endpoints(base_url: str) -> dict:
+    out = {}
+    for path in ["/health", "/scanning", "/mt5/status", "/open-trades"]:
+        url = f"{base_url.rstrip('/')}{path}"
+        req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "node4-diag-probe/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                try:
+                    body = json.loads(raw)
+                    if isinstance(body, dict):
+                        body = {"keys": sorted(body.keys()), "sample": {k: body[k] for k in list(body.keys())[:5] if not isinstance(body[k], (list, dict))}}
+                except Exception:
+                    body = raw[:300]
+                out[path] = {"status": resp.status, "body": body}
+        except urllib.error.HTTPError as e:
+            out[path] = {"status": e.code, "error": f"HTTPError {e.code}"}
+        except Exception as e:
+            out[path] = {"error": f"{type(e).__name__}: {e}"}
+    return out
+
+
 async def main() -> int:
     report = {
         "probed_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
@@ -213,10 +235,12 @@ async def main() -> int:
     for label, base_url in TARGETS:
         http_res = probe_http(base_url)
         ws_res = await probe_ws(base_url)
+        extra_res = probe_extra_endpoints(base_url)
         report["targets"][label] = {
             "base_url": base_url,
             "http_diagnostics": http_res,
             "ws_diagnostics": ws_res,
+            "extra_endpoints": extra_res,
         }
 
     for url in DASHBOARD_CONFIG_URLS:
@@ -256,6 +280,11 @@ async def main() -> int:
         md_lines.append("#### WebSocket `/ws` (`{\"type\":\"subscribe\",\"topics\":[\"diagnostics\"]}`)")
         md_lines.append("```json")
         md_lines.append(json.dumps(data["ws_diagnostics"], indent=2))
+        md_lines.append("```")
+        md_lines.append("")
+        md_lines.append("#### Extra Endpoints (`/health`, `/scanning`, `/mt5/status`, `/open-trades`)")
+        md_lines.append("```json")
+        md_lines.append(json.dumps(data["extra_endpoints"], indent=2))
         md_lines.append("```")
         md_lines.append("")
 
