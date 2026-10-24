@@ -134,6 +134,11 @@ impl LinkShared {
 
     /// The fail-closed pre-write gate, with the exact reason it refuses.
     pub(crate) fn source_gate(&self) -> Result<(), IntentRejection> {
+        if self.config.venue.is_real() {
+            if let Some(err) = self.config.startup_errors().into_iter().next() {
+                return Err(IntentRejection::new("startup_configuration_error", err));
+            }
+        }
         if let Some(feed) = &self.local_feed {
             return feed.gate_check();
         }
@@ -145,6 +150,22 @@ impl LinkShared {
         }
         Ok(())
     }
+}
+
+fn validate_link_config(config: &Config) -> Result<(), String> {
+    let url = config.node3_ws_url.trim();
+    if url.is_empty() {
+        return Err("NODE3_WS_URL is not set".into());
+    }
+    if !(url.starts_with("ws://") || url.starts_with("wss://")) {
+        return Err(format!(
+            "NODE3_WS_URL must be a ws:// or wss:// URL, got '{url}'"
+        ));
+    }
+    if config.node4_shared_token.is_none() {
+        return Err("NODE4_SHARED_TOKEN is not set".into());
+    }
+    Ok(())
 }
 
 /// Run the link forever, reconnecting with bounded exponential backoff.
@@ -165,21 +186,32 @@ pub async fn run(
         local_feed: None,
     };
 
+    if let Err(err) = validate_link_config(&config) {
+        warn!(
+            "Node 3 execution link configuration invalid ({err}); \
+             remaining in fail-closed unconfigured state"
+        );
+        shared.hub.set_node3_error("unconfigured", err).await;
+        futures_util::future::pending::<()>().await;
+        return;
+    }
+
     let mut backoff = config.node3_reconnect_min_ms.max(100);
     loop {
         match connect_once(&shared).await {
             Ok(()) => {
                 // A clean close still means the session ended; reconnect fast.
                 backoff = config.node3_reconnect_min_ms.max(100);
+                shared
+                    .hub
+                    .set_node3_state(false, false, "reconnecting")
+                    .await;
             }
             Err(err) => {
                 warn!("Node 3 link ended: {err}");
+                shared.hub.set_node3_error("reconnecting", err).await;
             }
         }
-        shared
-            .hub
-            .set_node3_state(false, false, "reconnecting")
-            .await;
         let delay = backoff;
         backoff = backoff
             .saturating_mul(2)

@@ -111,18 +111,36 @@ async def probe_ws(base_url: str) -> dict:
 async def probe_local_binary(bin_path: str) -> dict:
     results = {}
 
-    # 1. Verify startup_errors exit(2) when legacy env (no NODE3_WS_URL / NODE4_SHARED_TOKEN) is used
-    proc_unconfigured = subprocess.run(
-        [bin_path],
-        env={"PATH": os.environ.get("PATH", ""), "PORT": "19090", "EXECUTION_VENUE": "none"},
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    results["unconfigured_default_exit"] = {
-        "exit_code": proc_unconfigured.returncode,
-        "output": (proc_unconfigured.stdout + proc_unconfigured.stderr).strip().splitlines()[-10:],
-    }
+    # 1. Verify fail-closed startup when legacy env (no NODE3_WS_URL / NODE4_SHARED_TOKEN) is used
+    with tempfile.TemporaryDirectory() as tmpdir:
+        env_unconfigured = {
+            "PATH": os.environ.get("PATH", ""),
+            "PORT": "19090",
+            "EXECUTION_VENUE": "none",
+            "EXECUTION_LEDGER_FILE": os.path.join(tmpdir, "ledger.jsonl"),
+        }
+        proc = subprocess.Popen(
+            [bin_path],
+            env=env_unconfigured,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        try:
+            http_res = {"ok": False}
+            for _ in range(30):
+                await asyncio.sleep(0.1)
+                http_res = probe_http("http://127.0.0.1:19090")
+                if http_res.get("ok"):
+                    break
+            ws_res = await probe_ws("http://127.0.0.1:19090")
+            results["unconfigured_fail_closed_mode"] = {"http": http_res, "ws": ws_res}
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
 
     # 2. Verify local binary in node1_strategy mode (dry-run)
     with tempfile.TemporaryDirectory() as tmpdir:

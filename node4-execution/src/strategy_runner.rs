@@ -142,6 +142,10 @@ impl Runner {
 
         // The gate is checked immediately before a decision, and again inside
         // the execution pipeline immediately before any broker write.
+        if !self.config.strategy_approved {
+            self.suppress("NODE4_STRATEGY_APPROVED is not set");
+            return;
+        }
         if !self.feed.is_trading_ready() {
             let reason = self
                 .feed

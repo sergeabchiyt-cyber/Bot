@@ -143,6 +143,8 @@ impl DiagnosticsHub {
             ..Default::default()
         };
 
+        let startup_errors = config.startup_errors();
+
         let work = ExecutionWorkDiagnostics {
             service: "xauusd-node4-execution".into(),
             version: env!("CARGO_PKG_VERSION").into(),
@@ -168,7 +170,9 @@ impl DiagnosticsHub {
             orders_reconciled: 0,
             last_intent_ts: None,
             last_report_ts: None,
-            last_error: config.venue_selection_error(),
+            last_error: config
+                .venue_selection_error()
+                .or_else(|| startup_errors.first().cloned()),
             ws_clients_connected: 0,
         };
 
@@ -183,6 +187,14 @@ impl DiagnosticsHub {
                 EXECUTION_PROTOCOL_VERSION
             ),
         });
+        for err in &startup_errors {
+            recent_events.push_front(ActivityLogEntry {
+                timestamp: started_at,
+                level: "warn".into(),
+                category: "system".into(),
+                message: format!("startup configuration error: {err}"),
+            });
+        }
 
         Self {
             inner: Arc::new(RwLock::new(DiagnosticsInner {
@@ -405,6 +417,7 @@ impl DiagnosticsHub {
             inner.node3.state = state.into();
             if connected {
                 inner.node3.reconnect_count = inner.node3.reconnect_count.saturating_add(1);
+                inner.node3.last_error = None;
             }
             if !connected {
                 inner.node3.session_age_secs = None;
@@ -414,6 +427,27 @@ impl DiagnosticsHub {
                 if connected { "info" } else { "warn" },
                 "node3",
                 format!("Node 3 intent link: {state}"),
+            );
+            self.build_snapshot_locked(&inner, self.connected_clients(), &ledger)
+        };
+        let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
+    }
+
+    pub async fn set_node3_error(&self, state: &str, error: impl Into<String>) {
+        let error = error.into();
+        let snap = {
+            let ledger = self.ledger_stats().await;
+            let mut inner = self.inner.write().await;
+            inner.node3.connected = false;
+            inner.node3.authenticated = false;
+            inner.node3.state = state.into();
+            inner.node3.session_age_secs = None;
+            inner.node3.last_error = Some(error.clone());
+            Self::push_event_locked(
+                &mut inner,
+                "warn",
+                "node3",
+                format!("Node 3 intent link ({state}): {error}"),
             );
             self.build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
