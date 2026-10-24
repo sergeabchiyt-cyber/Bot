@@ -72,8 +72,49 @@ impl ExecutionVenue {
     }
 }
 
+/// Where a trade intent comes from.
+///
+/// `Node3` is the original, execution-only topology: Node 4 dials Node 3's
+/// authenticated `/execution` socket and never looks at market data.
+///
+/// `Node1Strategy` is the opt-in local path: Node 4 consumes the versioned
+/// Node 1 market feed, runs the ported `vp_break_retest_v1` strategy itself, and
+/// hands the resulting immutable intent to the *same* execution pipeline.
+/// Selecting it replaces the Node 3 link entirely; the two sources are never
+/// run at the same time, because two strategy inputs could open two positions
+/// for the same market event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntentSource {
+    Node3,
+    Node1Strategy,
+}
+
+impl IntentSource {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "node3" | "node_3" | "remote" => Some(IntentSource::Node3),
+            "node1_strategy" | "node1" | "local" | "local_strategy" => {
+                Some(IntentSource::Node1Strategy)
+            }
+            _ => None,
+        }
+    }
+
+    /// True when Node 4 itself owns the strategy decision.
+    pub fn is_local(&self) -> bool {
+        matches!(self, IntentSource::Node1Strategy)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Config {
+    // ---- Intent source ----------------------------------------------------
+    /// `NODE4_INTENT_SOURCE`: `node3` (default) or `node1_strategy` (opt-in).
+    pub intent_source: IntentSource,
+    /// Set when `NODE4_INTENT_SOURCE` was not one of the accepted values; a
+    /// malformed value must fail startup rather than silently select Node 3.
+    pub intent_source_error: Option<String>,
+
     // ---- Node 3 intent link (outbound WebSocket client) --------------------
     /// `NODE3_WS_URL`: Node 3's authenticated execution endpoint, for example
     /// `wss://<node3-host>/execution`. Node 4 dials out; Node 3 never connects
@@ -153,6 +194,77 @@ pub struct Config {
     /// Malformed `MT5_SYMBOL_MAP` entries collected at load time; surfaced as a
     /// hard error when the MT5 venue is selected.
     pub symbol_map_errors: Vec<String>,
+
+    // ---- Node 1 market-data feed (contract v1, local strategy mode) --------
+    /// `NODE1_FEED_ENABLED`: run the Node 1 consumer. It defaults on in
+    /// `node1_strategy` mode and off in `node3` mode. In `node3` mode it is a
+    /// read-only monitor: the strategy never emits an intent.
+    pub node1_feed_enabled: bool,
+    /// `NODE1_WS_URL`: `wss://<node1-host>/ws` — the market feed.
+    pub node1_ws_url: String,
+    /// `NODE1_FEED_TOKEN`: optional bearer token sent in the WebSocket
+    /// handshake. Contract v1 defines **no** read authentication, so this is
+    /// forward-compatible plumbing, not a security control by itself; set
+    /// `NODE1_FEED_REQUIRE_AUTH=1` to make its absence fatal.
+    pub node1_feed_token: Option<String>,
+    /// `NODE1_FEED_REQUIRE_AUTH`: refuse to run without a feed token.
+    pub node1_feed_require_auth: bool,
+    /// `NODE1_REQUIRE_TLS`: refuse a plaintext `ws://` feed unless the host is
+    /// loopback. Default on.
+    pub node1_require_tls: bool,
+    /// `NODE1_CONTRACT_VERSION`: the exact `contract_version` Node 1 must
+    /// report. Any other value (including a missing one) keeps the feed
+    /// non-trading.
+    pub node1_contract_version: String,
+    /// `NODE1_SYMBOL` and `NODE1_INTERVAL`: the feed identity Node 4 accepts.
+    /// Both are part of every v1 candle/tick-volume frame.
+    pub node1_symbol: String,
+    pub node1_interval: String,
+    /// Silence longer than this (default 75 s = 2.5 × the 30 s heartbeat)
+    /// closes the socket and reconnects.
+    pub node1_heartbeat_timeout_ms: i64,
+    /// Node 1 `freshness.state` older than this is not tradable (default 60 s).
+    pub node1_stale_ms: i64,
+    /// A closed candle older than this (measured from its close) is never a
+    /// trigger (default 30 min = 2 × the 15m interval).
+    pub node1_max_candle_age_ms: i64,
+    /// Reconnect backoff for the Node 1 feed.
+    pub node1_reconnect_min_ms: u64,
+    pub node1_reconnect_max_ms: u64,
+    /// Closed candles that must be observed in a session before the feed is
+    /// allowed to trade (the v1 subscribe replay carries 15).
+    pub node1_min_closed_candles: u64,
+
+    // ---- Local strategy ---------------------------------------------------
+    /// `NODE4_STRATEGY_APPROVED`: the operator asserts that the Node 1 feed
+    /// contract and this strategy specification are signed off for this
+    /// deployment. Required in `node1_strategy` mode — a draft contract must
+    /// never become tradable by accident.
+    pub strategy_approved: bool,
+    /// `NODE4_STRATEGY_VOLUME_THRESHOLD`: candle tick-volume gate (default
+    /// 10,500, exactly Node 3's shipped value).
+    pub strategy_volume_threshold: f64,
+    /// Node 3's price projection: SL/TP in pips (0.01 price units for XAUUSD)
+    /// and the hard risk/reward clamp.
+    pub strategy_sl_min_pips: f64,
+    pub strategy_sl_max_pips: f64,
+    pub strategy_tp_min_pips: f64,
+    pub strategy_tp_max_pips: f64,
+    pub strategy_rr_min: f64,
+    pub strategy_rr_max: f64,
+    /// `NODE4_STRATEGY_TTL_SECS`: intent lifetime (default 120 s).
+    pub strategy_ttl_secs: u64,
+    /// `NODE4_STRATEGY_ATR_FALLBACK`: ATR used before enough candles exist.
+    pub strategy_atr_fallback: f64,
+
+    // ---- Local-path execution gates ---------------------------------------
+    /// `NODE4_DEMO_INTEGRATION_PASSED`: required before a *real* venue may be
+    /// driven by the local strategy. The MT5 demo gate in
+    /// `docs/mt5/EXECUTION_ARCHITECTURE.md` must have passed first.
+    pub demo_integration_passed: bool,
+    /// `NODE4_LIVE_TRADING_APPROVED`: required for `chelsea_live` when the
+    /// local strategy is the intent source. Live remains opt-in.
+    pub live_trading_approved: bool,
 }
 
 fn env_str(key: &str, default: &str) -> String {
@@ -228,6 +340,8 @@ impl Default for Config {
     /// environment stays the single source of truth.
     fn default() -> Self {
         Self {
+            intent_source: IntentSource::Node3,
+            intent_source_error: None,
             node3_ws_url: String::new(),
             node4_shared_token: None,
             protocol_version: EXECUTION_PROTOCOL_VERSION,
@@ -259,6 +373,35 @@ impl Default for Config {
             execution_venue_override: None,
             venue: ExecutionVenue::None,
             symbol_map_errors: Vec::new(),
+
+            node1_feed_enabled: false,
+            node1_ws_url: String::new(),
+            node1_feed_token: None,
+            node1_feed_require_auth: false,
+            node1_require_tls: true,
+            node1_contract_version: "1.0".into(),
+            node1_symbol: "XAUUSD".into(),
+            node1_interval: "15m".into(),
+            node1_heartbeat_timeout_ms: 75_000,
+            node1_stale_ms: 60_000,
+            node1_max_candle_age_ms: 1_800_000,
+            node1_reconnect_min_ms: 1_000,
+            node1_reconnect_max_ms: 30_000,
+            node1_min_closed_candles: 15,
+
+            strategy_approved: false,
+            strategy_volume_threshold: 10_500.0,
+            strategy_sl_min_pips: 200.0,
+            strategy_sl_max_pips: 300.0,
+            strategy_tp_min_pips: 600.0,
+            strategy_tp_max_pips: 800.0,
+            strategy_rr_min: 2.0,
+            strategy_rr_max: 3.0,
+            strategy_ttl_secs: 120,
+            strategy_atr_fallback: 3.0,
+
+            demo_integration_passed: false,
+            live_trading_approved: false,
         }
     }
 }
@@ -266,7 +409,22 @@ impl Default for Config {
 impl Config {
     pub fn from_env() -> Self {
         let (mt5_symbol_map, symbol_map_errors) = env_pairs("MT5_SYMBOL_MAP");
+
+        let intent_source_raw = env_str("NODE4_INTENT_SOURCE", "node3");
+        let (intent_source, intent_source_error) = match IntentSource::parse(&intent_source_raw) {
+            Some(source) => (source, None),
+            None => (
+                IntentSource::Node3,
+                Some(format!(
+                    "NODE4_INTENT_SOURCE='{intent_source_raw}' is not recognised \
+                         (expected node3 | node1_strategy)"
+                )),
+            ),
+        };
+
         let mut config = Self {
+            intent_source,
+            intent_source_error,
             node3_ws_url: env_str("NODE3_WS_URL", ""),
             node4_shared_token: env_opt("NODE4_SHARED_TOKEN"),
             protocol_version: EXECUTION_PROTOCOL_VERSION,
@@ -319,10 +477,73 @@ impl Config {
             execution_venue_override: env_opt("EXECUTION_VENUE"),
             venue: ExecutionVenue::None,
             symbol_map_errors: Vec::new(),
+
+            // The feed is mandatory in local-strategy mode and a read-only
+            // monitor otherwise; an explicit NODE1_FEED_ENABLED=1 turns the
+            // monitor on in Node 3 mode as well.
+            node1_feed_enabled: env_truthy("NODE1_FEED_ENABLED")
+                || intent_source == IntentSource::Node1Strategy,
+            node1_ws_url: env_str("NODE1_WS_URL", ""),
+            node1_feed_token: env_opt("NODE1_FEED_TOKEN"),
+            node1_feed_require_auth: env_truthy("NODE1_FEED_REQUIRE_AUTH"),
+            node1_require_tls: match env::var("NODE1_REQUIRE_TLS") {
+                Ok(value) => !matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "0" | "false" | "no" | "off"
+                ),
+                Err(_) => true,
+            },
+            node1_contract_version: env_str("NODE1_CONTRACT_VERSION", "1.0"),
+            node1_symbol: env_str("NODE1_SYMBOL", "XAUUSD"),
+            node1_interval: env_str("NODE1_INTERVAL", "15m"),
+            node1_heartbeat_timeout_ms: env_u64("NODE1_HEARTBEAT_TIMEOUT_MS", 75_000) as i64,
+            node1_stale_ms: env_u64("NODE1_STALE_MS", 60_000) as i64,
+            node1_max_candle_age_ms: env_u64("NODE1_MAX_CANDLE_AGE_MS", 1_800_000) as i64,
+            node1_reconnect_min_ms: env_u64("NODE1_RECONNECT_MIN_MS", 1_000),
+            node1_reconnect_max_ms: env_u64("NODE1_RECONNECT_MAX_MS", 30_000),
+            node1_min_closed_candles: env_u64("NODE1_MIN_CLOSED_CANDLES", 15),
+
+            strategy_approved: env_truthy("NODE4_STRATEGY_APPROVED"),
+            strategy_volume_threshold: env_f64("NODE4_STRATEGY_VOLUME_THRESHOLD", 10_500.0),
+            strategy_sl_min_pips: env_f64("NODE4_STRATEGY_SL_MIN_PIPS", 200.0),
+            strategy_sl_max_pips: env_f64("NODE4_STRATEGY_SL_MAX_PIPS", 300.0),
+            strategy_tp_min_pips: env_f64("NODE4_STRATEGY_TP_MIN_PIPS", 600.0),
+            strategy_tp_max_pips: env_f64("NODE4_STRATEGY_TP_MAX_PIPS", 800.0),
+            strategy_rr_min: env_f64("NODE4_STRATEGY_RR_MIN", 2.0),
+            strategy_rr_max: env_f64("NODE4_STRATEGY_RR_MAX", 3.0),
+            strategy_ttl_secs: env_u64("NODE4_STRATEGY_TTL_SECS", 120),
+            strategy_atr_fallback: env_f64("NODE4_STRATEGY_ATR_FALLBACK", 3.0),
+
+            demo_integration_passed: env_truthy("NODE4_DEMO_INTEGRATION_PASSED"),
+            live_trading_approved: env_truthy("NODE4_LIVE_TRADING_APPROVED"),
         };
         config.symbol_map_errors = symbol_map_errors;
+        config.normalise_strategy();
         config.resolve_venue();
         config
+    }
+
+    /// Clamp strategy parameters exactly like Node 3's `Config::from_env` did,
+    /// so a malformed environment cannot produce unsafe prices.
+    fn normalise_strategy(&mut self) {
+        self.strategy_ttl_secs = self.strategy_ttl_secs.clamp(5, 3_600);
+        self.strategy_volume_threshold = self.strategy_volume_threshold.max(0.0);
+        self.strategy_sl_min_pips = self.strategy_sl_min_pips.max(1.0);
+        self.strategy_sl_max_pips = self.strategy_sl_max_pips.max(self.strategy_sl_min_pips);
+        self.strategy_tp_min_pips = self.strategy_tp_min_pips.max(1.0);
+        self.strategy_tp_max_pips = self.strategy_tp_max_pips.max(self.strategy_tp_min_pips);
+        self.strategy_rr_min = self.strategy_rr_min.max(0.1);
+        self.strategy_rr_max = self.strategy_rr_max.max(self.strategy_rr_min);
+        self.strategy_atr_fallback =
+            if self.strategy_atr_fallback.is_finite() && self.strategy_atr_fallback > 0.0 {
+                self.strategy_atr_fallback
+            } else {
+                3.0
+            };
+        self.node1_heartbeat_timeout_ms = self.node1_heartbeat_timeout_ms.max(1_000);
+        self.node1_stale_ms = self.node1_stale_ms.max(1_000);
+        self.node1_max_candle_age_ms = self.node1_max_candle_age_ms.max(1_000);
+        self.node1_min_closed_candles = self.node1_min_closed_candles.max(1);
     }
 
     /// Store the venue decision in `venue`, leaving the fail-closed
@@ -349,33 +570,117 @@ impl Config {
         self.venue_decision().err()
     }
 
-    /// Startup errors that must stop the process entirely. A Node 4 that cannot
-    /// authenticate to Node 3, or whose venue configuration is contradictory,
-    /// must not run: it could otherwise appear healthy while executing nothing
-    /// (or something unexpected).
-    pub fn startup_errors(&self) -> Vec<String> {
-        let mut errors = Vec::new();
-        if self.node3_ws_url.trim().is_empty() {
-            errors.push(
-                "NODE3_WS_URL is not set — Node 4 is an outbound client of the strategy \
-                 service and cannot accept intents without it"
-                    .into(),
+    /// Parsed feed interval in milliseconds ("15m", "1h", "1d").
+    pub fn node1_interval_ms(&self) -> Result<i64, String> {
+        parse_interval_ms(&self.node1_interval)
+    }
+
+    /// True when a feed token is configured (sent as a bearer header).
+    pub fn node1_auth_configured(&self) -> bool {
+        self.node1_feed_token.is_some()
+    }
+
+    /// The Node 1 URL may be used with the configured transport policy.
+    ///
+    /// A plaintext `ws://` URL is only accepted for loopback development; every
+    /// remote feed must be `wss://` unless `NODE1_REQUIRE_TLS=0` explicitly
+    /// overrides it (for a trusted private network).
+    pub fn node1_url_allowed(&self) -> Result<(), String> {
+        let url = self.node1_ws_url.trim();
+        if url.is_empty() {
+            return Err(
+                "NODE1_WS_URL is not set — the local strategy needs Node 1's market feed".into(),
             );
-        } else if !(self.node3_ws_url.starts_with("ws://")
-            || self.node3_ws_url.starts_with("wss://"))
-        {
-            errors.push(format!(
-                "NODE3_WS_URL must be a ws:// or wss:// URL, got '{}'",
-                self.node3_ws_url
+        }
+        if !(url.starts_with("ws://") || url.starts_with("wss://")) {
+            return Err(format!(
+                "NODE1_WS_URL must be a ws:// or wss:// URL, got '{url}'"
             ));
         }
-        if self.node4_shared_token.is_none() {
-            errors.push(
-                "NODE4_SHARED_TOKEN is not set — the Node 3 handshake would be rejected \
-                 (set the same value on Node 3 and Node 4)"
-                    .into(),
-            );
+        if url.starts_with("ws://") && self.node1_require_tls {
+            let host = url_host(url).unwrap_or("");
+            let loopback = matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]");
+            if !loopback {
+                return Err(format!(
+                    "NODE1_WS_URL='{url}' is plaintext ws:// for a non-loopback host; the \
+                     market feed must be wss:// (set NODE1_REQUIRE_TLS=0 only on a trusted \
+                     private network)"
+                ));
+            }
         }
+        Ok(())
+    }
+
+    /// Startup errors that must stop the process entirely. A Node 4 that cannot
+    /// authenticate to Node 3, cannot validate its feed contract, or whose venue
+    /// configuration is contradictory must not run: it could otherwise appear
+    /// healthy while executing nothing (or something unexpected).
+    pub fn startup_errors(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+        if let Some(err) = &self.intent_source_error {
+            errors.push(err.clone());
+        }
+
+        match self.intent_source {
+            IntentSource::Node3 => {
+                if self.node3_ws_url.trim().is_empty() {
+                    errors.push(
+                        "NODE3_WS_URL is not set — in `node3` mode Node 4 is an outbound \
+                         client of the strategy service and cannot accept intents without it"
+                            .into(),
+                    );
+                } else if !(self.node3_ws_url.starts_with("ws://")
+                    || self.node3_ws_url.starts_with("wss://"))
+                {
+                    errors.push(format!(
+                        "NODE3_WS_URL must be a ws:// or wss:// URL, got '{}'",
+                        self.node3_ws_url
+                    ));
+                }
+                if self.node4_shared_token.is_none() {
+                    errors.push(
+                        "NODE4_SHARED_TOKEN is not set — the Node 3 handshake would be rejected \
+                         (set the same value on Node 3 and Node 4)"
+                            .into(),
+                    );
+                }
+            }
+            IntentSource::Node1Strategy => {
+                if !self.node1_feed_enabled {
+                    errors.push(
+                        "NODE1_FEED_ENABLED must be 1 when NODE4_INTENT_SOURCE=node1_strategy"
+                            .into(),
+                    );
+                }
+                if !self.strategy_approved {
+                    errors.push(
+                        "NODE4_STRATEGY_APPROVED is not set — `node1_strategy` mode runs a \
+                         ported strategy against a draft feed contract; set it only after the \
+                         Node 1 contract and this strategy specification are signed off"
+                            .into(),
+                    );
+                }
+            }
+        }
+
+        if self.node1_feed_enabled {
+            if let Err(err) = self.node1_url_allowed() {
+                errors.push(err);
+            }
+            if let Err(err) = self.node1_interval_ms() {
+                errors.push(err);
+            }
+            if self.node1_feed_require_auth && self.node1_feed_token.is_none() {
+                errors.push("NODE1_FEED_REQUIRE_AUTH=1 but NODE1_FEED_TOKEN is not set".into());
+            }
+            if self.node1_symbol.trim().is_empty() {
+                errors.push("NODE1_SYMBOL must not be empty".into());
+            }
+            if self.node1_contract_version.trim().is_empty() {
+                errors.push("NODE1_CONTRACT_VERSION must not be empty".into());
+            }
+        }
+
         if let Some(err) = self.venue_selection_error() {
             errors.push(format!("execution venue configuration error: {err}"));
         }
@@ -385,6 +690,23 @@ impl Config {
             }
             if self.validation_stake().is_err() {
                 errors.push(self.validation_stake().unwrap_err());
+            }
+            if self.intent_source.is_local() {
+                if self.venue == ExecutionVenue::ChelseaLive && !self.live_trading_approved {
+                    errors.push(
+                        "EXECUTION_VENUE=chelsea_live is a live venue; set \
+                         NODE4_LIVE_TRADING_APPROVED=1 only after the demo integration gate has \
+                         passed and live trading is explicitly approved"
+                            .into(),
+                    );
+                }
+                if !self.demo_integration_passed {
+                    errors.push(
+                        "NODE4_DEMO_INTEGRATION_PASSED is not set — the local strategy must \
+                         complete the demo integration gate before it may drive a real venue"
+                            .into(),
+                    );
+                }
             }
         }
         errors
@@ -586,6 +908,60 @@ impl Config {
 
         Ok(venue)
     }
+}
+
+/// Parse a feed interval (`15m`, `1h`, `1d`) into milliseconds.
+///
+/// Only integer values with a lowercase `m`/`h`/`d` unit are accepted; the
+/// contract names intervals in exactly that form, and a guessed unit would
+/// silently misalign every candle bucket.
+pub fn parse_interval_ms(value: &str) -> Result<i64, String> {
+    let value = value.trim();
+    if value.len() < 2 {
+        return Err(format!(
+            "interval '{value}' is not `<number><m|h|d>` (for example 15m)"
+        ));
+    }
+    let (number, unit) = value.split_at(value.len() - 1);
+    let amount: u64 = number
+        .parse()
+        .map_err(|_| format!("interval '{value}' has no integer number"))?;
+    if amount == 0 {
+        return Err(format!("interval '{value}' must be greater than zero"));
+    }
+    let unit_ms: u64 = match unit {
+        "m" => 60_000,
+        "h" => 3_600_000,
+        "d" => 86_400_000,
+        _ => {
+            return Err(format!(
+                "interval '{value}' has unit '{unit}'; expected m, h or d"
+            ))
+        }
+    };
+    amount
+        .checked_mul(unit_ms)
+        .map(|ms| ms as i64)
+        .ok_or_else(|| format!("interval '{value}' is too large"))
+}
+
+/// Host component of a `ws(s)://` URL, without userinfo, port or path.
+fn url_host(url: &str) -> Option<&str> {
+    let rest = url.split("://").nth(1)?;
+    let authority = rest.split('/').next()?;
+    let host_port = authority.rsplit('@').next()?;
+    if host_port.starts_with('[') {
+        // Bracketed IPv6 literal: keep the brackets, drop any port.
+        return host_port.split(']').next().map(|host| {
+            // Re-add the bracket so callers can compare with "[::1]".
+            if host.is_empty() {
+                host_port
+            } else {
+                &host_port[..host.len() + 1]
+            }
+        });
+    }
+    Some(host_port.split(':').next().unwrap_or(host_port))
 }
 
 #[cfg(test)]
@@ -804,6 +1180,91 @@ mod tests {
         assert!(!config.mt5_control_enabled());
         config.mt5_control_token = Some("control-token".into());
         assert!(config.mt5_control_enabled());
+    }
+
+    #[test]
+    fn intervals_parse_only_the_contract_units() {
+        assert_eq!(parse_interval_ms("15m").unwrap(), 900_000);
+        assert_eq!(parse_interval_ms("1h").unwrap(), 3_600_000);
+        assert_eq!(parse_interval_ms("1d").unwrap(), 86_400_000);
+        for bad in ["", "15", "15x", "0m", "m", "1.5h"] {
+            assert!(parse_interval_ms(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn intent_source_parsing_is_explicit_and_fail_closed() {
+        assert_eq!(IntentSource::parse("node3"), Some(IntentSource::Node3));
+        assert_eq!(
+            IntentSource::parse("node1_strategy"),
+            Some(IntentSource::Node1Strategy)
+        );
+        assert_eq!(
+            IntentSource::parse("node1"),
+            Some(IntentSource::Node1Strategy)
+        );
+        assert_eq!(IntentSource::parse("nonsense"), None);
+        assert!(!IntentSource::Node3.is_local());
+        assert!(IntentSource::Node1Strategy.is_local());
+    }
+
+    #[test]
+    fn local_strategy_mode_requires_the_feed_the_gate_and_the_approval() {
+        let mut config = Config {
+            intent_source: IntentSource::Node1Strategy,
+            node1_feed_enabled: true,
+            node1_ws_url: "wss://engine.example/ws".into(),
+            ..Default::default()
+        };
+        let errors = config.startup_errors();
+        assert!(errors.iter().any(|e| e.contains("NODE4_STRATEGY_APPROVED")));
+        assert!(
+            !errors.iter().any(|e| e.contains("NODE3_WS_URL")),
+            "node3 variables must not be required in local mode"
+        );
+
+        config.strategy_approved = true;
+        assert!(config.startup_errors().is_empty());
+
+        // A real venue additionally needs the demo gate.
+        config.deriv_demo_api = Some("token".into());
+        config.resolve_venue();
+        let errors = config.startup_errors();
+        assert!(errors
+            .iter()
+            .any(|e| e.contains("NODE4_DEMO_INTEGRATION_PASSED")));
+        config.demo_integration_passed = true;
+        assert!(config.startup_errors().is_empty());
+    }
+
+    #[test]
+    fn a_plaintext_feed_is_only_allowed_for_loopback() {
+        let mut config = Config {
+            node1_feed_enabled: true,
+            node1_ws_url: "ws://engine.example/ws".into(),
+            ..Default::default()
+        };
+        assert!(config.node1_url_allowed().is_err());
+        config.node1_ws_url = "ws://localhost:3000/ws".into();
+        assert!(config.node1_url_allowed().is_ok());
+        config.node1_ws_url = "wss://engine.example/ws".into();
+        assert!(config.node1_url_allowed().is_ok());
+        config.node1_ws_url = "https://engine.example/ws".into();
+        assert!(config.node1_url_allowed().is_err());
+    }
+
+    #[test]
+    fn an_unknown_intent_source_is_a_startup_error() {
+        let config = Config {
+            intent_source_error: Some("NODE4_INTENT_SOURCE='nope'".into()),
+            node3_ws_url: "wss://strategy.example/execution".into(),
+            node4_shared_token: Some("t".into()),
+            ..Default::default()
+        };
+        assert!(config
+            .startup_errors()
+            .iter()
+            .any(|e| e.contains("NODE4_INTENT_SOURCE")));
     }
 
     #[test]

@@ -1,9 +1,20 @@
 # Node 4 — Execution Service (XAUUSD)
 
 The single execution service of the three-node split. Node 4 is a Rust service
-that consumes **authenticated trade intents from Node 3** (the strategy engine),
-applies venue policy, places **at most one broker order per `intent_id`**, and
-reports the broker-authoritative result back to Node 3.
+that consumes **authenticated trade intents**, applies venue policy, places **at
+most one broker order per `intent_id`**, and reports the broker-authoritative
+outcome.
+
+Intents come from exactly one source (`NODE4_INTENT_SOURCE`):
+
+* **`node3` (default)** — Node 3, the strategy engine, over the authenticated
+  `/execution` socket; or
+* **`node1_strategy` (opt-in, fail-closed)** — the local `vp_break_retest_v1`
+  strategy running on Node 1's versioned market feed. Node 4 then owns a feed
+  consumer and a strategy module, but still owns no broker decision: the
+  strategy emits an immutable `TradeIntent` that goes through the same
+  validation, durable ledger, venue policy and reconciliation as a Node 3
+  intent. See [`../docs/node4/LOCAL_STRATEGY.md`](../docs/node4/LOCAL_STRATEGY.md).
 
 It owns every execution concern:
 
@@ -17,10 +28,13 @@ It owns every execution concern:
 6. broker/account/position/history state, reconciliation of unclear writes,
 7. the operator kill switch and the audit trail.
 
-It owns **no** strategy and **no** market data. There is no candle, level,
-volume-profile, indicator or trigger state machine in Node 4, and it never
-recomputes the stop-loss or take-profit Node 3 sends: it may refuse an intent,
-but it never rewrites its meaning.
+In the default `node3` mode it owns **no** strategy and **no** market data:
+there is no candle, level, volume-profile, indicator or trigger state machine in
+Node 4. In `node1_strategy` mode those live in `src/node1.rs` (feed consumer) and
+`src/strategy.rs` (a verbatim port of Node 3's engine); the execution path and
+its guarantees do not change. In neither mode does Node 4 recompute an intent's
+stop-loss or take-profit from broker state: it may refuse an intent, but it
+never rewrites its meaning.
 
 ```
 +-----------------------------+         execution_hello / trade_intent

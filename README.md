@@ -19,12 +19,24 @@ Node 4  execution (THIS REPOSITORY)
    └── Deriv MT5 demo via mt5-bridge (MT5_BRIDGE_TOKEN)
 ```
 
-Node 4 is an outbound **client** of Node 3: it dials
-`NODE3_WS_URL` (`wss://<node3-host>/execution`), authenticates with
-`execution_hello`, and refuses to accept any intent until Node 3 answers
-`execution_hello_ack { accepted: true }`. It contains **no** market analytics and
-**no** strategy logic — it may refuse an unsafe intent, but it never recomputes
-the stop-loss or take-profit Node 3 sends.
+Node 4 has **two mutually exclusive intent sources** (`NODE4_INTENT_SOURCE`):
+
+* **`node3` (default).** Node 4 is an outbound client of Node 3: it dials
+  `NODE3_WS_URL` (`wss://<node3-host>/execution`), authenticates with
+  `execution_hello`, and refuses to accept any intent until Node 3 answers
+  `execution_hello_ack { accepted: true }`. In this mode it contains no market
+  analytics and no strategy logic.
+* **`node1_strategy` (opt-in, fail-closed).** Node 4 consumes Node 1's versioned
+  market feed and runs the ported `vp_break_retest_v1` strategy as a distinct
+  module. The strategy emits a complete immutable `TradeIntent`; validation,
+  the durable ledger, venue policy, reporting and reconciliation are identical
+  to the Node 3 path. It never talks to a broker adapter directly and executes
+  nothing until an explicit operator gate is set, the feed is contract-valid
+  and fresh, and the strategy spec is approved. See
+  [`docs/node4/LOCAL_STRATEGY.md`](docs/node4/LOCAL_STRATEGY.md).
+
+In both modes Node 4 never recomputes an intent's stop-loss or take-profit from
+broker state: it may refuse an intent, but it never rewrites its meaning.
 
 ## Repository layout
 
@@ -35,7 +47,8 @@ the stop-loss or take-profit Node 3 sends.
 | `mt5-bridge/` | Terminal-side bridge: runs next to the MT5 terminal, dials **out** to Node 4 at `WS /mt5/bridge`, routes orders to the EA over loopback. |
 | `docs/mt5/EXECUTION_ARCHITECTURE.md` | MT5 demo topology, the layered guards, the fail-closed order path and the integration gate. |
 | `docs/mt5/FRONTEND_RESOURCES.md` | Field-by-field reference for the JSON/WS resources a frontend can render. |
-| `docs/node1/` | Read-only audit of the Node 1 market-data boundary and the draft v1 feed contract (documentation only — Node 4 is **not** a consumer of that feed; the code lives on the `Node1` branch). |
+| `docs/node1/` | Read-only audit of the Node 1 market-data boundary and the draft v1 feed contract. Node 4 reads that feed only in the opt-in `node1_strategy` mode described below; the contract itself is still a draft. |
+| `docs/node4/LOCAL_STRATEGY.md` | The opt-in Node 1 feed consumer and local strategy: source provenance, the sign-off gate, failure modes and activation checklist. |
 | `ci/mt5/protocol_lint.py` | Build gate: fails if the EA ⇄ bridge ⇄ Node 4 contract drifts (methods, params, fields, frames). |
 | `ci/deriv_probe.py`, `ci/deriv/DERIV.md` | Execution-side Deriv probe/report (which contract shapes are actually tradable). |
 | `Dockerfile` | Builds the execution service image only. |
@@ -43,9 +56,12 @@ the stop-loss or take-profit Node 3 sends.
 
 ## What Node 4 guarantees
 
-* **Authenticated intents only.** No intent is accepted before the handshake is
-  acknowledged, and a stale Node 3 link means no new positions (monitoring,
-  reconciliation and the kill switch keep working).
+* **Authenticated intents only.** In `node3` mode no intent is accepted before
+  the handshake is acknowledged, and a stale Node 3 link means no new positions
+  (monitoring, reconciliation and the kill switch keep working). In
+  `node1_strategy` mode every intent is refused unless the feed is connected,
+  contract-valid, synchronized, fresh, market-open and recent, checked both at
+  decision time and again immediately before the broker write.
 * **Durable idempotency.** `intent_id` is the system-wide key. It is written to
   the append-only ledger (`EXECUTION_LEDGER_FILE`, fsynced) **before** any broker
   write; a repeat replays the recorded result and can never place a second order.

@@ -20,10 +20,13 @@ use crate::config::{Config, EXECUTION_PROTOCOL_VERSION};
 use crate::execution_mt5::Mt5BridgeLink;
 use crate::intent::{ExecutionReport, ExecutionStatus, IntentRejection, TradeIntent};
 use crate::ledger::ExecutionLedger;
+use crate::node1::MarketFeed;
+use crate::strategy_runner::StrategyHandle;
 use crate::types::{
     ActivityLogEntry, DerivAccountSnapshot, DerivOpenContract, ExecutionSnapshot, ExecutionTrade,
-    ExecutionWorkDiagnostics, Mt5AccountSnapshot, Mt5BridgeStatus, Mt5Diagnostics,
-    Mt5HistorySnapshot, Mt5PositionsSnapshot, Node3LinkStatus, OpenTradesSnapshot, WsFrame,
+    ExecutionWorkDiagnostics, FeedSnapshot, Mt5AccountSnapshot, Mt5BridgeStatus, Mt5Diagnostics,
+    Mt5HistorySnapshot, Mt5PositionsSnapshot, Node3LinkStatus, OpenTradesSnapshot,
+    StrategySnapshot, WsFrame,
 };
 
 const MAX_RECENT_EVENTS: usize = 50;
@@ -56,6 +59,11 @@ pub struct DiagnosticsHub {
     mt5: Arc<Mt5BridgeLink>,
     ledger: Arc<RwLock<Option<Arc<ExecutionLedger>>>>,
     ledger_cache: Arc<RwLock<LedgerCache>>,
+    /// Attached only when the Node 1 feed runs (always in `node1_strategy`
+    /// mode, optionally as a monitor in `node3` mode).
+    market_feed: Arc<std::sync::RwLock<Option<MarketFeed>>>,
+    /// Attached by `main` for both sources; disabled in `node3` mode.
+    strategy: Arc<std::sync::RwLock<Option<StrategyHandle>>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -194,7 +202,45 @@ impl DiagnosticsHub {
             mt5,
             ledger: Arc::new(RwLock::new(None)),
             ledger_cache: Arc::new(RwLock::new(LedgerCache::default())),
+            market_feed: Arc::new(std::sync::RwLock::new(None)),
+            strategy: Arc::new(std::sync::RwLock::new(None)),
         }
+    }
+
+    /// Attach the Node 1 feed handle so `/diagnostics` reports its live state.
+    pub fn attach_market_feed(&self, feed: MarketFeed) {
+        let mut guard = self
+            .market_feed
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *guard = Some(feed);
+    }
+
+    /// Attach the local strategy state (disabled in `node3` mode).
+    pub fn attach_strategy(&self, strategy: StrategyHandle) {
+        let mut guard = self
+            .strategy
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *guard = Some(strategy);
+    }
+
+    fn feed_snapshot(&self) -> FeedSnapshot {
+        self.market_feed
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .map(MarketFeed::snapshot)
+            .unwrap_or_default()
+    }
+
+    fn strategy_snapshot(&self) -> StrategySnapshot {
+        self.strategy
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .map(StrategyHandle::snapshot)
+            .unwrap_or_default()
     }
 
     /// Shared MT5 bridge link (session registry + snapshot cache).
@@ -298,6 +344,7 @@ impl DiagnosticsHub {
     }
 
     fn build_snapshot_locked(
+        &self,
         inner: &DiagnosticsInner,
         ws_clients: usize,
         ledger: &LedgerCache,
@@ -321,6 +368,8 @@ impl DiagnosticsHub {
         ExecutionSnapshot {
             timestamp: ts,
             node3,
+            market_feed: self.feed_snapshot(),
+            strategy: self.strategy_snapshot(),
             work,
             open_trades: Self::build_open_trades_locked(inner, ts),
             deriv_account: inner.deriv_account.clone(),
@@ -332,7 +381,7 @@ impl DiagnosticsHub {
     pub async fn snapshot(&self) -> ExecutionSnapshot {
         let ledger = self.ledger_stats().await;
         let inner = self.inner.read().await;
-        Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
+        self.build_snapshot_locked(&inner, self.connected_clients(), &ledger)
     }
 
     pub async fn open_trades_snapshot(&self) -> OpenTradesSnapshot {
@@ -366,7 +415,7 @@ impl DiagnosticsHub {
                 "node3",
                 format!("Node 3 intent link: {state}"),
             );
-            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
+            self.build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -398,7 +447,7 @@ impl DiagnosticsHub {
                     "Node 3 rejected execution_hello".to_string()
                 },
             );
-            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
+            self.build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -419,7 +468,7 @@ impl DiagnosticsHub {
             if !accepted {
                 inner.node3.last_error = Some("Node 3 rejected an execution_report".into());
             }
-            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
+            self.build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -432,7 +481,7 @@ impl DiagnosticsHub {
             let mut inner = self.inner.write().await;
             inner.work.intents_received = inner.work.intents_received.saturating_add(1);
             inner.work.last_intent_ts = Some(now_ms());
-            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
+            self.build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
         let _ = intent;
@@ -452,7 +501,7 @@ impl DiagnosticsHub {
                     intent.intent_id, intent.side, intent.symbol
                 ),
             );
-            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
+            self.build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -474,7 +523,7 @@ impl DiagnosticsHub {
                     intent.intent_id, rejection.message, rejection.code
                 ),
             );
-            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
+            self.build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -495,7 +544,7 @@ impl DiagnosticsHub {
                     recorded_status.unwrap_or("accepted")
                 ),
             );
-            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
+            self.build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -544,7 +593,7 @@ impl DiagnosticsHub {
                         .unwrap_or_default()
                 ),
             );
-            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
+            self.build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -566,7 +615,7 @@ impl DiagnosticsHub {
                 inner.recent_trades.pop_back();
             }
             let open_trades_snap = Self::build_open_trades_locked(&inner, ts);
-            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
+            let snap = self.build_snapshot_locked(&inner, self.connected_clients(), &ledger);
             (trade, open_trades_snap, snap)
         };
 
@@ -588,7 +637,7 @@ impl DiagnosticsHub {
                 "execution",
                 format!("Order refused ({code}): {message}"),
             );
-            Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger)
+            self.build_snapshot_locked(&inner, self.connected_clients(), &ledger)
         };
         let _ = self.tx.send(WsFrame::Diagnostics { data: snap });
     }
@@ -627,7 +676,7 @@ impl DiagnosticsHub {
                 Self::push_event_locked(&mut inner, "error", "deriv", message);
             }
             let deriv_snap = inner.deriv_account.clone();
-            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
+            let snap = self.build_snapshot_locked(&inner, self.connected_clients(), &ledger);
             (deriv_snap, snap)
         };
 
@@ -658,7 +707,7 @@ impl DiagnosticsHub {
             inner.deriv_account.last_updated = Some(ts);
 
             let deriv_snap = inner.deriv_account.clone();
-            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
+            let snap = self.build_snapshot_locked(&inner, self.connected_clients(), &ledger);
             (deriv_snap, snap)
         };
 
@@ -677,7 +726,7 @@ impl DiagnosticsHub {
 
             let deriv_snap = inner.deriv_account.clone();
             let open_trades_snap = Self::build_open_trades_locked(&inner, ts);
-            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
+            let snap = self.build_snapshot_locked(&inner, self.connected_clients(), &ledger);
             (deriv_snap, open_trades_snap, snap)
         };
 
@@ -759,7 +808,7 @@ impl DiagnosticsHub {
 
             let deriv_snap = inner.deriv_account.clone();
             let open_trades_snap = Self::build_open_trades_locked(&inner, ts);
-            let snap = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
+            let snap = self.build_snapshot_locked(&inner, self.connected_clients(), &ledger);
             (deriv_snap, open_trades_snap, snap)
         };
 
@@ -855,7 +904,7 @@ impl DiagnosticsHub {
             } else {
                 None
             };
-            let snapshot = Self::build_snapshot_locked(&inner, self.connected_clients(), &ledger);
+            let snapshot = self.build_snapshot_locked(&inner, self.connected_clients(), &ledger);
             (extra, snapshot)
         };
 
