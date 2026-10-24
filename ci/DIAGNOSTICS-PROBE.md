@@ -1,6 +1,6 @@
 # Node 4 `/diagnostics` Live & Local Probe Report
 
-Recorded at: `2026-10-24 15:16:31 UTC`
+Recorded at: `2026-10-24 22:36:08 UTC`
 
 ## 1. Deployed Render Services
 
@@ -13,13 +13,13 @@ Recorded at: `2026-10-24 15:16:31 UTC`
   "status": 200,
   "url": "https://execution-southeastasia-sng-main.onrender.com/diagnostics",
   "headers": {
-    "Date": "Sat, 24 Oct 2026 15:16:32 GMT",
+    "Date": "Sat, 24 Oct 2026 22:36:08 GMT",
     "Content-Type": "application/json",
     "Server": "cloudflare",
     "x-render-origin-server": "Render",
-    "CF-RAY": "a4f9f1737e84c8e0-IAD"
+    "CF-RAY": "a4fc7566cd9a8467-SJC"
   },
-  "raw_len": 29875,
+  "raw_len": 29799,
   "summary": {
     "build": "xauusd-node3-execution 1.0.0",
     "role": null,
@@ -39,17 +39,17 @@ Recorded at: `2026-10-24 15:16:31 UTC`
     "version": "1.0.0",
     "venue": "DerivDemo",
     "started_at": 1791398084400,
-    "uptime_secs": 1456907,
+    "uptime_secs": 1483283,
     "node1_ws_url": "wss://engine-southeastasia-sng-main.onrender.com/ws",
     "node1_connected": true,
     "node1_state": "connected",
     "node1_reconnect_count": 78,
-    "last_node1_msg_ts": 1792854988587,
+    "last_node1_msg_ts": 1792881358588,
     "last_candle_ts": 1792841938604,
-    "last_levels_ts": 1792841938601,
+    "last_levels_ts": 1792879227047,
     "candles_received": 6849614,
-    "levels_received": 840,
-    "ws_messages_received": 6899125,
+    "levels_received": 844,
+    "ws_messages_received": 6900008,
     "candle_buffer_len": 30,
     "candle_buffer_capacity": 30,
     "last_price": 3998.16,
@@ -85,7 +85,7 @@ Recorded at: `2026-10-24 15:16:31 UTC`
     "trades_failed": 97,
     "last_signal_ts": 1792638412510,
     "last_error": "Deriv WS disconnected \u2014 reconnecting",
-    "ws_clients_connected": 0
+    "ws_clients_connected": 1
   },
   "node3": null,
   "market_feed": null,
@@ -124,17 +124,17 @@ Recorded at: `2026-10-24 15:16:31 UTC`
         "version": "1.0.0",
         "venue": "DerivDemo",
         "started_at": 1791398084400,
-        "uptime_secs": 1456908,
+        "uptime_secs": 1483284,
         "node1_ws_url": "wss://engine-southeastasia-sng-main.onrender.com/ws",
         "node1_connected": true,
         "node1_state": "connected",
         "node1_reconnect_count": 78,
-        "last_node1_msg_ts": 1792854988587,
+        "last_node1_msg_ts": 1792881358588,
         "last_candle_ts": 1792841938604,
-        "last_levels_ts": 1792841938601,
+        "last_levels_ts": 1792879227047,
         "candles_received": 6849614,
-        "levels_received": 840,
-        "ws_messages_received": 6899125,
+        "levels_received": 844,
+        "ws_messages_received": 6900008,
         "candle_buffer_len": 30,
         "candle_buffer_capacity": 30,
         "last_price": 3998.16,
@@ -170,12 +170,68 @@ Recorded at: `2026-10-24 15:16:31 UTC`
         "trades_failed": 97,
         "last_signal_ts": 1792638412510,
         "last_error": "Deriv WS disconnected \u2014 reconnecting",
-        "ws_clients_connected": 1
+        "ws_clients_connected": 2
       },
       "has_market_feed": false,
       "has_strategy": false
     }
   ]
+}
+```
+
+#### Extra Endpoints (`/health`, `/scanning`, `/mt5/status`, `/open-trades`)
+```json
+{
+  "/health": {
+    "status": 200,
+    "body": "ok"
+  },
+  "/scanning": {
+    "status": 200,
+    "body": {
+      "keys": [
+        "active_setups_count",
+        "atr",
+        "atr_pips",
+        "current_volume",
+        "invalidation_dollars",
+        "last_price",
+        "proximity_dollars",
+        "setups",
+        "timestamp",
+        "total_levels_tracked",
+        "volume_confirmed",
+        "volume_threshold"
+      ],
+      "sample": {
+        "active_setups_count": 0,
+        "total_levels_tracked": 7,
+        "proximity_dollars": 0.5,
+        "invalidation_dollars": 2.0,
+        "volume_threshold": 3500.0
+      }
+    }
+  },
+  "/mt5/status": {
+    "status": 404,
+    "error": "HTTPError 404"
+  },
+  "/open-trades": {
+    "status": 200,
+    "body": {
+      "keys": [
+        "deriv_open_trades",
+        "node3_open_trades",
+        "recent_trades",
+        "timestamp",
+        "total_open_count"
+      ],
+      "sample": {
+        "total_open_count": 0,
+        "timestamp": 1792881375909
+      }
+    }
+  }
 }
 ```
 
@@ -199,6 +255,28 @@ Recorded at: `2026-10-24 15:16:31 UTC`
   "ws_url": "wss://strategy-southeastasia-sng-main.onrender.com/ws",
   "error": "InvalidStatus: server rejected WebSocket connection: HTTP 404",
   "frames": []
+}
+```
+
+#### Extra Endpoints (`/health`, `/scanning`, `/mt5/status`, `/open-trades`)
+```json
+{
+  "/health": {
+    "status": 404,
+    "error": "HTTPError 404"
+  },
+  "/scanning": {
+    "status": 404,
+    "error": "HTTPError 404"
+  },
+  "/mt5/status": {
+    "status": 404,
+    "error": "HTTPError 404"
+  },
+  "/open-trades": {
+    "status": 404,
+    "error": "HTTPError 404"
+  }
 }
 ```
 
@@ -237,10 +315,10 @@ Recorded at: `2026-10-24 15:16:31 UTC`
         "version": "1.0.0",
         "role": "execution_only",
         "venue": "none",
-        "started_at": 1792854999111,
+        "started_at": 1792881376767,
         "uptime_secs": 0,
         "execution_protocol_version": 1,
-        "ledger_path": "/tmp/tmpr_n2g_p8/ledger.jsonl",
+        "ledger_path": "/tmp/tmpr3oxn9pv/ledger.jsonl",
         "ledger_available": true,
         "ledger_records": 0,
         "ledger_intents": 0,
@@ -380,10 +458,10 @@ Recorded at: `2026-10-24 15:16:31 UTC`
             "version": "1.0.0",
             "role": "execution_only",
             "venue": "none",
-            "started_at": 1792854999111,
+            "started_at": 1792881376767,
             "uptime_secs": 0,
             "execution_protocol_version": 1,
-            "ledger_path": "/tmp/tmpr_n2g_p8/ledger.jsonl",
+            "ledger_path": "/tmp/tmpr3oxn9pv/ledger.jsonl",
             "ledger_available": true,
             "ledger_records": 0,
             "ledger_intents": 0,
@@ -440,10 +518,10 @@ Recorded at: `2026-10-24 15:16:31 UTC`
         "version": "1.0.0",
         "role": "execution_only",
         "venue": "none",
-        "started_at": 1792854999220,
+        "started_at": 1792881376876,
         "uptime_secs": 0,
         "execution_protocol_version": 1,
-        "ledger_path": "/tmp/tmpekwkji6x/ledger.jsonl",
+        "ledger_path": "/tmp/tmp8rmoivxx/ledger.jsonl",
         "ledger_available": true,
         "ledger_records": 0,
         "ledger_intents": 0,
@@ -516,7 +594,7 @@ Recorded at: `2026-10-24 15:16:31 UTC`
         "contract_violations": 0,
         "resyncs": 0,
         "last_error": "cannot connect to ws://127.0.0.1:19999/ws: IO error: Connection refused (os error 111)",
-        "last_event_ms": 1792854999220
+        "last_event_ms": 1792881376877
       },
       "strategy": {
         "enabled": true,
@@ -583,10 +661,10 @@ Recorded at: `2026-10-24 15:16:31 UTC`
             "version": "1.0.0",
             "role": "execution_only",
             "venue": "none",
-            "started_at": 1792854999220,
+            "started_at": 1792881376876,
             "uptime_secs": 0,
             "execution_protocol_version": 1,
-            "ledger_path": "/tmp/tmpekwkji6x/ledger.jsonl",
+            "ledger_path": "/tmp/tmp8rmoivxx/ledger.jsonl",
             "ledger_available": true,
             "ledger_records": 0,
             "ledger_intents": 0,
@@ -643,10 +721,10 @@ Recorded at: `2026-10-24 15:16:31 UTC`
         "version": "1.0.0",
         "role": "execution_only",
         "venue": "none",
-        "started_at": 1792854999330,
+        "started_at": 1792881376983,
         "uptime_secs": 0,
         "execution_protocol_version": 1,
-        "ledger_path": "/tmp/tmpgmj77lcd/ledger.jsonl",
+        "ledger_path": "/tmp/tmpguimword/ledger.jsonl",
         "ledger_available": true,
         "ledger_records": 0,
         "ledger_intents": 0,
@@ -786,10 +864,10 @@ Recorded at: `2026-10-24 15:16:31 UTC`
             "version": "1.0.0",
             "role": "execution_only",
             "venue": "none",
-            "started_at": 1792854999330,
+            "started_at": 1792881376983,
             "uptime_secs": 0,
             "execution_protocol_version": 1,
-            "ledger_path": "/tmp/tmpgmj77lcd/ledger.jsonl",
+            "ledger_path": "/tmp/tmpguimword/ledger.jsonl",
             "ledger_available": true,
             "ledger_records": 0,
             "ledger_intents": 0,
