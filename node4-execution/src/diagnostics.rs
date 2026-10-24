@@ -1062,4 +1062,41 @@ mod tests {
         assert_eq!(work.orders_unknown, 1);
         assert_eq!(work.last_report_ts, Some(4));
     }
+
+    #[tokio::test]
+    async fn unconfigured_startup_still_serialises_market_feed_and_strategy() {
+        let unconfigured = Config::default();
+        assert!(!unconfigured.startup_errors().is_empty());
+
+        let hub = DiagnosticsHub::new(&unconfigured);
+        hub.attach_strategy(StrategyHandle::new(&unconfigured));
+        hub.set_node3_error("unconfigured", "NODE3_WS_URL is not set")
+            .await;
+
+        let snapshot = hub.snapshot().await;
+        let json = serde_json::to_value(&snapshot).unwrap();
+        let obj = json.as_object().expect("snapshot is a JSON object");
+        let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            vec![
+                "deriv_account",
+                "market_feed",
+                "mt5",
+                "node3",
+                "open_trades",
+                "recent_events",
+                "strategy",
+                "timestamp",
+                "work",
+            ]
+        );
+        assert_eq!(json["node3"]["state"], "unconfigured");
+        assert_eq!(json["node3"]["last_error"], "NODE3_WS_URL is not set");
+        assert!(json["work"]["last_error"]
+            .as_str()
+            .unwrap()
+            .contains("NODE3_WS_URL"));
+    }
 }

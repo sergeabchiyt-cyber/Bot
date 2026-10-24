@@ -1028,4 +1028,17 @@ mod tests {
         assert_eq!(value["symbol"], "XAUUSD");
         assert_eq!(value["side"], "buy");
     }
+
+    #[test]
+    fn source_gate_refuses_real_venue_when_startup_config_is_incomplete() {
+        let mut shared = shared();
+        shared.last_frame_ms.store(now_ms(), Ordering::SeqCst);
+        shared.config.node3_ws_url = String::new();
+        shared.config.deriv_demo_api = Some("demo-token".into());
+        shared.config.resolve_venue();
+
+        let err = shared.source_gate().unwrap_err();
+        assert_eq!(err.code, "startup_configuration_error");
+        assert!(err.message.contains("NODE3_WS_URL"));
+    }
 }
