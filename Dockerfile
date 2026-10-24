@@ -15,21 +15,21 @@
 
 FROM rust:1.94-slim AS builder
 WORKDIR /app
-COPY node4-execution/Cargo.toml ./node4-execution/Cargo.toml
+COPY node4-execution/Cargo.toml node4-execution/Cargo.lock ./node4-execution/
 COPY node4-execution/src ./node4-execution/src
-RUN cargo build --release --manifest-path node4-execution/Cargo.toml
+RUN cargo build --release --locked --manifest-path node4-execution/Cargo.toml
 
 FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/node4-execution/target/release/xauusd-node4-execution /usr/local/bin/node4-execution
+RUN ln -s /usr/local/bin/node4-execution /usr/local/bin/node3-execution \
+    && ln -s /usr/local/bin/node4-execution /usr/local/bin/xauusd-node4-execution
 
 # Public read-only resources + the private bridge/control endpoints.
 EXPOSE 10000
 ENV PORT=10000 \
-    RUST_LOG=info \
-    EXECUTION_LEDGER_FILE=/data/execution_ledger.jsonl
-VOLUME ["/data"]
+    RUST_LOG=info
 WORKDIR /app
 CMD ["node4-execution"]
