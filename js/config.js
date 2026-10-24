@@ -1,11 +1,15 @@
 /* ============================================================
- * XAUUSD Terminal — browser-safe Node 1 endpoint configuration.
+ * XAUUSD Terminal — browser-safe Node 1 + Node 4 endpoint configuration.
  *
- * Node 2 is a static, read-only client of the Node 1 service:
- *   market data + built-in strategy evaluator + demo (paper) account.
+ * Node 2 is a static, read-only client of two services:
+ *   Node 1 — market data, built-in strategy evaluator, demo (paper) account;
+ *   Node 4 — execution diagnostics (market feed, local strategy, venue).
  *
  * Runtime override, installed before this file is loaded:
- *   window.XAUUSD_CONFIG = { MARKET_HOST: "https://market.example" };
+ *   window.XAUUSD_CONFIG = {
+ *     MARKET_HOST: "https://market.example",
+ *     NODE4_HOST: "https://execution.example",
+ *   };
  *
  * Only an origin is accepted; the documented public paths are fixed below.
  * No credentials, tokens, or authorization headers belong here.
@@ -20,6 +24,8 @@
 
   const DEFAULTS = {
     MARKET_HOST: "https://engine-southeastasia-sng-main.onrender.com",
+    // Node 4 execution service: GET /diagnostics and the read-only /ws stream.
+    NODE4_HOST: "https://execution-southeastasia-sng-main.onrender.com",
   };
 
   function normaliseHost(value) {
@@ -39,8 +45,12 @@
   }
 
   const MARKET_HOST = normaliseHost(own(runtime, "MARKET_HOST") ? runtime.MARKET_HOST : DEFAULTS.MARKET_HOST);
+  const NODE4_HOST = normaliseHost(own(runtime, "NODE4_HOST") ? runtime.NODE4_HOST : DEFAULTS.NODE4_HOST);
   const websocketBase = MARKET_HOST.replace(/^https:/i, "wss:").replace(/^http:/i, "ws:");
+  const node4WebsocketBase = NODE4_HOST.replace(/^https:/i, "wss:").replace(/^http:/i, "ws:");
   const endpoint = (path, websocket) => (MARKET_HOST ? `${websocket ? websocketBase : MARKET_HOST}${path}` : "");
+  const executionEndpoint = (path, websocket) =>
+    (NODE4_HOST ? `${websocket ? node4WebsocketBase : NODE4_HOST}${path}` : "");
 
   const endpoints = {
     ws: endpoint("/ws", true),
@@ -51,10 +61,14 @@
     strategy: endpoint("/strategy", false),
     demo: endpoint("/demo", false),
     status: endpoint("/status", false),
+    // Node 4: the same ExecutionSnapshot over REST and WebSocket.
+    executionDiagnostics: executionEndpoint("/diagnostics", false),
+    executionWs: executionEndpoint("/ws", true),
   };
 
   App.config = {
     MARKET_HOST,
+    NODE4_HOST,
     endpoints,
 
     // Exactly the Node 1 topics the dashboard renders, and nothing else.
@@ -66,6 +80,19 @@
       heartbeatTimeoutMs: 75000,
       staleAfterMs: 90000,
       pollFallbackMs: 5000,
+    },
+
+    // Node 4 execution diagnostics. One topic; complete snapshots only.
+    execution: {
+      diagnostics: endpoints.executionDiagnostics,
+      ws: endpoints.executionWs,
+      topics: ["diagnostics"],
+      reconnectMinMs: 1000,
+      reconnectMaxMs: 30000,
+      heartbeatEveryMs: 30000,
+      heartbeatTimeoutMs: 75000,
+      pollFallbackMs: 5000,
+      pollGraceMs: 1500,
     },
 
     strategy: {

@@ -1,6 +1,6 @@
 # Node 2 service architecture
 
-Node 2 is a static, read-only browser client of **one** service: Node 1.
+Node 2 is a static, read-only browser client of **two** services.
 
 ```text
                     ┌─────────────────────────────┐
@@ -9,6 +9,12 @@ Node 2 is a static, read-only browser client of **one** service: Node 1.
                     │  built-in strategy evaluator│
    WS /ws           │  demo (paper) account       │
   ◄────────────────►│                             │
+                    └─────────────────────────────┘
+                    ┌─────────────────────────────┐
+   GET /diagnostics │  Node 4                     │
+  ─────────────────►│  execution snapshot         │
+   WS /ws           │  market feed · local strategy│
+  ◄────────────────►│  venue · Node 3 link         │
                     └─────────────────────────────┘
                                  ▲
                                  │ public GET + WS
@@ -19,14 +25,17 @@ Node 2 is a static, read-only browser client of **one** service: Node 1.
 ```
 
 Node 2 has no database, no proxy, no server-side rendering and no write path.
-It renders what Node 1 publishes and never places, modifies or closes orders.
-The demo engine trades itself.
+It renders what Node 1 and Node 4 publish and never places, modifies or closes
+orders. The Node 1 demo engine trades itself; Node 4's local strategy is
+rendered, never re-implemented.
 
 ## Endpoint map
 
-`js/config.js` defines `MARKET_HOST` and derives:
+`js/config.js` defines `MARKET_HOST` (Node 1) and `NODE4_HOST` (Node 4) and
+derives:
 
 ```text
+Node 1
 GET  /candles        chart history
 GET  /tick-volume    volume / TPS snapshot
 GET  /levels         volume-profile levels
@@ -35,11 +44,17 @@ GET  /strategy       StrategySnapshot seed
 GET  /demo           DemoSnapshot seed
 GET  /status         status + feeds
 WS   /ws             levels · candle · tick_volume · strategy · demo · calendar · status
+
+Node 4
+GET  /diagnostics    ExecutionSnapshot seed (market_feed · strategy · work · node3)
+WS   /ws             diagnostics only
 ```
 
 Every path is fixed in code. The runtime override (`window.XAUUSD_CONFIG`)
-accepts an origin only — never a path, credential, query or fragment. An empty
-host disables the service and is reported as `NOT CONFIGURED`.
+accepts origins only — never a path, credential, query or fragment. An empty
+host disables that service: an empty `MARKET_HOST` is reported as `NOT
+CONFIGURED`, an empty `NODE4_HOST` leaves the execution cards in a calm
+"not configured" state.
 
 ## Module graph
 
@@ -47,15 +62,19 @@ host disables the service and is reported as `NOT CONFIGURED`.
 config ─┬─ normalize ─┬─ utils ─┬─ api
         │             │         ├─ levels
         │             │         ├─ calendar
-        │             │         └─ strategy, demo, status
-        ├─ format ────┴─ socket, chart, strategy, demo, overlays, status
+        │             │         └─ strategy, demo, status, execution
+        ├─ format ────┴─ socket, chart, strategy, demo, overlays, status, execution
         ├─ strategy-math ── strategy, demo, overlays, status
         └─ axis ── chart ── (levels, overlays)
 ```
 
-Only `js/app.js` wires frame types to modules. The strategy, demo, chart,
-levels and calendar modules never talk to a service directly except through
-`App.api` / `App.utils.fetchPublicJson` and never construct their own socket.
+Only `js/app.js` wires Node 1 frame types to modules. `js/execution.js` owns the
+Node 4 socket, because execution diagnostics are a second service with their own
+reconnect budget: a dead Node 4 must never disturb the market stream, and a dead
+Node 1 must not stop the execution cards from rendering. The strategy, demo,
+chart, levels and calendar modules never talk to a service directly except
+through `App.api` / `App.utils.fetchPublicJson` and never construct their own
+socket.
 
 ## State
 
@@ -67,6 +86,7 @@ levels and calendar modules never talk to a service directly except through
 | candles | `js/chart.js` | upsert by bucket; REST snapshots guarded by a WS revision |
 | `calendar` | `js/calendar.js` | sorted USD events, impact filter |
 | `status` | `js/status.js` | last status snapshot, feeds rendered generically |
+| `diagnostics` (Node 4) | `js/execution.js` | **complete** `ExecutionSnapshot` replaces the previous one; never merged. Only an older REST seed is rejected |
 
 The REST payload is only a seed. A REST response whose decision data started
 before a newer WebSocket frame is discarded (`wsRevision` guard); the evaluator
@@ -74,7 +94,7 @@ configuration (enabled + params) is still seeded because decision frames do not
 carry it. `strategy.ts` dedupes replayed decisions, so a reconnect cannot
 duplicate history.
 
-## WebSocket lifecycle (`js/socket.js`)
+## WebSocket lifecycle (`js/socket.js`, Node 1)
 
 - exactly one socket, created from `endpoints.ws`;
 - on every open: send the full `{"type":"subscribe","topics":[…]}` payload —
@@ -86,6 +106,19 @@ duplicate history.
 
 State published to the header badge: `LIVE`, `CONNECTING`, `RECONNECTING`,
 `STALE`, `OFFLINE`, `NOT CONFIGURED`.
+
+## Node 4 socket (`js/execution.js`)
+
+- one socket to `NODE4_HOST + /ws`, subscribing to exactly `["diagnostics"]`;
+- every `diagnostics` frame is a complete snapshot and replaces the stored one;
+- heartbeat every 30 s, silence over 75 s forces a reconnect;
+- bounded backoff 1 s → 30 s, visibility recovery, same shape as the market
+  socket;
+- while the socket is down, `GET /diagnostics` is polled every 5 s; the poller
+  stops as soon as a socket is open;
+- a render is a pure function of the snapshot. Identical frames reuse the
+  already-painted markup, so repeated snapshots do not flicker or duplicate
+  rows, and a snapshot with cleared counters visibly resets the cards.
 
 ## Polling fallback
 
@@ -112,6 +145,11 @@ While the socket is healthy there is no polling of those routes.
 - **Trade history** — last 50 closed trades, newest first, exit-reason chips.
 - **Chart** — candles and volume on the compacted `axis.js` timeline, levels,
   position lines, action marker, optional ATR band.
+- **Execution cards** — market-data gate (`trading_ready`, with
+  `not_ready_reason` verbatim and a feed-integrity row), the local strategy
+  runner (action, ATR, bands, counters, emitted/suppressed intents), the
+  execution venue (dry-run banner when `venue === "none"`) and the Node 3
+  intent link (grey "not used — local strategy" in local mode).
 - **Drawer** — read-only connection, strategy/demo blocks, parameters, feeds.
 
 All money is USD and all prices are XAUUSD price units. There is no pip or
@@ -132,6 +170,10 @@ price 2 dp with grouping, lots 2 dp, money 2 dp with `$`, PnL signed, percent
 | socket down | `DELAYED` badge + 5 s REST polling |
 | socket open but silent | `STALE` badge after 90 s; strategy panel dims after 60 s without a decision |
 | malformed JSON frame | logged, ignored; connection stays up |
+| Node 4 unreachable | execution cards show a calm "waiting / not configured" state; `/diagnostics` polled every 5 s; market panels unaffected |
+| Node 4 older than `market_feed` / `strategy` | those cards read "unavailable"; all other panels render |
+| feed `state === "live"` but `trading_ready === false` | market card reads **not ready** in amber; `state` never drives colour |
+| diagnostics frame with cleared counters | the UI resets (replace, never merge) |
 | chart library missing | chart area empty; strategy/demo/levels/calendar still render |
 | older REST snapshot | discarded by the revision / `ts` guard |
 | demo engine disabled | dimmed account strip + "demo engine off" |

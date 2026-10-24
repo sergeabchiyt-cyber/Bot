@@ -6,6 +6,7 @@ const format = require("../js/format.js");
 
 const DASH = "\u2014";
 const MINUS = "\u2212";
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 test("prices, lots and counts are fixed-decimal and grouped", () => {
   assert.equal(format.price(3415.1), "3,415.10");
@@ -57,7 +58,9 @@ test("local time and dates use HH:mm:ss and DD MMM", () => {
   assert.equal(format.dateTime(stamp), "23 Oct 14:03:22");
   assert.equal(format.time(null), DASH);
   assert.equal(format.date("not a date"), DASH);
-  assert.equal(format.dayLabel(stamp), "Today \u00b7 23 Oct");
+  const today = new Date();
+  const todayLabel = `${String(today.getDate()).padStart(2, "0")} ${MONTHS[today.getMonth()]}`;
+  assert.equal(format.dayLabel(today.getTime()), `Today \u00b7 ${todayLabel}`);
 });
 
 test("ages read in seconds then minutes and never go negative", () => {
