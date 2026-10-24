@@ -47,5 +47,10 @@ mt5-host/data/
 .coverage
 htmlcov/
 
+# Node (Node 2 dashboard)
+node2/node_modules/
+node2-errors.log
+node2-test-errors.log
+
 # OS artifacts
 .DS_Store
