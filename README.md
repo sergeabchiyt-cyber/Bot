@@ -47,6 +47,7 @@ broker state: it may refuse an intent, but it never rewrites its meaning.
 | `mt5-bridge/` | Terminal-side bridge: runs next to the MT5 terminal, dials **out** to Node 4 at `WS /mt5/bridge`, routes orders to the EA over loopback. |
 | `docs/mt5/EXECUTION_ARCHITECTURE.md` | MT5 demo topology, the layered guards, the fail-closed order path and the integration gate. |
 | `docs/mt5/FRONTEND_RESOURCES.md` | Field-by-field reference for the JSON/WS resources a frontend can render. |
+| `docs/node1/` | Read-only audit of the Node 1 market-data boundary and the draft v1 feed contract. Node 4 reads that feed only in the opt-in `node1_strategy` mode described below; the contract itself is still a draft. |
 | `docs/node4/LOCAL_STRATEGY.md` | The opt-in Node 1 feed consumer and local strategy: source provenance, the sign-off gate, failure modes and activation checklist. |
 | `ci/mt5/protocol_lint.py` | Build gate: fails if the EA ⇄ bridge ⇄ Node 4 contract drifts (methods, params, fields, frames). |
 | `ci/deriv_probe.py`, `ci/deriv/DERIV.md` | Execution-side Deriv probe/report (which contract shapes are actually tradable). |
