@@ -359,15 +359,65 @@ test("monitor mode labels both cards monitor only", () => {
   assert.match(feedBody(), /Market data ready/);
 });
 
-test("missing market_feed / strategy renders unavailable and never throws", () => {
-  assert.equal(App.execution.apply({ timestamp: TS + 7000, work: { venue: "none" } }, "ws"), true);
+// A Node 4 build from before PR #44: node3 + work + the old blocks, no
+// `market_feed` and no `strategy` keys at all.
+function oldNode4(overrides = {}) {
+  return {
+    timestamp: TS + 7000,
+    node3: healthy().node3,
+    work: { ...healthy().work, venue: "none" },
+    open_trades: { node4_open_trades: [], timestamp: TS },
+    recent_events: [],
+    ...overrides,
+  };
+}
+
+test("a snapshot from a pre-#44 Node 4 names the build and the fix, and never throws", () => {
+  assert.equal(App.execution.apply(oldNode4(), "ws"), true);
+
+  for (const markup of [feedBody(), strategyBody()]) {
+    assert.match(markup, /data-tone="warn"/);
+    assert.match(markup, /returned a snapshot with neither market_feed nor strategy/);
+    assert.match(markup, /7f6f071 \(PR #44\) always serialises both/);
+    assert.match(markup, /redeploy Node 4 from the Node-4 branch/);
+    // The operator can see the exact endpoint and the build that answered.
+    assert.match(markup, /<code class="exec-id">https:\/\/execution\.example\/diagnostics<\/code>/);
+    assert.match(markup, /Reported build: node4-execution \u00b7 0\.1\.0 \u00b7 role execution_only/);
+    // The venue card carries the one-line section summary.
+    assert.match(venueBody(), /Node 4 build node4-execution \u00b7 0\.1\.0 \u00b7 execution_only \u00b7 market_feed missing \u00b7 strategy missing/);
+  }
   assert.match(feedBody(), /Market feed state unavailable/);
-  assert.match(feedBody(), /does not include market_feed/);
   assert.match(strategyBody(), /Local strategy state unavailable/);
-  assert.match(strategyBody(), /does not include strategy/);
+
+  // Everything else keeps rendering from the same snapshot.
   assert.match(venueBody(), /Dry run/);
-  assert.match(node3Body(), /Node 3 link unavailable/);
+  assert.match(node3Body(), /Node 3 intent link|Link starting/);
   assert.equal(elements.get("dry-run-banner").hidden, false);
+  // No mode is invented for a snapshot that reports no strategy mode.
+  assert.equal(elements.get("exec-feed-mode").textContent, DASH);
+  assert.equal(elements.get("exec-strategy-mode").textContent, DASH);
+  assert.doesNotMatch(feedBody(), /monitor only/);
+  assert.doesNotMatch(venueBody(), /market_feed present/);
+});
+
+test("one section present and the other missing points at a partial build or a proxy", () => {
+  App.execution.apply(oldNode4({ market_feed: healthy().market_feed }), "ws");
+  assert.match(feedBody(), /Market data ready/);
+  assert.match(strategyBody(), /Local strategy state unavailable/);
+  assert.match(strategyBody(), /has market_feed but no strategy/);
+  assert.match(strategyBody(), /dropping fields/);
+  assert.doesNotMatch(strategyBody(), /redeploy Node 4 from the Node-4 branch/);
+});
+
+test("a payload that is not a Node 4 snapshot is ignored, not rendered as a missing section", () => {
+  App.execution.apply(healthy(), "ws");
+  const before = feedBody();
+  // Another service answering /diagnostics: a timestamp alone proves nothing.
+  assert.equal(App.execution.apply({ timestamp: TS + 9000 }, "ws"), false);
+  assert.equal(App.execution.apply({ data: { ok: true, value: 0 } }, "ws"), false);
+  assert.equal(App.execution.apply({ type: "diagnostics", data: {} }, "ws"), false);
+  assert.equal(feedBody(), before);
+  assert.deepEqual(App.execution.getState().sections, { market_feed: true, strategy: true });
 });
 
 test("an unknown or malformed payload is ignored instead of clearing the cards", () => {
@@ -586,7 +636,7 @@ test("the page ships the new sections and the dry-run banner", () => {
   assert.doesNotMatch(markup, /\\n/);
 });
 
-test("a missing market_feed with a real snapshot never renders the dash as a reason", () => {
+test("a missing not_ready_reason is stated, never replaced by the dash", () => {
   App.execution.apply({ timestamp: TS + 60000, market_feed: { enabled: true, trading_ready: false, connected: true } }, "ws");
   assert.match(feedBody(), /Market data not ready/);
   assert.match(feedBody(), /Node 4 reported no not_ready_reason/);

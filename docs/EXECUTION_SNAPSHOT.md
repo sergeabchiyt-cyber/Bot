@@ -131,7 +131,83 @@ Always present; disabled/default in `node3` mode.
 | Feed integrity | `duplicates`, `gaps`, `out_of_order`, `contract_violations`, `resyncs` as a compact row; the `contract_violations` badge turns red on any non-zero value. |
 | Dry run | `work.venue === "none"` shows a full-width **DRY RUN** banner and a venue-card note: intents are recorded, no broker order is placed. |
 | Counts | `work.intents_duplicate` is shown as **"duplicates rejected"**, neutral: it is the expected count after a reconnect, never an error. |
-| Missing sections | A snapshot without `market_feed` / `strategy` renders those cards as "unavailable" and leaves every other panel working. Nothing throws. |
+| Missing sections | A snapshot without `market_feed` / `strategy` says which endpoint answered, which of the two keys was absent and which build reported itself, then leaves every other panel working. Nothing throws. See [Diagnosing a missing section](#diagnosing-a-missing-section). |
+
+## Diagnosing a missing section
+
+`market_feed` and `strategy` are **non-optional outbound** fields. In
+`node4-execution/src/types.rs` they carry `#[serde(default)]` (inbound
+tolerance) and no `skip_serializing_if`, and `DiagnosticsHub::build_snapshot_locked`
+always calls `feed_snapshot()` / `strategy_snapshot()`, which fall back to
+`Default` when a handle is not attached. So **every** `/diagnostics` response
+and every `diagnostics` frame from `7f6f071` (PR #44) or later contains both
+keys, in every mode — `node3`, `monitor` and `local`.
+
+A response without them is therefore a property of the deployment, not of the
+data. Three causes, in order of likelihood:
+
+1. **The running binary predates `7f6f071`** — the deployment was not rebuilt
+   after PR #44 merged. `work.version` cannot tell you this: it is
+   `CARGO_PKG_VERSION` (`1.0.0`) on both sides of the merge. Key presence can.
+2. **A proxy re-serialises the snapshot** and drops unknown fields (a strict
+   schema, an allow-list mapper, an API gateway model).
+3. **`NODE4_HOST` points at something that is not Node 4.** The dashboard then
+   ignores the payload entirely (a bare `timestamp` is not enough to look like
+   an `ExecutionSnapshot`) and keeps waiting.
+
+Check with the exact bytes:
+
+```bash
+curl -s https://<node4-host>/diagnostics \
+  | jq '{build: .work.service + " " + .work.version, role: .work.role,
+         has_market_feed: has("market_feed"), has_strategy: has("strategy"),
+         keys: (keys | sort)}'
+```
+
+Expected from a current build:
+
+```json
+{
+  "build": "xauusd-node4-execution 1.0.0",
+  "role": "execution_only",
+  "has_market_feed": true,
+  "has_strategy": true,
+  "keys": ["deriv_account", "market_feed", "mt5", "node3", "open_trades",
+           "recent_events", "strategy", "timestamp", "work"]
+}
+```
+
+Then the same over the stream (the frame must carry the identical object):
+
+```bash
+# any websocket client
+wscat -c wss://<node4-host>/ws
+> {"type":"subscribe","topics":["diagnostics"]}
+# → {"type":"diagnostics","data":{ ... "market_feed":{…}, "strategy":{…} … }}
+```
+
+If `has_strategy` is `false`, the fix is on Node 4 — redeploy from the branch
+that contains `7f6f071`, and make sure nothing between the browser and the
+service rewrites the JSON. **Do not** add `skip_serializing_if = "…"`
+annotations or move the two fields behind an `Option` to "fix" this: the
+additive, always-present shape is the contract this dashboard (and the lint in
+`ci/mt5/protocol_lint.py`) relies on.
+
+In the UI, an older build shows, on both cards:
+
+> `GET <host>/diagnostics` returned a snapshot with neither market_feed nor
+> strategy. Node 4 from 7f6f071 (PR #44) always serialises both, even in node3
+> mode, so this response comes from an older build — redeploy Node 4 from the
+> Node-4 branch. Reported build: xauusd-node4-execution · 1.0.0 · role
+> execution_only.
+
+and the **Execution venue** card ends with a one-line summary:
+
+> Node 4 build xauusd-node4-execution · 1.0.0 · execution_only · market_feed
+> missing · strategy missing
+
+One key present and the other absent is reported as a partial build or a
+dropping proxy, because no Node 4 revision serialises them separately.
 
 ## What is deliberately not represented
 
