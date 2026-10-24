@@ -1,6 +1,6 @@
 # Node 4 `/diagnostics` Live & Local Probe Report
 
-Recorded at: `2026-10-24 14:37:06 UTC`
+Recorded at: `2026-10-24 15:16:31 UTC`
 
 ## 1. Deployed Render Services
 
@@ -13,11 +13,11 @@ Recorded at: `2026-10-24 14:37:06 UTC`
   "status": 200,
   "url": "https://execution-southeastasia-sng-main.onrender.com/diagnostics",
   "headers": {
-    "Date": "Sat, 24 Oct 2026 14:37:07 GMT",
+    "Date": "Sat, 24 Oct 2026 15:16:32 GMT",
     "Content-Type": "application/json",
     "Server": "cloudflare",
     "x-render-origin-server": "Render",
-    "CF-RAY": "a4f9b7b6ff7c52ff-SEA"
+    "CF-RAY": "a4f9f1737e84c8e0-IAD"
   },
   "raw_len": 29875,
   "summary": {
@@ -39,17 +39,17 @@ Recorded at: `2026-10-24 14:37:06 UTC`
     "version": "1.0.0",
     "venue": "DerivDemo",
     "started_at": 1791398084400,
-    "uptime_secs": 1454542,
+    "uptime_secs": 1456907,
     "node1_ws_url": "wss://engine-southeastasia-sng-main.onrender.com/ws",
     "node1_connected": true,
     "node1_state": "connected",
     "node1_reconnect_count": 78,
-    "last_node1_msg_ts": 1792852618587,
+    "last_node1_msg_ts": 1792854988587,
     "last_candle_ts": 1792841938604,
     "last_levels_ts": 1792841938601,
     "candles_received": 6849614,
     "levels_received": 840,
-    "ws_messages_received": 6899046,
+    "ws_messages_received": 6899125,
     "candle_buffer_len": 30,
     "candle_buffer_capacity": 30,
     "last_price": 3998.16,
@@ -85,7 +85,7 @@ Recorded at: `2026-10-24 14:37:06 UTC`
     "trades_failed": 97,
     "last_signal_ts": 1792638412510,
     "last_error": "Deriv WS disconnected \u2014 reconnecting",
-    "ws_clients_connected": 1
+    "ws_clients_connected": 0
   },
   "node3": null,
   "market_feed": null,
@@ -124,17 +124,17 @@ Recorded at: `2026-10-24 14:37:06 UTC`
         "version": "1.0.0",
         "venue": "DerivDemo",
         "started_at": 1791398084400,
-        "uptime_secs": 1454543,
+        "uptime_secs": 1456908,
         "node1_ws_url": "wss://engine-southeastasia-sng-main.onrender.com/ws",
         "node1_connected": true,
         "node1_state": "connected",
         "node1_reconnect_count": 78,
-        "last_node1_msg_ts": 1792852618587,
+        "last_node1_msg_ts": 1792854988587,
         "last_candle_ts": 1792841938604,
         "last_levels_ts": 1792841938601,
         "candles_received": 6849614,
         "levels_received": 840,
-        "ws_messages_received": 6899046,
+        "ws_messages_received": 6899125,
         "candle_buffer_len": 30,
         "candle_buffer_capacity": 30,
         "last_price": 3998.16,
@@ -170,7 +170,7 @@ Recorded at: `2026-10-24 14:37:06 UTC`
         "trades_failed": 97,
         "last_signal_ts": 1792638412510,
         "last_error": "Deriv WS disconnected \u2014 reconnecting",
-        "ws_clients_connected": 2
+        "ws_clients_connected": 1
       },
       "has_market_feed": false,
       "has_strategy": false
@@ -206,13 +206,208 @@ Recorded at: `2026-10-24 14:37:06 UTC`
 
 ```json
 {
-  "unconfigured_default_exit": {
-    "exit_code": 2,
-    "output": [
-      "\u001b[2m2026-10-24T14:37:13.741699Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2mxauusd_node4_execution\u001b[0m\u001b[2m:\u001b[0m startup configuration error: NODE3_WS_URL is not set \u2014 in `node3` mode Node 4 is an outbound client of the strategy service and cannot accept intents without it",
-      "\u001b[2m2026-10-24T14:37:13.741730Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2mxauusd_node4_execution\u001b[0m\u001b[2m:\u001b[0m startup configuration error: NODE4_SHARED_TOKEN is not set \u2014 the Node 3 handshake would be rejected (set the same value on Node 3 and Node 4)",
-      "\u001b[2m2026-10-24T14:37:13.741741Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2mxauusd_node4_execution\u001b[0m\u001b[2m:\u001b[0m refusing to start \u2014 Node 4 never guesses a venue and never falls back to another one"
-    ]
+  "unconfigured_fail_closed_mode": {
+    "http": {
+      "ok": true,
+      "status": 200,
+      "url": "http://127.0.0.1:19090/diagnostics",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "raw_len": 5349,
+      "summary": {
+        "build": "xauusd-node4-execution 1.0.0",
+        "role": "execution_only",
+        "has_market_feed": true,
+        "has_strategy": true,
+        "keys": [
+          "deriv_account",
+          "market_feed",
+          "mt5",
+          "node3",
+          "open_trades",
+          "recent_events",
+          "strategy",
+          "timestamp",
+          "work"
+        ]
+      },
+      "work": {
+        "service": "xauusd-node4-execution",
+        "version": "1.0.0",
+        "role": "execution_only",
+        "venue": "none",
+        "started_at": 1792854999111,
+        "uptime_secs": 0,
+        "execution_protocol_version": 1,
+        "ledger_path": "/tmp/tmpr_n2g_p8/ledger.jsonl",
+        "ledger_available": true,
+        "ledger_records": 0,
+        "ledger_intents": 0,
+        "intents_received": 0,
+        "intents_accepted": 0,
+        "intents_rejected": 0,
+        "intents_expired": 0,
+        "intents_duplicate": 0,
+        "orders_placed": 0,
+        "orders_filled": 0,
+        "orders_partial": 0,
+        "orders_rejected": 0,
+        "orders_unknown": 0,
+        "orders_reconciled": 0,
+        "last_intent_ts": null,
+        "last_report_ts": null,
+        "last_error": "NODE3_WS_URL is not set \u2014 in `node3` mode Node 4 is an outbound client of the strategy service and cannot accept intents without it",
+        "ws_clients_connected": 0
+      },
+      "node3": {
+        "url": "",
+        "token_configured": false,
+        "protocol_version": 1,
+        "connected": false,
+        "authenticated": false,
+        "state": "unconfigured",
+        "session_age_secs": null,
+        "last_message_ts": null,
+        "last_hello_ack_ts": null,
+        "last_report_ts": null,
+        "reconnect_count": 0,
+        "frames_received": 0,
+        "reports_sent": 0,
+        "reports_acked": 0,
+        "last_error": "NODE3_WS_URL is not set"
+      },
+      "market_feed": {
+        "enabled": false,
+        "state": "disabled",
+        "trading_ready": false,
+        "not_ready_reason": "NODE1_FEED_ENABLED is not set",
+        "url": "",
+        "auth": "none",
+        "contract_version": null,
+        "contract_required": "1.0",
+        "symbol": "XAUUSD",
+        "interval": "15m",
+        "connected": false,
+        "last_frame_ms": null,
+        "last_status_ms": null,
+        "last_candle_time": null,
+        "last_closed_candle_time": null,
+        "last_levels_ts": null,
+        "last_seq": null,
+        "session_closed_candles": 0,
+        "sync_complete": false,
+        "contract_ok": false,
+        "freshness_state": null,
+        "freshness_age_ms": null,
+        "market_open": null,
+        "reconnect_count": 0,
+        "frames_received": 0,
+        "candles_received": 0,
+        "closed_candles": 0,
+        "levels_received": 0,
+        "status_frames": 0,
+        "duplicates": 0,
+        "out_of_order": 0,
+        "gaps": 0,
+        "contract_violations": 0,
+        "resyncs": 0,
+        "last_error": null,
+        "last_event_ms": null
+      },
+      "strategy": {
+        "enabled": false,
+        "mode": "monitor",
+        "strategy_version": "vp_break_retest_v1",
+        "symbol": "XAUUSD",
+        "interval": "15m",
+        "volume_threshold": 10500.0,
+        "sl_min_pips": 200.0,
+        "sl_max_pips": 300.0,
+        "tp_min_pips": 600.0,
+        "tp_max_pips": 800.0,
+        "rr_min": 2.0,
+        "rr_max": 3.0,
+        "ttl_secs": 120,
+        "levels_tracked": 0,
+        "candles_observed": 0,
+        "last_candle_time": null,
+        "atr": 0.0,
+        "last_decision_at_ms": null,
+        "last_action": "flat",
+        "last_trigger_level": null,
+        "last_intent_id": null,
+        "intents_emitted": 0,
+        "intents_suppressed": 0,
+        "last_suppression_reason": null,
+        "last_error": null,
+        "updated_at": null,
+        "breaks_detected": 0,
+        "breaks_invalidated": 0,
+        "retests_rejected_low_volume": 0,
+        "signals_confirmed": 0
+      }
+    },
+    "ws": {
+      "ok": true,
+      "ws_url": "ws://127.0.0.1:19090/ws",
+      "frames": [
+        {
+          "type": "diagnostics",
+          "top_keys": [
+            "data",
+            "type"
+          ],
+          "summary": {
+            "build": "xauusd-node4-execution 1.0.0",
+            "role": "execution_only",
+            "has_market_feed": true,
+            "has_strategy": true,
+            "keys": [
+              "deriv_account",
+              "market_feed",
+              "mt5",
+              "node3",
+              "open_trades",
+              "recent_events",
+              "strategy",
+              "timestamp",
+              "work"
+            ]
+          },
+          "work": {
+            "service": "xauusd-node4-execution",
+            "version": "1.0.0",
+            "role": "execution_only",
+            "venue": "none",
+            "started_at": 1792854999111,
+            "uptime_secs": 0,
+            "execution_protocol_version": 1,
+            "ledger_path": "/tmp/tmpr_n2g_p8/ledger.jsonl",
+            "ledger_available": true,
+            "ledger_records": 0,
+            "ledger_intents": 0,
+            "intents_received": 0,
+            "intents_accepted": 0,
+            "intents_rejected": 0,
+            "intents_expired": 0,
+            "intents_duplicate": 0,
+            "orders_placed": 0,
+            "orders_filled": 0,
+            "orders_partial": 0,
+            "orders_rejected": 0,
+            "orders_unknown": 0,
+            "orders_reconciled": 0,
+            "last_intent_ts": null,
+            "last_report_ts": null,
+            "last_error": "NODE3_WS_URL is not set \u2014 in `node3` mode Node 4 is an outbound client of the strategy service and cannot accept intents without it",
+            "ws_clients_connected": 1
+          },
+          "has_market_feed": true,
+          "has_strategy": true
+        }
+      ]
+    }
   },
   "node1_strategy_mode": {
     "http": {
@@ -245,10 +440,10 @@ Recorded at: `2026-10-24 14:37:06 UTC`
         "version": "1.0.0",
         "role": "execution_only",
         "venue": "none",
-        "started_at": 1792852633744,
+        "started_at": 1792854999220,
         "uptime_secs": 0,
         "execution_protocol_version": 1,
-        "ledger_path": "/tmp/tmpttpb5w8j/ledger.jsonl",
+        "ledger_path": "/tmp/tmpekwkji6x/ledger.jsonl",
         "ledger_available": true,
         "ledger_records": 0,
         "ledger_intents": 0,
@@ -321,7 +516,7 @@ Recorded at: `2026-10-24 14:37:06 UTC`
         "contract_violations": 0,
         "resyncs": 0,
         "last_error": "cannot connect to ws://127.0.0.1:19999/ws: IO error: Connection refused (os error 111)",
-        "last_event_ms": 1792852633745
+        "last_event_ms": 1792854999220
       },
       "strategy": {
         "enabled": true,
@@ -388,10 +583,10 @@ Recorded at: `2026-10-24 14:37:06 UTC`
             "version": "1.0.0",
             "role": "execution_only",
             "venue": "none",
-            "started_at": 1792852633744,
+            "started_at": 1792854999220,
             "uptime_secs": 0,
             "execution_protocol_version": 1,
-            "ledger_path": "/tmp/tmpttpb5w8j/ledger.jsonl",
+            "ledger_path": "/tmp/tmpekwkji6x/ledger.jsonl",
             "ledger_available": true,
             "ledger_records": 0,
             "ledger_intents": 0,
@@ -425,7 +620,7 @@ Recorded at: `2026-10-24 14:37:06 UTC`
       "headers": {
         "Content-Type": "application/json"
       },
-      "raw_len": 4854,
+      "raw_len": 5041,
       "summary": {
         "build": "xauusd-node4-execution 1.0.0",
         "role": "execution_only",
@@ -448,10 +643,10 @@ Recorded at: `2026-10-24 14:37:06 UTC`
         "version": "1.0.0",
         "role": "execution_only",
         "venue": "none",
-        "started_at": 1792852633852,
+        "started_at": 1792854999330,
         "uptime_secs": 0,
         "execution_protocol_version": 1,
-        "ledger_path": "/tmp/tmpot3qo1s_/ledger.jsonl",
+        "ledger_path": "/tmp/tmpgmj77lcd/ledger.jsonl",
         "ledger_available": true,
         "ledger_records": 0,
         "ledger_intents": 0,
@@ -486,7 +681,7 @@ Recorded at: `2026-10-24 14:37:06 UTC`
         "frames_received": 0,
         "reports_sent": 0,
         "reports_acked": 0,
-        "last_error": null
+        "last_error": "cannot connect to ws://127.0.0.1:19998/execution: IO error: Connection refused (os error 111)"
       },
       "market_feed": {
         "enabled": false,
@@ -591,10 +786,10 @@ Recorded at: `2026-10-24 14:37:06 UTC`
             "version": "1.0.0",
             "role": "execution_only",
             "venue": "none",
-            "started_at": 1792852633852,
+            "started_at": 1792854999330,
             "uptime_secs": 0,
             "execution_protocol_version": 1,
-            "ledger_path": "/tmp/tmpot3qo1s_/ledger.jsonl",
+            "ledger_path": "/tmp/tmpgmj77lcd/ledger.jsonl",
             "ledger_available": true,
             "ledger_records": 0,
             "ledger_intents": 0,
