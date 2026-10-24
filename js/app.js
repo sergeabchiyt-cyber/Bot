@@ -1,9 +1,12 @@
 /* ============================================================
  * XAUUSD Terminal — bootstrap.
  *
- * One Node 1 WebSocket feeds every panel. On mount the REST snapshots
+ * One Node 1 WebSocket feeds every market panel. On mount the REST snapshots
  * (`/strategy`, `/demo`, `/status`) seed the UI; while the socket is down a
  * 5 s REST poll keeps strategy + demo fresh and the header shows DELAYED.
+ *
+ * Node 4 execution diagnostics have their own socket and REST seed inside
+ * js/execution.js, so one service being down never disturbs the other.
  * Nothing on this page can place, modify or close an order.
  * ============================================================ */
 (function (App) {
@@ -90,6 +93,7 @@
   if (App.strategy) App.strategy.start();
   if (App.demo) App.demo.start();
   if (App.status) App.status.start();
+  if (App.execution) App.execution.start();
 
   // Mount-time REST seeds run before the first socket frame.
   App.socket.start();

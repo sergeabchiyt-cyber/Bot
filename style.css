@@ -1315,6 +1315,200 @@ button:disabled { cursor: not-allowed; opacity: 0.4; }
   color: var(--text-dim);
 }
 
+
+/* ---------- Node 4 execution diagnostics ---------- */
+
+.dry-run-banner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 12px;
+  background: rgba(240, 185, 11, 0.09);
+  border-bottom: 1px solid rgba(240, 185, 11, 0.28);
+  color: var(--gold);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.dry-run-tag {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: #0B0E11;
+  background: var(--gold);
+  border-radius: 3px;
+  padding: 2px 7px;
+}
+
+.panel-exec .panel-body { padding-top: 9px; }
+
+.exec-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.exec-status[data-tone="live"] { color: var(--teal); }
+.exec-status[data-tone="warn"] { color: var(--gold); }
+.exec-status[data-tone="bad"] { color: var(--coral); }
+.exec-status[data-tone="muted"] { color: var(--text-muted); }
+
+.exec-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.exec-flag {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--gold);
+  border: 1px solid rgba(240, 185, 11, 0.4);
+  border-radius: 999px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.exec-reason {
+  margin: 6px 0 0;
+  padding: 5px 8px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--bg-2);
+  border-left: 2px solid var(--border-strong);
+  border-radius: 0 3px 3px 0;
+  overflow-wrap: anywhere;
+}
+.exec-reason[data-tone="bad"] { border-left-color: var(--coral); }
+.exec-reason[data-tone="warn"] { border-left-color: var(--gold); }
+.exec-reason[data-tone="muted"] { color: var(--text-muted); }
+
+.exec-note {
+  margin: 8px 0 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.exec-note.is-warn { color: var(--gold); }
+.exec-note.is-bad { color: var(--coral); }
+
+.exec-meta {
+  margin-top: 6px;
+  font-size: 9.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.exec-meta .muted { margin-right: 4px; }
+
+.exec-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 9.5px;
+  color: var(--text);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  overflow-wrap: anywhere;
+}
+
+.integrity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.integrity-chip {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+.integrity-chip b {
+  margin-left: 2px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.integrity-chip.is-bad {
+  color: #FF8A85;
+  border-color: rgba(239, 83, 80, 0.45);
+  background: rgba(239, 83, 80, 0.12);
+}
+.integrity-chip.is-bad b { color: #FF8A85; }
+
+.exec-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 9px 0 0;
+}
+.exec-symbol {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.exec-version {
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 0.03em;
+  margin-left: auto;
+  overflow-wrap: anywhere;
+}
+
+.action-badge.is-unknown {
+  color: var(--text-muted);
+  background: var(--bg-2);
+  border-color: var(--border);
+}
+
+.exec-intents {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 10px;
+}
+.exec-intent {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 7px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.exec-intent-key {
+  font-size: 8px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.exec-intent b { font-size: 12px; font-weight: 700; }
+
+@media (max-width: 720px) {
+  .dry-run-banner { padding: 4px 10px; font-size: 10px; }
+}
+
 /* ============================================================
  * Responsive
  * ============================================================ */
