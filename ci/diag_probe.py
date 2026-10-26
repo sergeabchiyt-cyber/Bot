@@ -1,59 +1,64 @@
 #!/usr/bin/env python3
-"""Fetch SiftingIO public OpenAPI / AsyncAPI / docs sections for historical bars and WS ticks."""
+"""Fetch SiftingIO commodities historical + pagination + websocket docs."""
 
+import html
 import re
 import sys
 import urllib.error
 import urllib.request
 
 
-def http_get(url, timeout=20):
+def http_get(url, accept="text/markdown, text/plain, text/html", timeout=20):
     req = urllib.request.Request(
-        url, headers={"User-Agent": "Mozilla/5.0", "Accept-Encoding": "identity"}
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Accept": accept,
+            "Accept-Encoding": "identity",
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status, resp.read().decode("utf-8", "replace")
+            return resp.status, resp.headers.get("Content-Type", ""), resp.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as err:
         body = err.read().decode("utf-8", "replace") if err.fp else ""
-        return err.code, body
+        return err.code, "", body
     except Exception as exc:
-        return -1, str(exc)
+        return -1, "", str(exc)
+
+
+def strip_html(raw):
+    raw = re.sub(r"<script\b[^>]*>.*?</script>", " ", raw, flags=re.S | re.I)
+    raw = re.sub(r"<style\b[^>]*>.*?</style>", " ", raw, flags=re.S | re.I)
+    raw = re.sub(r"<[^>]+>", "\n", raw)
+    raw = html.unescape(raw)
+    return "\n".join(line.strip() for line in raw.splitlines() if line.strip())
 
 
 def main():
-    lines = ["# SiftingIO Spec Extract", ""]
-
-    # 1. Full llms-full.txt (58 KB)
-    code, text = http_get("https://sifting.io/llms-full.txt")
-    lines.append(f"## 1. llms-full.txt ({code}, {len(text)} chars)")
-    lines.append(text)
-    lines.append("")
-
-    # 2. pricing.md
-    code, text = http_get("https://sifting.io/pricing.md")
-    lines.append(f"## 2. pricing.md ({code}, {len(text)} chars)")
-    lines.append(text[:15000])
-    lines.append("")
-
-    # 3. openapi.yaml — extract commodities/bars + components/parameters/schemas + pagination/errors
-    code, openapi = http_get("https://sifting.io/openapi.yaml")
-    lines.append(f"## 3. openapi.yaml ({code}, {len(openapi)} chars)")
-    if len(openapi) <= 120000:
-        lines.append(openapi)
-    else:
-        for m in re.finditer(r"(?im)^.*(?:commodit|bars|cursor|interval|hist).*$", openapi):
-            start = max(0, m.start() - 400)
-            end = min(len(openapi), m.end() + 1200)
-            lines.append("--- match ---")
-            lines.append(openapi[start:end])
-    lines.append("")
-
-    # 4. asyncapi.yaml
-    code, asyncapi = http_get("https://sifting.io/asyncapi.yaml")
-    lines.append(f"## 4. asyncapi.yaml ({code}, {len(asyncapi)} chars)")
-    lines.append(asyncapi[:50000])
-    lines.append("")
+    urls = [
+        "https://sifting.io/docs/historical/commodities.md",
+        "https://sifting.io/docs/historical/commodities",
+        "https://sifting.io/blog/commodities-market-data-api-backfill-history-stream-live-prices.md",
+        "https://sifting.io/blog/commodities-market-data-api-backfill-history-stream-live-prices",
+        "https://sifting.io/blog/cursor-pagination-market-data-api-years-of-1-minute-ohlcv-bars.md",
+        "https://sifting.io/blog/cursor-pagination-market-data-api-years-of-1-minute-ohlcv-bars",
+        "https://sifting.io/blog/commodities-data-api-coverage-symbols-gold-silver-oil",
+        "https://sifting.io/blog/streaming-gold-silver-oil-prices-websocket-commodities-api",
+    ]
+    lines = ["# SiftingIO Commodities & Pagination Docs", ""]
+    for u in urls:
+        code, ct, body = http_get(u)
+        lines.append(f"## {u} -> {code} ({len(body)} chars, ct={ct})")
+        if code == 200:
+            if "html" in ct.lower():
+                cleaned = strip_html(body)
+                lines.append(cleaned[:18000])
+            else:
+                lines.append(body[:18000])
+        else:
+            lines.append(body[:400])
+        lines.append("")
 
     out_path = sys.argv[1] if len(sys.argv) > 1 else "ci/live/diag.md"
     with open(out_path, "w", encoding="utf-8") as fh:
