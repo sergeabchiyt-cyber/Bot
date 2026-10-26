@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xauusd.local/contracts/c3-intent.schema.json",
+  "title": "C3 v1.1 — Node 3 → Node 4 trade_intent (private /execution)",
+  "description": "Protocol version 1, intent schema version 1. v1.1 adds OPTIONAL flat provenance fields. Node 4's serde parser ignores unknown fields, so a v1.1 frame is accepted by a v1 consumer. Node 4 persists intent_id before any broker write and never rewrites stop_loss/take_profit.",
+  "type": "object",
+  "required": [
+    "schema_version", "intent_id", "symbol", "side", "order_type",
+    "reference_price", "stop_loss", "take_profit", "risk_reward",
+    "created_at", "expires_at"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "intent_id": { "type": "string", "minLength": 1, "description": "deterministic, cross-service idempotency key" },
+    "strategy": { "type": "string", "description": "e.g. vp_break_retest_v1" },
+    "symbol": { "const": "XAUUSD" },
+    "side": { "enum": ["buy", "sell"] },
+    "order_type": { "const": "market" },
+    "reference_price": { "type": "number", "exclusiveMinimum": 0 },
+    "stop_loss": { "type": "number", "exclusiveMinimum": 0 },
+    "take_profit": { "type": "number", "exclusiveMinimum": 0 },
+    "risk_reward": { "type": "number", "minimum": 2.0, "maximum": 3.0 },
+    "level_name": { "type": "string" },
+    "source_candle_time": { "type": "integer" },
+    "created_at": { "type": "integer" },
+    "expires_at": { "type": "integer", "description": "must be > created_at; Node 4 rejects now >= expires_at" },
+
+    "atr": { "type": ["number", "null"], "description": "v1.1 additive; optional" },
+    "atr_pips": { "type": ["number", "null"], "description": "v1.1 additive; optional" },
+    "level_id": { "type": ["string", "null"], "description": "v1.1 additive; optional" },
+    "drawing_id": { "type": ["string", "null"], "description": "v1.1 additive; optional" },
+    "strategy_version": { "type": ["string", "null"], "description": "v1.1 additive; bump when rules change" },
+    "volume_confirmed": { "type": ["boolean", "null"], "description": "v1.1 additive; D6 leaves the volume filter off" }
+  },
+  "not": {
+    "description": "An intent must never carry account-aware or credential fields.",
+    "anyOf": [
+      { "required": ["venue"] }, { "required": ["account"] }, { "required": ["stake"] },
+      { "required": ["lots"] }, { "required": ["leverage"] }, { "required": ["token"] },
+      { "required": ["password"] }, { "required": ["MT5_LOGIN"] }
+    ]
+  }
+}

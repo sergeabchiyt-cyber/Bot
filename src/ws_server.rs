@@ -1,66 +1,87 @@
+//! HTTP + WebSocket surface (C1 v2).
+//!
+//! Five `GET` routes and one upgrade. There is no write route anywhere: the
+//! CORS layer only offers `GET, OPTIONS`, and the router only registers `get`.
+//!
+//! The socket is a one-way market feed. A client may send `subscribe` and
+//! `heartbeat`; every other frame — including anything shaped like an order or
+//! a fill — is dropped and never rebroadcast.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
+
 use axum::{
     Json, Router,
     extract::{
         Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{HeaderValue, Method, header},
+    http::{HeaderValue, Method, StatusCode, header},
     response::{IntoResponse, Response},
     routing::get,
 };
+use futures_util::stream::SplitSink;
 use futures_util::{SinkExt, StreamExt};
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::{RwLock, broadcast};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
 
-use crate::ai_cache::AiCache;
+use crate::candles::{CAPACITY_H1, CAPACITY_M1, CAPACITY_M15, CandleBook};
 use crate::config::Config;
-use crate::demo_engine::DemoEngine;
-use crate::status::FeedStatus;
-use crate::strategy::StrategyEngine;
+use crate::publish::MarketPublisher;
+use crate::session;
+use crate::sifting_rest::SEED_BARS;
+use crate::status::{BootInfo, FeedStatus, FreshnessTracker};
 use crate::tick_volume::TickVolumeStore;
-use crate::types::{TickVolumeBar, VpCandle, VpLevels, WsFrame};
-use crate::volume_profile::{CustomRangeError, VolumeProfileEngine};
+use crate::types::{
+    BROADCAST_CAPACITY, CONTRACT_VERSION, Candle, Freshness, FreshnessState, HEARTBEAT_SECS,
+    Interval, Publication, Topic, WsFrame, is_rejected_kind,
+};
 
-/// Fourteen ATR true ranges need fifteen OHLC bars (the first close is the
-/// reference close for the first range). Replay just this recent candle tail
-/// over WS; clients that need the full chart history can use GET /candles.
-const CANDLE_REPLAY_LIMIT: usize = 15;
+/// Closed candles replayed per resolution when a client subscribes. The full
+/// history is a REST call (`GET /candles?interval=1h`): replay is only the
+/// live edge.
+fn replay_bars(interval: Interval) -> usize {
+    match interval {
+        Interval::M1 => 240,
+        Interval::M15 => 96,
+        Interval::H1 => 48,
+    }
+}
 
+fn capacity(interval: Interval) -> usize {
+    match interval {
+        Interval::M1 => CAPACITY_M1,
+        Interval::M15 => CAPACITY_M15,
+        Interval::H1 => CAPACITY_H1,
+    }
+}
+
+/// Everything a handler needs. Cheap to clone (every field is a handle).
 #[derive(Clone)]
 pub struct AppState {
-    pub tx: broadcast::Sender<WsFrame>,
-    pub cached_levels: Arc<RwLock<Vec<VpLevels>>>,
-    pub cached_candles: Arc<RwLock<Vec<VpCandle>>>,
-    pub cached_calendar: Arc<RwLock<serde_json::Value>>,
+    pub publisher: MarketPublisher,
+    pub candles: CandleBook,
     pub tick_volume: TickVolumeStore,
-    pub vp: Arc<RwLock<VolumeProfileEngine>>,
+    pub calendar: Arc<RwLock<serde_json::Value>>,
     pub status: FeedStatus,
+    pub freshness: FreshnessTracker,
+    pub boot: Arc<BootInfo>,
     pub config: Config,
-    /// Everything Node3 reports back (transcripts, sentiment, health).
-    pub ai: Arc<AiCache>,
-    /// Built-in strategy evaluator (price + volume profile + tick volume).
-    pub strategy: Arc<RwLock<StrategyEngine>>,
-    /// Demo (paper) account: 1:1000 leverage, 0.10 spread, 0.01-1.00 lots.
-    pub demo: Arc<RwLock<DemoEngine>>,
 }
 
 /// Browser-facing CORS policy.
 ///
-/// The Node2 dashboard is a static site served from its own origin, so that
+/// The Node 2 dashboard is a static site served from its own origin, so that
 /// origin has to be allowed explicitly: no wildcard, no `Any`, and no
 /// credentials — nothing here is cookie/token authenticated, and mirroring
 /// arbitrary origins would let any page read the API.
 ///
-/// `AllowOrigin::list` is used instead of `AllowOrigin::exact` on purpose.
-/// `exact` is a *constant* header value, so tower-http emits
-/// `access-control-allow-origin` on every response regardless of who asked —
-/// a foreign origin would still see it (harmless to browsers, which block the
-/// read, but it also makes the response cacheable under a lie). `list` compares
-/// the request's `Origin` first and simply omits the header when it does not
-/// match, which is what "only this origin may call the API" requires.
+/// `AllowOrigin::list` compares the request's `Origin` first and simply omits
+/// the header when it does not match, which is what "only this origin may call
+/// the API" requires (unlike `exact`, which is a constant header value emitted
+/// to every caller).
 pub fn cors_layer(allowed_origin: &str) -> CorsLayer {
     let origin = allowed_origin.parse::<HeaderValue>().unwrap_or_else(|e| {
         panic!("CORS_ALLOWED_ORIGIN must be a valid header value ({allowed_origin:?}): {e}")
@@ -72,9 +93,9 @@ pub fn cors_layer(allowed_origin: &str) -> CorsLayer {
         .allow_headers([header::CONTENT_TYPE, header::ACCEPT, header::ORIGIN])
         .max_age(Duration::from_secs(600))
         // tower-http's default `vary` only lists the preflight request headers.
-        // Origin has to be in there too: the response body is the same for
-        // everyone but the allow-header differs per origin, so a shared cache
-        // (Render's proxy) must never hand ours to another requester.
+        // Origin has to be in there too: the body is the same for everyone but
+        // the allow-header differs per origin, so a shared cache (Render's
+        // proxy) must never hand ours to another requester.
         .vary([
             header::ORIGIN,
             header::ACCESS_CONTROL_REQUEST_METHOD,
@@ -92,15 +113,10 @@ pub fn router(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(health))
-        .route("/levels", get(levels_snapshot))
-        .route("/vp", get(vp_audit))
+        .route("/status", get(status_snapshot))
         .route("/candles", get(candles_snapshot))
         .route("/tick-volume", get(tick_volume_snapshot))
         .route("/calendar", get(calendar_snapshot))
-        .route("/ai", get(ai_snapshot))
-        .route("/strategy", get(strategy_snapshot))
-        .route("/demo", get(demo_snapshot))
-        .route("/status", get(status_snapshot))
         .route("/ws", get(ws_handler))
         .with_state(state)
         .layer(cors)
@@ -110,421 +126,326 @@ async fn health() -> &'static str {
     "ok"
 }
 
-async fn levels_snapshot(State(state): State<AppState>) -> Json<Vec<VpLevels>> {
-    let vp = state.vp.read().await;
-    Json(vp.all_levels())
-}
-
-/// Full volume-profile histogram for one window, for auditing against the
-/// TradingView chart: which range, which row model and which input resolution
-/// produced the emitted POC/VAH/VAL.
+/// Closed bars for one resolution, ascending and unique by `time`.
 ///
-/// `GET /vp`                  -> the configured model for PW
-/// `GET /vp?window=PS`        -> another window (PW/PS/CW/SWING_BULL/SWING_BEAR)
-/// `GET /vp?window=PW&rows=64`-> recompute that window with a different row
-///                               count, to line the numbers up with a specific
-///                               TradingView "Row Size" setting
-/// `GET /vp?start=<ms>&end=<ms>`
-///                            -> profile a hand-selected range from the
-///                               retained 1m history (`window=CUSTOM`), which
-///                               is how a Fixed Range Volume Profile drawn on
-///                               the chart is reproduced here exactly
-///
-/// 400 -> malformed `rows`/`start`/`end` (or an inverted range);
-/// 404 -> no profile computed for that window yet;
-/// 409 -> the range is valid but too little of it is still retained.
-async fn vp_audit(
+/// `interval` defaults to `15m` (the chart's original contract) and rejects
+/// anything else with a 400 instead of silently serving another resolution.
+async fn candles_snapshot(
     State(state): State<AppState>,
-    Query(params): Query<std::collections::HashMap<String, String>>,
+    Query(params): Query<HashMap<String, String>>,
 ) -> Response {
-    let rows_override: Option<usize> = match params.get("rows") {
-        Some(raw) => match raw.trim().parse::<usize>() {
-            Ok(rows) => Some(rows.clamp(2, 5_000)),
-            Err(_) => {
+    let interval = match params.get("interval") {
+        None => Interval::M15,
+        Some(raw) => match Interval::parse(raw) {
+            Some(interval) => interval,
+            None => {
                 return (
-                    axum::http::StatusCode::BAD_REQUEST,
+                    StatusCode::BAD_REQUEST,
                     Json(serde_json::json!({
-                        "error": "rows must be an integer between 2 and 5000"
+                        "error": "interval must be one of 1m, 15m, 1h",
+                        "contract_version": CONTRACT_VERSION,
                     })),
                 )
                     .into_response();
             }
         },
-        None => None,
     };
-
-    // Hand-selected range: the chart already knows which range it drew, so
-    // profile exactly that instead of one of the engine's own windows.
-    if params.contains_key("start") || params.contains_key("end") {
-        let (start, end) = match (
-            parse_epoch_ms(&params, "start"),
-            parse_epoch_ms(&params, "end"),
-        ) {
-            (Some(start), Some(end)) => (start, end),
-            _ => {
-                return (
-                    axum::http::StatusCode::BAD_REQUEST,
-                    Json(serde_json::json!({
-                        "error": "start and end must both be epoch milliseconds"
-                    })),
-                )
-                    .into_response();
-            }
-        };
-        let vp = state.vp.read().await;
-        return match vp.audit_custom_range(start, end, rows_override) {
-            Ok(audit) => Json(audit).into_response(),
-            Err(err) => {
-                let status = match err {
-                    CustomRangeError::Invalid => axum::http::StatusCode::BAD_REQUEST,
-                    CustomRangeError::NotRetained => axum::http::StatusCode::CONFLICT,
-                };
-                let retained = vp
-                    .retained_bounds()
-                    .map(|(first, last)| serde_json::json!({ "first": first, "last": last }));
-                (
-                    status,
-                    Json(serde_json::json!({
-                        "error": err.message(),
-                        "start": start,
-                        "end": end,
-                        "retained": retained,
-                    })),
-                )
-                    .into_response()
-            }
-        };
-    }
-
-    let window = params
-        .get("window")
-        .map(|w| w.trim().to_ascii_uppercase())
-        .filter(|w| !w.is_empty())
-        .unwrap_or_else(|| "PW".to_string());
-
-    let vp = state.vp.read().await;
-    match vp.audit(&window, rows_override) {
-        Some(audit) => Json(audit).into_response(),
-        None => (
-            axum::http::StatusCode::NOT_FOUND,
-            Json(serde_json::json!({
-                "error": "no profile computed for this window yet",
-                "window": window,
-            })),
-        )
-            .into_response(),
-    }
-}
-
-/// Epoch milliseconds from a query parameter, or `None` when it is missing or
-/// not a number. Empty values (`?start=`) are rejected like a typo.
-fn parse_epoch_ms(params: &std::collections::HashMap<String, String>, key: &str) -> Option<i64> {
-    params.get(key)?.trim().parse::<i64>().ok()
-}
-
-async fn candles_snapshot(State(state): State<AppState>) -> Json<Vec<VpCandle>> {
-    let candles = state.cached_candles.read().await;
-    Json(candles.clone())
-}
-
-/// Live tick-volume bars built since boot (oldest first; the last one may be
-/// the in-progress bucket, `closed: false`). History before boot is the
-/// `volume` field of `/candles`, which uses the same tick-count unit.
-async fn tick_volume_snapshot(State(state): State<AppState>) -> Response {
-    let bars: Vec<TickVolumeBar> = state.tick_volume.snapshot();
+    let bars: Vec<Candle> = state.candles.closed(interval);
     ([(header::CACHE_CONTROL, "no-store")], Json(bars)).into_response()
 }
 
-async fn calendar_snapshot(State(state): State<AppState>) -> Json<serde_json::Value> {
-    Json(state.cached_calendar.read().await.clone())
+/// Live tick-volume bars (oldest first; the last one may be the in-progress
+/// bucket, `closed: false`).
+async fn tick_volume_snapshot(State(state): State<AppState>) -> Response {
+    let bars = state.tick_volume.snapshot();
+    ([(header::CACHE_CONTROL, "no-store")], Json(bars)).into_response()
 }
 
-/// What the econ news delivered today: Node3's transcripts + sentiment
-/// (plus last health), filtered to the current UTC day.
-async fn ai_snapshot(State(state): State<AppState>) -> Json<serde_json::Value> {
-    Json(state.ai.snapshot_today())
-}
-
-/// Latest strategy evaluation: params, the current decision and a short
-/// history. The `strategy` WS topic carries the same decision payload live.
-async fn strategy_snapshot(State(state): State<AppState>) -> Response {
-    let body = state.strategy.read().await.snapshot();
+async fn calendar_snapshot(State(state): State<AppState>) -> Response {
+    let body = state.calendar.read().await.clone();
     ([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
-}
-
-/// Demo (paper) account: balance, equity, margin, the open position and the
-/// closed-trade history. This is a simulator — the response is read-only and
-/// there is no route that submits an order.
-async fn demo_snapshot(State(state): State<AppState>) -> Response {
-    let body = state.demo.read().await.snapshot();
-    ([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
-}
-
-/// Fill in the `data` envelope at the edge for loose producer payloads:
-/// `{"type":"learn","features":[..],"target":1}` and
-/// `{"type":"audio_chunk","audio":"<b64>"}` are accepted alongside the
-/// canonical `{"type":"...","data":{...}}` shape Node3 uses, and normalized
-/// before rebroadcast so subscribers always see one wire format.
-fn normalize_envelope(raw: &str, frame: WsFrame) -> WsFrame {
-    let needs_payload = match &frame {
-        WsFrame::AudioChunk { data } | WsFrame::Learn { data } => data.is_null(),
-        _ => return frame,
-    };
-    if !needs_payload {
-        return frame;
-    }
-    let Ok(obj) = serde_json::from_str::<serde_json::Value>(raw) else {
-        return frame;
-    };
-    let Some(map) = obj.as_object() else {
-        return frame;
-    };
-    match frame {
-        WsFrame::AudioChunk { .. } => {
-            let payload = if let Some(a) = map.get("audio") {
-                serde_json::json!({ "data": a.clone() })
-            } else if let Some(a) = map.get("payload") {
-                serde_json::json!({ "data": a.clone() })
-            } else {
-                serde_json::Value::Null
-            };
-            WsFrame::AudioChunk { data: payload }
-        }
-        WsFrame::Learn { .. } => {
-            let mut m = serde_json::Map::new();
-            for k in ["features", "target"] {
-                if let Some(v) = map.get(k) {
-                    m.insert(k.to_string(), v.clone());
-                }
-            }
-            WsFrame::Learn {
-                data: serde_json::Value::Object(m),
-            }
-        }
-        other => other,
-    }
 }
 
 async fn status_snapshot(State(state): State<AppState>) -> Response {
-    // Explicit feed contract: the chart feed is 15m by design, the profile
-    // windows use their own (TradingView-selected) resolution.
-    let (row_mode, rows, bin_size, va_pct) = {
-        let vp = state.vp.read().await;
-        let model = vp.model();
-        (
-            model.row_mode.as_str(),
-            model.rows,
-            model.bin_size,
-            model.va_pct,
-        )
-    };
-    // Where the chart history actually ends. `edge_lag_minutes` is the gap
-    // between the newest candle's bucket and now: a healthy live feed sits
-    // inside the in-progress bucket (< 15), while a large value means the
-    // history seed lagged the live stream at boot and the chart is showing a
-    // hole. Reported here because that is exactly the kind of thing a chart
-    // cannot tell you about itself.
-    let (bars, first_bar, last_bar, edge_lag_minutes) = {
-        let candles = state.cached_candles.read().await;
-        let first = candles.first().map(|c| c.time);
-        let last = candles.last().map(|c| c.time);
-        let lag = last.map(|t| (chrono::Utc::now().timestamp_millis() - t).max(0) / 60_000);
-        (candles.len(), first, last, lag)
-    };
-    let body = serde_json::json!({
-        "status": state.status.snapshot(),
-        "version": env!("CARGO_PKG_VERSION"),
-        "candles": {
-            "interval": "15m",
-            "seed_bars": crate::sifting_rest::SIFTING_HISTORY_CANDLE_LIMIT,
-            "bars": bars,
-            "first_bar": first_bar,
-            "last_bar": last_bar,
-            "edge_lag_minutes": edge_lag_minutes,
-        },
-        "volume_profile": {
-            "row_mode": row_mode,
-            "rows": rows,
-            "bin_size": bin_size,
-            "va_pct": va_pct * 100.0,
-            "input": state.config.vp_lower_tf,
-            "audit": "/vp?window=PW",
-        },
-        "strategy": {
-            "enabled": state.config.strategy_enabled,
-            "eval_secs": state.config.strategy_eval_secs,
-            "min_confidence": state.config.strategy_min_confidence,
-            "risk_pct": state.config.strategy_risk_pct,
-            "endpoint": "/strategy",
-        },
-        "demo": {
-            "enabled": state.config.demo_enabled && state.config.strategy_enabled,
-            "mode": "demo",
-            "leverage": state.config.demo_leverage,
-            "spread": state.config.demo_spread,
-            "min_lots": state.config.demo_min_lots,
-            "max_lots": state.config.demo_max_lots,
-            "endpoint": "/demo",
-        },
-    });
+    let body = state.status_document().await;
     ([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
+}
+
+impl AppState {
+    /// The full `/status` document (also the payload of every `status` frame).
+    pub async fn status_document(&self) -> serde_json::Value {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let freshness = self
+            .freshness
+            .snapshot(now_ms, session::market_open(now_ms));
+        self.status_document_at(now_ms, &freshness).await
+    }
+
+    async fn status_document_at(&self, now_ms: i64, freshness: &Freshness) -> serde_json::Value {
+        let current = session::current_session(now_ms);
+        let mut intervals = serde_json::Map::new();
+        for interval in Interval::ALL {
+            let edge = self.candles.edge(interval);
+            intervals.insert(
+                interval.as_str().to_string(),
+                serde_json::json!({
+                    "bars": self.candles.bars(interval),
+                    "capacity": capacity(interval),
+                    "first_bar": self.candles.origin(interval),
+                    "last_bar": edge,
+                    "forming": self.candles.forming(interval).map(|bar| bar.time),
+                    "edge_lag_minutes": edge.map(|time| (now_ms - time).max(0) / 60_000),
+                }),
+            );
+        }
+
+        let counters = self.candles.counters();
+        let dropped_ticks = counters.dropped();
+
+        let calendar = self.calendar.read().await;
+        let calendar_summary = serde_json::json!({
+            "source": calendar.get("source").cloned().unwrap_or(serde_json::Value::Null),
+            "count": calendar.get("count").cloned().unwrap_or(serde_json::Value::Null),
+            "updated": calendar.get("updated").cloned().unwrap_or(serde_json::Value::Null),
+        });
+
+        serde_json::json!({
+            "service": "xauusd-engine",
+            "version": env!("CARGO_PKG_VERSION"),
+            "contract_version": CONTRACT_VERSION,
+            "boot_id": self.boot.boot_id,
+            "uptime_ms": self.boot.uptime_ms(now_ms),
+            "market_open": current.market_open,
+            "session": {
+                "anchor": "18:00 America/New_York",
+                "open_ms": current.open_ms,
+                "close_ms": current.close_ms,
+                "market_open": current.market_open,
+            },
+            "freshness": freshness,
+            "feeds": self.status.snapshot(),
+            "candles": {
+                "seed_bars": SEED_BARS,
+                "intervals": intervals,
+                "counters": counters,
+                "dropped_ticks": dropped_ticks,
+            },
+            "calendar": calendar_summary,
+            "ws": {
+                "topics": Topic::ALL.map(Topic::as_str),
+                "heartbeat_secs": HEARTBEAT_SECS,
+                "broadcast_capacity": BROADCAST_CAPACITY,
+                "replay_bars": {
+                    "1m": replay_bars(Interval::M1),
+                    "15m": replay_bars(Interval::M15),
+                    "1h": replay_bars(Interval::H1),
+                },
+            },
+        })
+    }
+
+    async fn replay_status(&self) -> Publication {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let freshness = self
+            .freshness
+            .snapshot(now_ms, session::market_open(now_ms));
+        Publication::replay(
+            Topic::Status.as_str(),
+            self.status_document_at(now_ms, &freshness).await,
+        )
+    }
+}
+
+/// Publish a `status` frame on **every** transition — freshness state, feed
+/// state or market-open flag — not only when a feed reconnects.
+///
+/// One poll per second: the states it watches do not change faster than that,
+/// and a tick-level status frame would drown the candles it describes.
+pub fn spawn_status_poller(state: AppState) {
+    tokio::spawn(async move {
+        let mut last_freshness: Option<FreshnessState> = None;
+        let mut last_market_open: Option<bool> = None;
+        let mut last_feeds = String::new();
+        let mut tick = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            tick.tick().await;
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            let current = session::current_session(now_ms);
+            let freshness = state.freshness.snapshot(now_ms, current.market_open);
+            let feeds = state.status.fingerprint();
+            let changed = last_freshness != Some(freshness.state)
+                || last_market_open != Some(current.market_open)
+                || last_feeds != feeds;
+            if !changed {
+                continue;
+            }
+            last_freshness = Some(freshness.state);
+            last_market_open = Some(current.market_open);
+            last_feeds = feeds;
+            let document = state.status_document_at(now_ms, &freshness).await;
+            state.publisher.publish_status(document);
+        }
+    });
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
     ws.on_upgrade(|socket| handle_socket(socket, state))
 }
 
+async fn send_frame(sender: &mut SplitSink<WebSocket, Message>, frame: &Publication) -> bool {
+    let json = match serde_json::to_string(frame) {
+        Ok(json) => json,
+        Err(_) => return false,
+    };
+    sender.send(Message::Text(json.into())).await.is_ok()
+}
+
+/// True when `frame` is a feed frame the client asked for.
+///
+/// Heartbeats and gap notices are sent directly by the socket loop, so they
+/// never reach this filter.
+fn frame_matches(frame: &Publication, topics: &[Topic], intervals: &[Interval]) -> bool {
+    match frame.topic() {
+        None => false,
+        Some(Topic::Candle) => {
+            if !topics.contains(&Topic::Candle) {
+                return false;
+            }
+            frame
+                .data
+                .as_ref()
+                .and_then(|data| data.get("interval"))
+                .and_then(|value| value.as_str())
+                .and_then(Interval::parse)
+                .is_some_and(|interval| intervals.contains(&interval))
+        }
+        Some(topic) => topics.contains(&topic),
+    }
+}
+
+/// Send the cached state a fresh subscriber needs before the live stream
+/// starts: closed candles per requested resolution (ascending), tick volume,
+/// and the calendar snapshot. Everything here is `replay: true` with no `seq`,
+/// and the burst never contains a forming bucket.
+async fn replay(
+    state: &AppState,
+    topics: &[Topic],
+    intervals: &[Interval],
+    sender: &mut SplitSink<WebSocket, Message>,
+) -> bool {
+    if topics.contains(&Topic::Candle) {
+        for interval in intervals {
+            for candle in state.candles.recent(*interval, replay_bars(*interval)) {
+                let Ok(data) = serde_json::to_value(&candle) else {
+                    continue;
+                };
+                let frame = Publication::replay(Topic::Candle.as_str(), data);
+                if !send_frame(sender, &frame).await {
+                    return false;
+                }
+            }
+        }
+    }
+    if topics.contains(&Topic::TickVolume) {
+        for bar in state.tick_volume.snapshot() {
+            let Ok(data) = serde_json::to_value(&bar) else {
+                continue;
+            };
+            let frame = Publication::replay(Topic::TickVolume.as_str(), data);
+            if !send_frame(sender, &frame).await {
+                return false;
+            }
+        }
+    }
+    if topics.contains(&Topic::Calendar) {
+        let cached = state.calendar.read().await.clone();
+        let frame = Publication::replay(Topic::Calendar.as_str(), cached);
+        if !send_frame(sender, &frame).await {
+            return false;
+        }
+    }
+    true
+}
+
 async fn handle_socket(socket: WebSocket, state: AppState) {
     let (mut sender, mut receiver) = socket.split();
-    let mut rx = state.tx.subscribe();
+    let mut rx = state.publisher.subscribe();
 
     let session_id = format!(
         "sess-{}",
         chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
     );
-    info!("WS session {} opened", session_id);
+    info!("WS session {session_id} opened");
 
-    let mut topics: Vec<String> = Vec::new();
+    let mut topics: Vec<Topic> = Vec::new();
+    let mut intervals: Vec<Interval> = Interval::ALL.to_vec();
     let mut subscribed = false;
-    let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(30));
+    let mut heartbeat = tokio::time::interval(Duration::from_secs(HEARTBEAT_SECS));
 
     loop {
         tokio::select! {
             _ = heartbeat.tick() => {
-                let json = serde_json::to_string(&WsFrame::Heartbeat).unwrap_or_default();
-                if sender.send(Message::Text(json.into())).await.is_err() {
-                    info!("WS session {} send failed", session_id);
+                if !send_frame(&mut sender, &Publication::heartbeat()).await {
+                    info!("WS session {session_id} closed while sending a heartbeat");
                     return;
                 }
             }
 
-            msg = receiver.next() => {
-                match msg {
+            message = receiver.next() => {
+                match message {
                     Some(Ok(Message::Text(text))) => {
-                        if let Ok(frame) = serde_json::from_str::<WsFrame>(&text) {
-                          match frame {
-                            WsFrame::Subscribe { topics: t } => {
-                                info!("WS session {} subscribed to {:?}", session_id, t);
-                                topics = t;
+                        let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+                            continue;
+                        };
+                        // Explicit, logged refusal: nothing execution-shaped
+                        // is parsed, cached or rebroadcast.
+                        if is_rejected_kind(&value) {
+                            info!("WS session {session_id} ignored an execution-shaped frame");
+                            continue;
+                        }
+                        match serde_json::from_value::<WsFrame>(value) {
+                            Ok(WsFrame::Subscribe {
+                                topics: requested_topics,
+                                intervals: requested_intervals,
+                            }) => {
+                                topics = requested_topics
+                                    .iter()
+                                    .filter_map(|topic| Topic::parse(topic.as_str()))
+                                    .collect();
+                                let wanted: Vec<Interval> = requested_intervals
+                                    .iter()
+                                    .filter_map(|raw| Interval::parse(raw.as_str()))
+                                    .collect();
+                                if !wanted.is_empty() {
+                                    intervals = wanted;
+                                }
                                 subscribed = true;
-
-                                // Replay cached state as soon as the client
-                                // subscribes (the first message after connect).
-                                // Clone under the read lock, then release it
-                                // before any network write.
-                                if topics.iter().any(|x| x == "levels") {
-                                    let cached = state.cached_levels.read().await.clone();
-                                    for lvl in cached {
-                                        let frame = WsFrame::Levels { data: lvl };
-                                        let json = serde_json::to_string(&frame).unwrap_or_default();
-                                        if sender.send(Message::Text(json.into())).await.is_err() {
-                                            return;
-                                        }
-                                    }
+                                info!(
+                                    "WS session {session_id} subscribed to {:?} intervals {:?}",
+                                    topics, intervals
+                                );
+                                if !replay(&state, &topics, &intervals, &mut sender).await {
+                                    return;
                                 }
-                                if topics.iter().any(|x| x == "candle") {
-                                    let cached = {
-                                        let candles = state.cached_candles.read().await;
-                                        let first = candles.len().saturating_sub(CANDLE_REPLAY_LIMIT);
-                                        candles[first..].to_vec()
-                                    };
-                                    for c in cached {
-                                        let frame = WsFrame::Candle { data: c };
-                                        let json = serde_json::to_string(&frame).unwrap_or_default();
-                                        if sender.send(Message::Text(json.into())).await.is_err() {
-                                            return;
-                                        }
-                                    }
-                                }
-                                if topics.iter().any(|x| x == "tick_volume") {
-                                    for bar in state.tick_volume.snapshot() {
-                                        let frame = WsFrame::TickVolume { data: bar };
-                                        let json = serde_json::to_string(&frame).unwrap_or_default();
-                                        if sender.send(Message::Text(json.into())).await.is_err() {
-                                            return;
-                                        }
-                                    }
-                                }
-                                if topics.iter().any(|x| x == "calendar") {
-                                    let cached = state.cached_calendar.read().await.clone();
-                                    let frame = WsFrame::Calendar { data: cached };
-                                    let json = serde_json::to_string(&frame).unwrap_or_default();
-                                    if sender.send(Message::Text(json.into())).await.is_err() {
-                                        return;
-                                    }
-                                }
-                                if topics.iter().any(|x| x == "strategy") {
-                                    let last = {
-                                        let engine = state.strategy.read().await;
-                                        engine
-                                            .last()
-                                            .and_then(|d| serde_json::to_value(d).ok())
-                                    };
-                                    if let Some(data) = last {
-                                        let frame = WsFrame::Strategy { data };
-                                        let json =
-                                            serde_json::to_string(&frame).unwrap_or_default();
-                                        if sender.send(Message::Text(json.into())).await.is_err() {
-                                            return;
-                                        }
-                                    }
-                                }
-                                if topics.iter().any(|x| x == "demo") {
-                                    let data = state.demo.read().await.snapshot();
-                                    let frame = WsFrame::Demo { data };
-                                    let json = serde_json::to_string(&frame).unwrap_or_default();
-                                    if sender.send(Message::Text(json.into())).await.is_err() {
-                                        return;
-                                    }
-                                }
-                                let frame = WsFrame::Status { data: state.status.snapshot() };
-                                let json = serde_json::to_string(&frame).unwrap_or_default();
-                                if sender.send(Message::Text(json.into())).await.is_err() {
+                                if !send_frame(&mut sender, &state.replay_status().await).await {
                                     return;
                                 }
                             }
-
-                            // AI ingest: external producers (the econ monitor,
-                            // scripts) may publish audio chunks / learner
-                            // samples through the WS itself. The frame is
-                            // rebroadcast on the bus so Node3 — subscribed to
-                            // `audio_chunk` + `learn` — receives it.
-                            WsFrame::AudioChunk { .. } | WsFrame::Learn { .. } => {
-                                let frame = normalize_envelope(&text, frame);
-                                let _ = state.tx.send(frame);
+                            Ok(WsFrame::Heartbeat) => {
+                                if !send_frame(&mut sender, &Publication::heartbeat()).await {
+                                    return;
+                                }
                             }
-
-                            // Node3 answers: cache for GET /ai and fan out to
-                            // subscribers of the matching topic.
-                            //
-                            // These four are the only inbound frames Node1
-                            // acts on. There is deliberately no `trades` arm:
-                            // Node1 is a read-only market service, so an
-                            // execution/fill frame a client tries to publish
-                            // never even parses and reaches the ignore arm
-                            // below instead of the bus.
-                            WsFrame::Transcript { .. }
-                            | WsFrame::Sentiment { .. }
-                            | WsFrame::Health { .. }
-                            | WsFrame::Prediction { .. } => {
-                                state.ai.record(&frame);
-                                let _ = state.tx.send(frame);
-                            }
-
-                            // Requests aimed at the AI node — rebroadcast so
-                            // the fan-out forwards them past the topic filter
-                            // (Node3 subscribes to audio_chunk + learn).
-                            WsFrame::SentimentReq { .. } | WsFrame::PredictReq { .. } => {
-                                let _ = state.tx.send(frame);
-                            }
-
-                            _ => {}
-                          }
+                            Err(_) => {}
                         }
                     }
                     Some(Ok(_)) => {}
-                    Some(Err(_)) | None => {
-                        info!("WS session {} disconnected", session_id);
+                    Some(Err(e)) => {
+                        info!("WS session {session_id} error: {e}");
+                        return;
+                    }
+                    None => {
+                        info!("WS session {session_id} disconnected");
                         return;
                     }
                 }
@@ -533,46 +454,21 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
             result = rx.recv() => {
                 match result {
                     Ok(frame) => {
-                        if !subscribed { continue; }
-                        let topic = match &frame {
-                            WsFrame::Levels { .. } => "levels",
-                            WsFrame::Candle { .. } => "candle",
-                            WsFrame::TickVolume { .. } => "tick_volume",
-                            WsFrame::Calendar { .. } => "calendar",
-                            WsFrame::Status { .. } => "status",
-                            WsFrame::Strategy { .. } => "strategy",
-                            WsFrame::Demo { .. } => "demo",
-                            WsFrame::AudioChunk { .. } => "audio_chunk",
-                            WsFrame::Learn { .. } => "learn",
-                            WsFrame::Transcript { .. } => "transcript",
-                            WsFrame::Sentiment { .. } => "sentiment",
-                            WsFrame::Health { .. } => "health",
-                            WsFrame::Prediction { .. } => "prediction",
-                            WsFrame::Heartbeat
-                            | WsFrame::SentimentReq { .. }
-                            | WsFrame::PredictReq { .. } => {
-                                // keepalive for proxies and requests aimed at
-                                // the AI node — always forwarded, regardless
-                                // of topic subscription
-                                let json = serde_json::to_string(&frame).unwrap_or_default();
-                                if sender.send(Message::Text(json.into())).await.is_err() {
-                                    info!("WS session {} send failed", session_id);
-                                    return;
-                                }
-                                continue;
-                            }
-                            WsFrame::Subscribe { .. } => continue,
-                        };
-                        if !topics.iter().any(|t| t == topic) { continue; }
-
-                        let json = serde_json::to_string(&frame).unwrap_or_default();
-                        if sender.send(Message::Text(json.into())).await.is_err() {
-                            info!("WS session {} send failed", session_id);
+                        if !subscribed || !frame_matches(&frame, &topics, &intervals) {
+                            continue;
+                        }
+                        if !send_frame(&mut sender, &frame).await {
+                            info!("WS session {session_id} send failed");
                             return;
                         }
                     }
-                    Err(broadcast::error::RecvError::Lagged(n)) => {
-                        info!("WS session {} lagged {} frames", session_id, n);
+                    Err(broadcast::error::RecvError::Lagged(dropped)) => {
+                        // A slow subscriber lost frames: tell it how many
+                        // instead of silently skipping candles.
+                        info!("WS session {session_id} lagged {dropped} frame(s)");
+                        if !send_frame(&mut sender, &Publication::gap(dropped)).await {
+                            return;
+                        }
                     }
                     Err(broadcast::error::RecvError::Closed) => {
                         return;
@@ -584,122 +480,134 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 }
 
 // =====================================================================
-// CORS policy tests — the Node2 static site lives on its own origin, so
-// these pin down exactly which requester gets an allow-header.
+// Tests
 // =====================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::demo_engine::DemoParams;
-    use crate::strategy::StrategyParams;
+    use crate::types::{SYMBOL, Sequencer};
     use axum::body::Body;
-    use axum::http::{Request, StatusCode};
+    use axum::http::Request;
     use tower::ServiceExt;
 
     const ALLOWED: &str = "https://static-dash-frontend.onrender.com";
     const FOREIGN: &str = "https://evil.example";
-    const REST_ROUTES: [&str; 9] = [
-        "/health",
-        "/levels",
-        "/candles",
-        "/tick-volume",
-        "/calendar",
-        "/ai",
-        "/strategy",
-        "/demo",
-        "/status",
-    ];
+    const REST_ROUTES: [&str; 5] = ["/health", "/status", "/candles", "/tick-volume", "/calendar"];
 
-    /// Router with an empty-but-valid snapshot cache, configured for `allowed`.
+    fn candle(interval: Interval, time: i64) -> Candle {
+        Candle {
+            symbol: SYMBOL.to_string(),
+            interval: interval.as_str().to_string(),
+            time: interval.align(time),
+            open: 3380.0,
+            high: 3385.0,
+            low: 3378.0,
+            close: 3383.0,
+            volume: 412.0,
+            source: "sifting".to_string(),
+            closed: true,
+        }
+    }
+
+    fn bar(time: i64) -> crate::types::TickVolumeBar {
+        crate::types::TickVolumeBar {
+            symbol: SYMBOL.to_string(),
+            interval: Interval::M15.as_str().to_string(),
+            time,
+            ticks: 412,
+            up_ticks: 150,
+            down_ticks: 140,
+            flat_ticks: 122,
+            close: 3383.0,
+            last_tick: time + 899_000,
+            ticks_per_sec: 0.4,
+            closed: false,
+            source: "sifting".to_string(),
+        }
+    }
+
     fn app(allowed: &str) -> Router {
-        let (tx, _rx) = broadcast::channel(16);
+        let (tx, _rx) = broadcast::channel(64);
         let mut config = Config::from_env();
         config.cors_allowed_origin = allowed.to_string();
 
-        let state = AppState {
-            tx: tx.clone(),
-            cached_levels: Arc::new(RwLock::new(Vec::new())),
-            cached_candles: Arc::new(RwLock::new(vec![VpCandle {
-                time: 1_700_000_000_000,
-                open: 3381.0,
-                high: 3385.5,
-                low: 3378.25,
-                close: 3383.75,
-                volume: 412.0,
-                source: "sifting".into(),
-            }])),
-            cached_calendar: Arc::new(RwLock::new(serde_json::json!({
-                "source": "forexfactory", "count": 0, "events": []
+        let store = TickVolumeStore::new(16);
+        store.upsert(bar(1_700_000_100_000));
+
+        let book = CandleBook::new();
+        for interval in Interval::ALL {
+            book.seed(interval, &[candle(interval, 1_700_000_100_000)]);
+        }
+
+        router(AppState {
+            publisher: MarketPublisher::new(
+                tx,
+                Sequencer::new(),
+                store.clone(),
+                FreshnessTracker::new("sifting"),
+            ),
+            candles: book,
+            tick_volume: store,
+            calendar: Arc::new(RwLock::new(serde_json::json!({
+                "source": "forexfactory",
+                "count": 0,
+                "events": [],
+                "updated": 1_700_000_000_000_i64
             }))),
-            tick_volume: {
-                let store = TickVolumeStore::new(16);
-                store.upsert(TickVolumeBar {
-                    time: 1_700_000_000_000,
-                    ticks: 412,
-                    up_ticks: 150,
-                    down_ticks: 140,
-                    flat_ticks: 122,
-                    close: 3383.75,
-                    last_tick: 1_700_000_899_000,
-                    ticks_per_sec: 0.4,
-                    closed: false,
-                    source: "sifting".into(),
-                });
-                store
-            },
-            vp: Arc::new(RwLock::new(VolumeProfileEngine::new())),
-            status: FeedStatus::new(tx),
+            status: FeedStatus::new(),
+            freshness: FreshnessTracker::new("sifting"),
+            boot: Arc::new(BootInfo::new(1_700_000_000_000)),
             config,
-            ai: Arc::new(AiCache::new()),
-            strategy: Arc::new(RwLock::new(StrategyEngine::new(StrategyParams::default()))),
-            demo: Arc::new(RwLock::new(DemoEngine::new(
-                DemoParams::default(),
-                3400.0,
-                1_700_000_000_000,
-            ))),
-        };
-        router(state)
+        })
     }
 
     fn build(method: &str, uri: &str, origin: Option<&str>) -> Request<Body> {
-        let mut req = Request::builder().method(method).uri(uri);
-        if let Some(o) = origin {
-            req = req.header(header::ORIGIN, o);
+        let mut request = Request::builder().method(method).uri(uri);
+        if let Some(origin) = origin {
+            request = request.header(header::ORIGIN, origin);
         }
-        req.body(Body::empty()).unwrap()
+        request.body(Body::empty()).expect("request")
     }
 
     async fn send(method: &str, uri: &str, origin: Option<&str>) -> Response {
         app(ALLOWED)
             .oneshot(build(method, uri, origin))
             .await
-            .unwrap()
+            .expect("router response")
     }
 
-    fn acao(res: &Response) -> Option<String> {
-        res.headers()
+    async fn body_json(response: Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        serde_json::from_slice(&bytes).expect("json body")
+    }
+
+    fn acao(response: &Response) -> Option<String> {
+        response
+            .headers()
             .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
-            .map(|v| v.to_str().unwrap().to_string())
+            .map(|value| value.to_str().expect("header value").to_string())
     }
 
     #[tokio::test]
     async fn allowed_origin_may_read_every_rest_route() {
         for uri in REST_ROUTES {
-            let res = send("GET", uri, Some(ALLOWED)).await;
-            assert_eq!(res.status(), StatusCode::OK, "{uri}");
-            assert_eq!(acao(&res).as_deref(), Some(ALLOWED), "{uri}");
+            let response = send("GET", uri, Some(ALLOWED)).await;
+            assert_eq!(response.status(), StatusCode::OK, "{uri}");
+            assert_eq!(acao(&response).as_deref(), Some(ALLOWED), "{uri}");
             assert_ne!(
-                acao(&res).as_deref(),
+                acao(&response).as_deref(),
                 Some("*"),
                 "{uri} must not use a wildcard"
             );
 
-            let vary = res
+            let vary = response
                 .headers()
                 .get_all(header::VARY)
                 .into_iter()
-                .map(|v| v.to_str().unwrap().to_lowercase())
+                .map(|value| value.to_str().unwrap().to_lowercase())
                 .collect::<Vec<_>>()
                 .join(", ");
             assert!(vary.contains("origin"), "{uri} vary: {vary}");
@@ -709,214 +617,312 @@ mod tests {
     #[tokio::test]
     async fn only_the_configured_origin_is_ever_allowed() {
         for uri in REST_ROUTES {
-            // Foreign origin and non-browser clients (no Origin at all, e.g.
-            // curl or another server) get the data but no allow-header, so a
-            // browser on any other page cannot read the response.
-            let res = send("GET", uri, Some(FOREIGN)).await;
-            assert_eq!(res.status(), StatusCode::OK, "{uri}");
+            let response = send("GET", uri, Some(FOREIGN)).await;
+            assert_eq!(response.status(), StatusCode::OK, "{uri}");
             assert_eq!(
-                acao(&res),
+                acao(&response),
                 None,
                 "{uri} leaked an allow-header to a foreign origin"
             );
 
-            let res = send("GET", uri, None).await;
-            assert_eq!(res.status(), StatusCode::OK, "{uri}");
-            assert_eq!(acao(&res), None, "{uri} sent CORS with no Origin");
+            let response = send("GET", uri, None).await;
+            assert_eq!(response.status(), StatusCode::OK, "{uri}");
+            assert_eq!(acao(&response), None, "{uri} sent CORS with no Origin");
         }
     }
 
     #[tokio::test]
     async fn cors_grant_is_scoped_to_the_configured_origin() {
-        // Nothing is authenticated with cookies/tokens, so credentials must stay
-        // off — with them a wildcard would expose the API to any site.
-        let res = send("GET", "/levels", Some(ALLOWED)).await;
+        let response = send("GET", "/status", Some(ALLOWED)).await;
         assert!(
-            !res.headers()
+            !response
+                .headers()
                 .contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS),
             "credentials must not be enabled"
         );
 
-        // An origin that is not the site's never unlocks the API, even if it
-        // shares the render.com suffix.
-        let res = app("https://other.onrender.com")
-            .oneshot(build("GET", "/levels", Some(ALLOWED)))
+        let response = app("https://other.onrender.com")
+            .oneshot(build("GET", "/status", Some(ALLOWED)))
             .await
-            .unwrap();
-        assert_eq!(acao(&res), None);
+            .expect("router response");
+        assert_eq!(acao(&response), None);
 
-        // The grant follows the configuration, so a moved site (or a local dev
-        // server) only needs CORS_ALLOWED_ORIGIN — nothing is hardcoded.
         let dev = "http://localhost:5173";
-        let res = app(dev)
-            .oneshot(build("GET", "/levels", Some(dev)))
+        let response = app(dev)
+            .oneshot(build("GET", "/candles", Some(dev)))
             .await
-            .unwrap();
-        assert_eq!(acao(&res).as_deref(), Some(dev));
-        let res = app(dev)
-            .oneshot(build("GET", "/levels", Some(ALLOWED)))
-            .await
-            .unwrap();
-        assert_eq!(acao(&res), None);
+            .expect("router response");
+        assert_eq!(acao(&response).as_deref(), Some(dev));
     }
 
     #[tokio::test]
     async fn preflight_is_answered_for_the_allowed_origin_only() {
-        let req = Request::builder()
+        let request = Request::builder()
             .method("OPTIONS")
             .uri("/candles")
             .header(header::ORIGIN, ALLOWED)
             .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
             .header(header::ACCESS_CONTROL_REQUEST_HEADERS, "content-type")
             .body(Body::empty())
-            .unwrap();
-        let res = app(ALLOWED).oneshot(req).await.unwrap();
+            .expect("request");
+        let response = app(ALLOWED).oneshot(request).await.expect("response");
 
-        assert_eq!(res.status(), StatusCode::OK);
-        assert_eq!(acao(&res).as_deref(), Some(ALLOWED));
-        let methods = res
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(acao(&response).as_deref(), Some(ALLOWED));
+        let methods = response
             .headers()
             .get(header::ACCESS_CONTROL_ALLOW_METHODS)
-            .unwrap()
+            .expect("allow-methods")
             .to_str()
-            .unwrap();
+            .expect("header value");
         assert!(
             methods.contains("GET") && methods.contains("OPTIONS"),
             "{methods}"
         );
-        assert!(
-            res.headers()
-                .get(header::ACCESS_CONTROL_ALLOW_HEADERS)
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .contains("content-type")
-        );
         assert_eq!(
-            res.headers()
+            response
+                .headers()
                 .get(header::ACCESS_CONTROL_MAX_AGE)
-                .unwrap()
+                .expect("max-age")
                 .to_str()
                 .unwrap(),
             "600"
         );
-        assert!(
-            !res.headers()
-                .contains_key(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
-        );
 
-        let req = Request::builder()
+        let request = Request::builder()
             .method("OPTIONS")
             .uri("/candles")
             .header(header::ORIGIN, FOREIGN)
             .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
             .body(Body::empty())
-            .unwrap();
-        let res = app(ALLOWED).oneshot(req).await.unwrap();
-        assert_eq!(acao(&res), None, "a foreign origin must not pass preflight");
+            .expect("request");
+        let response = app(ALLOWED).oneshot(request).await.expect("response");
+        assert_eq!(
+            acao(&response),
+            None,
+            "a foreign origin must not pass preflight"
+        );
     }
 
-    /// Node1 is a market-data service only: there is no route that accepts an
-    /// order, a fill or any other broker write. The CORS layer offers just
-    /// `GET, OPTIONS`, so a write to any market route is rejected outright.
+    /// Node 1 is a market-data service: there is no route that accepts an
+    /// order, a fill or any other broker write.
     #[tokio::test]
     async fn no_route_accepts_a_broker_write() {
         for method in ["POST", "PUT", "PATCH", "DELETE"] {
             for uri in REST_ROUTES {
-                let res = send(method, uri, Some(ALLOWED)).await;
+                let response = send(method, uri, Some(ALLOWED)).await;
                 assert!(
-                    res.status().is_client_error(),
-                    "{} {} was accepted ({}) - Node1 takes no writes",
-                    method,
-                    uri,
-                    res.status()
+                    response.status().is_client_error(),
+                    "{method} {uri} was accepted ({}) - Node 1 takes no writes",
+                    response.status()
                 );
             }
         }
 
-        // The router advertises read-only methods for the market routes.
-        let res = send("POST", "/levels", Some(ALLOWED)).await;
-        if let Some(allow) = res.headers().get(header::ALLOW) {
+        let response = send("POST", "/candles", Some(ALLOWED)).await;
+        if let Some(allow) = response.headers().get(header::ALLOW) {
             let allow = allow.to_str().unwrap();
             assert!(allow.contains("GET"), "GET must stay advertised");
             assert!(!allow.contains("POST"), "POST must not be advertised");
         }
     }
 
-    /// The only inbound frame Node1 could ever have fanned out for an
-    /// execution was `trades`. It is gone, so a client publishing one is
-    /// simply ignored instead of reaching other subscribers.
-    #[test]
-    fn an_execution_frame_cannot_be_submitted_to_node1() {
-        let raw = r#"{"type":"trades","data":{"trade_id":"n3-1","symbol":"XAUUSD","side":"buy","size":0.01,"entry":2340.0,"sl":2335.0,"tp":2350.0,"status":"signal","timestamp":1700000000000}}"#;
-        assert!(
-            serde_json::from_str::<WsFrame>(raw).is_err(),
-            "Node1 must not parse an execution/fill frame"
-        );
-    }
-
     #[tokio::test]
-    async fn payload_shape_is_untouched_by_the_layer() {
-        // /candles must keep returning SiftingIO candle objects; the CORS layer
-        // may not rewrap or rename anything.
-        let res = send("GET", "/candles", Some(ALLOWED)).await;
-        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        let candles = json.as_array().unwrap();
-        assert_eq!(candles.len(), 1);
-        let c = &candles[0];
-        assert_eq!(c["source"], "sifting");
-        assert_eq!(c["time"], 1_700_000_000_000i64);
-        for key in ["open", "high", "low", "close", "volume"] {
-            assert!(c[key].is_f64(), "missing numeric field {key}");
+    async fn candles_are_served_per_interval_and_reject_an_unknown_one() {
+        for interval in Interval::ALL {
+            let uri = format!("/candles?interval={}", interval.as_str());
+            let response = send("GET", &uri, Some(ALLOWED)).await;
+            assert_eq!(response.status(), StatusCode::OK, "{uri}");
+            assert_eq!(
+                response.headers()[header::CACHE_CONTROL]
+                    .to_str()
+                    .expect("cache-control"),
+                "no-store"
+            );
+
+            let body = body_json(response).await;
+            let bars = body.as_array().expect("array");
+            assert_eq!(bars.len(), 1, "{uri}");
+            assert_eq!(bars[0]["interval"], interval.as_str());
+            assert_eq!(bars[0]["symbol"], SYMBOL);
+            assert_eq!(bars[0]["closed"], true);
+            assert_eq!(
+                bars[0]["time"].as_i64().unwrap() % interval.millis(),
+                0,
+                "{uri} served an unaligned bar"
+            );
         }
-        // Exactly the seven documented keys, no extras (no key or token ever
-        // rides along in the body).
-        let mut keys: Vec<String> = c.as_object().unwrap().keys().cloned().collect();
-        keys.sort();
-        assert_eq!(
-            keys,
-            vec!["close", "high", "low", "open", "source", "time", "volume"]
-        );
+
+        // No `interval` keeps the chart's original 15m default.
+        let body = body_json(send("GET", "/candles", Some(ALLOWED)).await).await;
+        assert_eq!(body[0]["interval"], "15m");
+
+        for bad in ["5m", "1d", "", "hour"] {
+            let uri = format!("/candles?interval={bad}");
+            let response = send("GET", &uri, Some(ALLOWED)).await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+        }
     }
 
     #[tokio::test]
-    async fn tick_volume_route_serves_the_live_bars_uncached() {
-        let res = send("GET", "/tick-volume", Some(ALLOWED)).await;
-        assert_eq!(res.status(), StatusCode::OK);
+    async fn status_reports_the_c1_envelope() {
+        let body = body_json(send("GET", "/status", Some(ALLOWED)).await).await;
+
+        assert_eq!(body["contract_version"], "2.0");
+        assert_eq!(body["service"], "xauusd-engine");
+        assert!(
+            body["boot_id"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("boot-")),
+            "boot_id: {}",
+            body["boot_id"]
+        );
+        assert_eq!(body["freshness"]["feed"], "sifting");
+        let state = body["freshness"]["state"].as_str().expect("freshness state");
+        assert!(
+            ["live", "stale", "offline", "closed_market"].contains(&state),
+            "unexpected freshness state {state}"
+        );
+        assert!(body["market_open"].is_boolean());
+        assert_eq!(body["session"]["anchor"], "18:00 America/New_York");
         assert_eq!(
-            res.headers()
-                .get(header::CACHE_CONTROL)
-                .unwrap()
+            body["candles"]["intervals"]["1h"]["bars"].as_u64(),
+            Some(1)
+        );
+        assert!(body["candles"]["counters"]["accepted"].as_u64().is_some());
+        assert!(body["feeds"].is_object());
+        assert_eq!(body["ws"]["heartbeat_secs"], 30);
+
+        // Nothing that was removed may come back into the document.
+        for gone in ["volume_profile", "strategy", "demo", "ai"] {
+            assert!(body.get(gone).is_none(), "{gone} must not be reported");
+        }
+        for key in ["side", "stop_loss", "take_profit", "lots", "action", "venue"] {
+            assert!(
+                !body.to_string().contains(&format!("\"{key}\"")),
+                "{key} leaked into /status"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn boot_id_is_stable_across_requests() {
+        let router = app(ALLOWED);
+        let first = body_json(
+            router
+                .clone()
+                .oneshot(build("GET", "/status", None))
+                .await
+                .expect("response"),
+        )
+        .await;
+        let second = body_json(
+            router
+                .oneshot(build("GET", "/status", None))
+                .await
+                .expect("response"),
+        )
+        .await;
+        assert_eq!(first["boot_id"], second["boot_id"]);
+        assert_eq!(first["contract_version"], second["contract_version"]);
+    }
+
+    #[tokio::test]
+    async fn tick_volume_is_served_uncached_with_its_envelope() {
+        let response = send("GET", "/tick-volume", Some(ALLOWED)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[header::CACHE_CONTROL]
                 .to_str()
-                .unwrap(),
+                .expect("cache-control"),
             "no-store"
         );
-        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        let bars = json.as_array().unwrap();
+
+        let body = body_json(response).await;
+        let bars = body.as_array().expect("array");
         assert_eq!(bars.len(), 1);
-        let b = &bars[0];
-        assert_eq!(b["time"], 1_700_000_000_000i64);
-        assert_eq!(b["ticks"], 412);
+        assert_eq!(bars[0]["symbol"], SYMBOL);
+        assert_eq!(bars[0]["interval"], "15m");
+        assert_eq!(bars[0]["ticks"], 412);
         assert_eq!(
-            b["up_ticks"].as_u64().unwrap()
-                + b["down_ticks"].as_u64().unwrap()
-                + b["flat_ticks"].as_u64().unwrap(),
+            bars[0]["up_ticks"].as_u64().unwrap()
+                + bars[0]["down_ticks"].as_u64().unwrap()
+                + bars[0]["flat_ticks"].as_u64().unwrap(),
             412
         );
-        assert_eq!(b["closed"], false);
-        assert_eq!(b["source"], "sifting");
+        assert_eq!(bars[0]["closed"], false);
+    }
+
+    /// Routes that belonged to the removed services must be gone, not
+    /// silently aliased to something else.
+    #[tokio::test]
+    async fn removed_routes_are_not_served() {
+        for uri in ["/levels", "/vp", "/strategy", "/demo", "/ai"] {
+            let response = send("GET", uri, Some(ALLOWED)).await;
+            assert_eq!(
+                response.status(),
+                StatusCode::NOT_FOUND,
+                "{uri} still has a handler"
+            );
+        }
+    }
+
+    #[test]
+    fn candle_frames_are_filtered_by_the_requested_intervals() {
+        let publication = Publication::live(
+            "candle",
+            1,
+            serde_json::json!({ "interval": "1h", "closed": true }),
+        );
+        assert!(frame_matches(
+            &publication,
+            &[Topic::Candle],
+            &[Interval::H1]
+        ));
+        assert!(!frame_matches(
+            &publication,
+            &[Topic::Candle],
+            &[Interval::M15]
+        ));
+        assert!(!frame_matches(
+            &publication,
+            &[Topic::TickVolume],
+            &[Interval::H1]
+        ));
+
+        let calendar = Publication::live("calendar", 2, serde_json::json!({}));
+        assert!(frame_matches(&calendar, &[Topic::Calendar], &[]));
+        assert!(!frame_matches(&calendar, &[Topic::Candle], &[]));
+
+        // A heartbeat is never forwarded through the topic filter.
+        assert!(!frame_matches(
+            &Publication::heartbeat(),
+            &Topic::ALL,
+            &Interval::ALL
+        ));
+    }
+
+    #[test]
+    fn every_interval_replays_a_usable_tail() {
+        for interval in Interval::ALL {
+            assert!(replay_bars(interval) >= 48, "{}", interval.as_str());
+            assert!(capacity(interval) >= replay_bars(interval));
+        }
+    }
+
+    #[test]
+    fn a_lagged_subscriber_is_told_how_much_it_lost() {
+        // The socket loop maps `Lagged(n)` to `Publication::gap(n)`; this pins
+        // the frame it produces.
+        let gap = Publication::gap(7);
+        assert_eq!(gap.kind, "gap");
+        assert_eq!(gap.data.as_ref().unwrap()["dropped"], 7);
+        assert_eq!(gap.seq, None);
+        assert!(!gap.replay);
     }
 
     #[test]
     fn malformed_origin_panics_at_boot() {
-        // Spaces and control characters are illegal in a header value. Failing at
-        // boot beats silently emitting an unparsable response header forever.
         let quiet = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
         let good = std::panic::catch_unwind(|| cors_layer("https://ok.example"));
@@ -925,126 +931,5 @@ mod tests {
 
         assert!(good.is_ok());
         assert!(bad.is_err());
-    }
-
-    #[tokio::test]
-    async fn ai_route_reports_todays_digest() {
-        let res = send("GET", "/ai", Some(ALLOWED)).await;
-        assert_eq!(res.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        for key in [
-            "day_start",
-            "generated",
-            "transcripts",
-            "sentiments",
-            "predictions",
-            "health",
-            "counts",
-        ] {
-            assert!(json.get(key).is_some(), "/ai missing {key}");
-        }
-        assert!(json["transcripts"].as_array().unwrap().is_empty());
-    }
-
-    #[test]
-    fn envelope_normalization_wraps_loose_producer_payloads() {
-        // Learn with top-level features/target (the shape Node3's handler
-        // documents) is wrapped into the canonical data envelope.
-        let f = normalize_envelope(
-            r#"{"type":"learn","features":[1.5,-0.4,0.8,0.68],"target":1}"#,
-            WsFrame::Learn {
-                data: serde_json::Value::Null,
-            },
-        );
-        match f {
-            WsFrame::Learn { data } => {
-                assert_eq!(data["features"][0], 1.5);
-                assert_eq!(data["target"], 1);
-            }
-            other => panic!("wrong variant: {other:?}"),
-        }
-
-        // Audio carried under an `audio` key becomes data.data.
-        let f = normalize_envelope(
-            r#"{"type":"audio_chunk","audio":"AAAA"}"#,
-            WsFrame::AudioChunk {
-                data: serde_json::Value::Null,
-            },
-        );
-        match f {
-            WsFrame::AudioChunk { data } => assert_eq!(data["data"], "AAAA"),
-            other => panic!("wrong variant: {other:?}"),
-        }
-
-        // Canonical payloads pass through untouched.
-        let f = normalize_envelope(
-            r#"{"type":"learn","data":{"features":[1.0],"target":0.0}}"#,
-            WsFrame::Learn {
-                data: serde_json::json!({"features": [1.0], "target": 0.0}),
-            },
-        );
-        match f {
-            WsFrame::Learn { data } => assert_eq!(data["target"], 0.0),
-            other => panic!("wrong variant: {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn strategy_and_demo_routes_serve_the_plan_and_the_print() {
-        let res = send("GET", "/strategy", Some(ALLOWED)).await;
-        assert_eq!(res.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["symbol"], "XAUUSD");
-        assert_eq!(json["params"]["min_lots"], 0.01);
-        assert_eq!(json["params"]["max_lots"], 1.0);
-        // No evaluation has run yet in this router.
-        assert!(json["last"].is_null());
-
-        let res = send("GET", "/demo", Some(ALLOWED)).await;
-        assert_eq!(res.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["mode"], "demo");
-        assert_eq!(json["symbol"], "XAUUSD");
-        assert_eq!(json["leverage"], 1000.0);
-        assert_eq!(json["quote"]["spread"], 0.1);
-        assert!(json["account"]["balance"].is_number());
-        assert!(json["position"].is_null());
-    }
-
-    /// `/vp?start=&end=` is the Fixed Range case: the caller picks the range,
-    /// so the failures it can hit are client errors, not 500s.
-    #[tokio::test]
-    async fn vp_custom_range_validates_its_parameters() {
-        // No 1m history is seeded in this router: a well-formed range is
-        // valid but not retained.
-        let res = send(
-            "GET",
-            "/vp?start=1700000000000&end=1700003600000",
-            Some(ALLOWED),
-        )
-        .await;
-        assert_eq!(res.status(), StatusCode::CONFLICT);
-        assert_eq!(acao(&res).as_deref(), Some(ALLOWED));
-
-        // Half a pair, a non-numeric value and an inverted range are 400s.
-        for uri in [
-            "/vp?start=1700000000000",
-            "/vp?end=1700000000000",
-            "/vp?start=abc&end=def",
-            "/vp?start=1700003600000&end=1700000000000",
-        ] {
-            let res = send("GET", uri, Some(ALLOWED)).await;
-            assert_eq!(res.status(), StatusCode::BAD_REQUEST, "{uri}");
-            assert_eq!(acao(&res).as_deref(), Some(ALLOWED), "{uri}");
-        }
     }
 }

@@ -1,22 +1,48 @@
+//! SiftingIO historical bars (the only candle history source).
+//!
+//! One endpoint serves every resolution Node 1 publishes; the seed depth per
+//! resolution is chosen from what consumers actually need:
+//!
+//! * `1m` — a full trading week plus the current one, so the weekly windows can
+//!   be rebuilt from Node 1 candles alone (~7,200 bars, fetched in pages).
+//! * `15m` — the chart's fixed 2,000-bar seed.
+//! * `1h` — the drawing-boundary resolution, 2,000 bars.
+//!
+//! REST history can lag the live stream, and the live stream only ever appends
+//! from "now", so boot also asks for the tail explicitly
+//! ([`fetch_since`]) instead of shipping a chart with a hole in it.
+
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Duration, SecondsFormat, TimeZone, Utc};
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use serde::Deserialize;
+use tracing::warn;
 
-use crate::types::VpCandle;
+use crate::types::{Candle, Interval, SYMBOL};
 
-/// The chart/swing seed remains exactly the largest SiftingIO 15m page.
-pub const SIFTING_HISTORY_CANDLE_LIMIT: usize = 2_000;
-const PROFILE_HISTORY_PAGE_LIMIT: usize = 2_000;
-/// One ascending page is enough to close a restart hole: 500 x 15m bars is
-/// over five days of buckets, and a longer outage is reported instead.
-const SIFTING_TAIL_CANDLE_LIMIT: usize = 500;
-const MAX_PROFILE_HISTORY_PAGES: usize = 32;
-const HISTORY_LOOKBACK_DAYS: i64 = 60;
+/// The 15m/1h seed span, unchanged from the chart's existing contract.
+pub const SEED_BARS: usize = 2_000;
+/// One ascending page is enough to close a restart hole: 500 bars is at least
+/// five days at 15m. A longer outage is reported instead.
+const TAIL_BARS: usize = 500;
+const PAGE_LIMIT: usize = 2_000;
+const MAX_PAGES: usize = 40;
 
-/// A single OHLC bar from SiftingIO's commodities historical endpoint.
-/// The API returns Unix epoch milliseconds in `t` and numeric OHLCV fields.
+const SOURCE: &str = "sifting";
+
+/// How far back the seed request looks for each resolution. 1m needs the
+/// previous complete week; 15m and 1h need their full 2,000-bar span.
+fn lookback(interval: Interval) -> Duration {
+    match interval {
+        Interval::M1 => Duration::days(14),
+        Interval::M15 => Duration::days(60),
+        Interval::H1 => Duration::days(400),
+    }
+}
+
+/// A single OHLC bar from SiftingIO's commodities historical endpoint. The API
+/// returns Unix epoch milliseconds in `t` and tick-count volume in `v`.
 #[derive(Debug, Deserialize)]
 struct SiftingBar {
     #[serde(rename = "t")]
@@ -51,9 +77,9 @@ struct SiftingBarsResponse {
     meta: SiftingBarsMeta,
 }
 
-// Eight positional arguments, one per SiftingIO history query parameter plus
-// the pagination cursor. Every one is read at the call site, so collapsing
-// them into a struct would only move the noise.
+// Eight positional arguments, one per query parameter plus the pagination
+// cursor. Every one is read at the call site, so a struct would only move the
+// noise.
 #[allow(clippy::too_many_arguments)]
 fn history_url(
     base_url: &str,
@@ -89,47 +115,45 @@ fn history_url(
 fn parse_page(
     response: SiftingBarsResponse,
     symbol: &str,
-    expected_interval: &str,
-) -> Result<(Vec<VpCandle>, Option<String>)> {
+    interval: Interval,
+) -> Result<(Vec<Candle>, Option<String>)> {
     if let Some(response_symbol) = response.meta.symbol.as_deref()
         && !response_symbol.eq_ignore_ascii_case(symbol)
     {
         anyhow::bail!("SiftingIO returned symbol {response_symbol}, expected {symbol}");
     }
-    if let Some(interval) = response.meta.interval.as_deref()
-        && interval != expected_interval
+    // Accept the upstream's synonyms (`60m` for `1h`) but nothing else.
+    if let Some(returned) = response.meta.interval.as_deref()
+        && Interval::parse(returned) != Some(interval)
     {
-        anyhow::bail!("SiftingIO returned interval {interval}, expected {expected_interval}");
+        anyhow::bail!(
+            "SiftingIO returned interval {returned}, expected {}",
+            interval.as_str()
+        );
     }
 
-    let mut candles: Vec<VpCandle> = response
+    let mut candles: Vec<Candle> = response
         .data
         .into_iter()
-        .map(|bar| VpCandle {
+        .map(|bar| Candle {
+            symbol: SYMBOL.to_string(),
+            interval: interval.as_str().to_string(),
             time: bar.time,
             open: bar.open,
             high: bar.high,
             low: bar.low,
             close: bar.close,
             volume: bar.volume,
-            source: "sifting".into(),
+            source: SOURCE.to_string(),
+            closed: true,
         })
         .collect();
 
-    if candles.iter().any(|c| {
-        !c.open.is_finite()
-            || !c.high.is_finite()
-            || !c.low.is_finite()
-            || !c.close.is_finite()
-            || !c.volume.is_finite()
-            || c.volume < 0.0
-            || c.high < c.low
-            || c.time <= 0
-    }) {
+    if candles.iter().any(|candle| !has_valid_values(candle)) {
         anyhow::bail!("SiftingIO returned an invalid OHLCV bar");
     }
 
-    candles.sort_by_key(|c| c.time);
+    candles.sort_by_key(|candle| candle.time);
     if candles.windows(2).any(|pair| pair[0].time == pair[1].time) {
         anyhow::bail!("SiftingIO returned duplicate candle timestamps");
     }
@@ -142,8 +166,8 @@ async fn get_page(
     url: reqwest::Url,
     api_key: &str,
     symbol: &str,
-    interval: &str,
-) -> Result<(Vec<VpCandle>, Option<String>)> {
+    interval: Interval,
+) -> Result<(Vec<Candle>, Option<String>)> {
     let resp = client
         .get(url)
         .header("X-API-Key", api_key)
@@ -168,138 +192,43 @@ async fn get_page(
     parse_page(response, symbol, interval)
 }
 
-/// Fetch exactly 2,000 latest 15-minute candles for the chart and swing seed.
-///
-/// The 15m page is deliberately kept for the chart's existing contract and
-/// for the swing detector. Time-window profiles use the dedicated 1m fetch
-/// below, which pages over the precise history they need.
-pub async fn fetch_sifting_klines_15m(
+/// Walk the cursor until the page is exhausted, returning every row.
+async fn fetch_pages(
     base_url: &str,
     api_key: &str,
     symbol: &str,
-) -> Result<Vec<VpCandle>> {
-    let now = Utc::now();
-    let url = history_url(
-        base_url,
-        symbol,
-        now - Duration::days(HISTORY_LOOKBACK_DAYS),
-        now,
-        "15m",
-        "desc",
-        SIFTING_HISTORY_CANDLE_LIMIT,
-        None,
-    )?;
-    let client = reqwest::Client::new();
-    let (candles, _) = get_page(&client, url, api_key, symbol, "15m").await?;
-    require_chart_seed(candles)
-}
-
-/// Fetch the 15m bars newer than `after_ms`, ascending.
-///
-/// SiftingIO's REST history can lag its own live stream — on the 2026-10 probe
-/// the newest seeded 15m bar was fifteen *hours* behind the live bucket — and
-/// the live stream only ever appends from "now". Without this tail the chart
-/// would boot with a hole between the seed's edge and the first live close,
-/// and nothing would ever fill it.
-pub async fn fetch_sifting_klines_15m_since(
-    base_url: &str,
-    api_key: &str,
-    symbol: &str,
-    after_ms: i64,
-) -> Result<Vec<VpCandle>> {
-    let now = Utc::now();
-    let start = DateTime::<Utc>::from_timestamp_millis(after_ms + 1)
-        .context("invalid 15m history tail timestamp")?;
-    if start >= now {
-        return Ok(Vec::new());
-    }
-    let url = history_url(
-        base_url,
-        symbol,
-        start,
-        now,
-        "15m",
-        "asc",
-        SIFTING_TAIL_CANDLE_LIMIT,
-        None,
-    )?;
-    let client = reqwest::Client::new();
-    let (candles, _) = get_page(&client, url, api_key, symbol, "15m").await?;
-    Ok(newer_than(candles, after_ms))
-}
-
-/// The strictly-newer bars. SiftingIO's `start` is inclusive, so the page can
-/// repeat the boundary bar the caller already has.
-fn newer_than(mut candles: Vec<VpCandle>, after_ms: i64) -> Vec<VpCandle> {
-    candles.retain(|candle| candle.time > after_ms);
-    candles
-}
-
-fn require_chart_seed(candles: Vec<VpCandle>) -> Result<Vec<VpCandle>> {
-    if candles.len() != SIFTING_HISTORY_CANDLE_LIMIT {
-        anyhow::bail!(
-            "SiftingIO returned {} 15m candles; chart seed requires exactly {}",
-            candles.len(),
-            SIFTING_HISTORY_CANDLE_LIMIT
-        );
-    }
-    Ok(candles)
-}
-
-/// Fetch fine candles for the time-window volume profiles at `interval`
-/// (`"1m"`, `"5m"`, ...), following SiftingIO's cursor across pages.
-/// `end_exclusive_ms` is exclusive, matching the profile engine's candle-window
-/// semantics; the REST endpoint's end parameter is inclusive, so the request
-/// ends one millisecond earlier.
-pub async fn fetch_sifting_profile_candles(
-    base_url: &str,
-    api_key: &str,
-    symbol: &str,
-    start_ms: i64,
-    end_exclusive_ms: i64,
-    interval: &str,
-) -> Result<Vec<VpCandle>> {
-    if end_exclusive_ms <= start_ms {
-        anyhow::bail!("invalid 1m profile history bounds");
-    }
-    let start = Utc
-        .timestamp_millis_opt(start_ms)
-        .single()
-        .context("invalid 1m profile start timestamp")?;
-    let end_ms = end_exclusive_ms - 1;
-    let end = Utc
-        .timestamp_millis_opt(end_ms)
-        .single()
-        .context("invalid 1m profile end timestamp")?;
-
+    interval: Interval,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    order: &str,
+) -> Result<Vec<Candle>> {
     let client = reqwest::Client::new();
     let mut all = Vec::new();
     let mut cursor: Option<String> = None;
     let mut seen_cursors = HashSet::new();
 
-    for page_index in 0..MAX_PROFILE_HISTORY_PAGES {
+    for page_index in 0..MAX_PAGES {
         let url = history_url(
             base_url,
             symbol,
             start,
             end,
-            interval,
-            "asc",
-            PROFILE_HISTORY_PAGE_LIMIT,
+            interval.as_str(),
+            order,
+            PAGE_LIMIT,
             cursor.as_deref(),
         )?;
-        let (mut page, next_cursor) = get_page(&client, url, api_key, symbol, interval).await?;
+        let (mut page, next_cursor) =
+            get_page(&client, url, api_key, symbol, interval).await?;
         all.append(&mut page);
 
         match next_cursor.filter(|next| !next.is_empty()) {
             Some(next) => {
                 if !seen_cursors.insert(next.clone()) {
-                    anyhow::bail!("SiftingIO repeated a 1m profile-history cursor");
+                    anyhow::bail!("SiftingIO repeated a history cursor");
                 }
-                if page_index + 1 == MAX_PROFILE_HISTORY_PAGES {
-                    anyhow::bail!(
-                        "SiftingIO 1m profile history exceeded {MAX_PROFILE_HISTORY_PAGES} pages"
-                    );
+                if page_index + 1 == MAX_PAGES {
+                    anyhow::bail!("SiftingIO history exceeded {MAX_PAGES} pages");
                 }
                 cursor = Some(next);
             }
@@ -307,191 +236,210 @@ pub async fn fetch_sifting_profile_candles(
         }
     }
 
-    all.retain(|c| c.time >= start_ms && c.time < end_exclusive_ms);
-    all.sort_by_key(|c| c.time);
-    all.dedup_by_key(|c| c.time);
+    all.sort_by_key(|candle| candle.time);
+    all.dedup_by_key(|candle| candle.time);
     Ok(all)
 }
 
-/// Minimum share of the window's buckets a profile page must contain to be
-/// trusted. A plan- or cursor-limited response can return the right first and
-/// last timestamps while covering only a fraction of the week, which would
-/// silently smear the profile. Real gold history covers ~23h a day, 5 days a
-/// week, so a quarter of the raw bucket count is a conservative floor.
-const MIN_PROFILE_HISTORY_DENSITY: f64 = 0.25;
+/// Fetch the boot seed for one resolution.
+pub async fn fetch_seed(
+    base_url: &str,
+    api_key: &str,
+    symbol: &str,
+    interval: Interval,
+) -> Result<Vec<Candle>> {
+    let end = Utc::now();
+    let start = end - lookback(interval);
+    let order = if interval == Interval::M1 { "asc" } else { "desc" };
+    let mut bars = fetch_pages(base_url, api_key, symbol, interval, start, end, order).await?;
 
-/// True when `candles` can honestly represent `[start_ms, end_ms)` at
-/// `interval_ms`: bars must reach both boundaries (within
-/// `boundary_tolerance_ms`, so a weekend/holiday gap is fine) *and* the bar
-/// count must be a plausible share of the buckets the window spans.
-pub fn profile_history_covers(
-    candles: &[VpCandle],
-    start_ms: i64,
-    end_ms: i64,
-    interval_ms: i64,
-    boundary_tolerance_ms: i64,
-) -> bool {
-    if candles.is_empty() || end_ms <= start_ms || interval_ms <= 0 {
-        return false;
+    // The seed is bounded; keep the newest rows.
+    if bars.len() > SEED_BARS && interval != Interval::M1 {
+        let skip = bars.len() - SEED_BARS;
+        bars = bars.into_iter().skip(skip).collect();
     }
-    let reaches_start = candles
-        .first()
-        .is_some_and(|first| first.time <= start_ms + boundary_tolerance_ms);
-    let reaches_end = candles
-        .last()
-        .is_some_and(|last| last.time >= end_ms - boundary_tolerance_ms);
-    if !reaches_start || !reaches_end {
-        return false;
+    if bars.len() < SEED_BARS && interval != Interval::M1 {
+        warn!(
+            "SiftingIO {} history returned {} bars, short of the {} bar seed",
+            interval.as_str(),
+            bars.len(),
+            SEED_BARS
+        );
     }
-    let span_buckets = (end_ms - start_ms) as f64 / interval_ms as f64;
-    let density = candles.len() as f64 / span_buckets.max(1.0);
-    density >= MIN_PROFILE_HISTORY_DENSITY
+    Ok(bars)
 }
 
-fn truncate(s: &str, n: usize) -> &str {
-    match s.get(..n) {
-        Some(prefix) => prefix,
-        None => s,
+/// Fetch the bars newer than `after_ms`, ascending. SiftingIO's `start` is
+/// inclusive, so the boundary bar the seed already has is dropped.
+pub async fn fetch_since(
+    base_url: &str,
+    api_key: &str,
+    symbol: &str,
+    interval: Interval,
+    after_ms: i64,
+) -> Result<Vec<Candle>> {
+    let now = Utc::now();
+    let start = DateTime::<Utc>::from_timestamp_millis(after_ms + 1)
+        .context("invalid history tail timestamp")?;
+    if start >= now {
+        return Ok(Vec::new());
     }
+    let client = reqwest::Client::new();
+    let url = history_url(
+        base_url,
+        symbol,
+        start,
+        now,
+        interval.as_str(),
+        "asc",
+        TAIL_BARS,
+        None,
+    )?;
+    let (candles, _) = get_page(&client, url, api_key, symbol, interval).await?;
+    Ok(candles
+        .into_iter()
+        .filter(|candle| candle.time > after_ms)
+        .collect())
+}
+
+fn truncate(text: &str, limit: usize) -> &str {
+    match text.get(..limit) {
+        Some(prefix) => prefix,
+        None => text,
+    }
+}
+
+/// `Candle::is_valid` also checks bucket alignment, which the book (the single
+/// authority on what enters the cache) enforces and counts. The page parser
+/// only rejects values that are impossible for *any* bar.
+fn has_valid_values(candle: &Candle) -> bool {
+    let positive = |value: f64| value.is_finite() && value > 0.0;
+    positive(candle.open)
+        && positive(candle.high)
+        && positive(candle.low)
+        && positive(candle.close)
+        && candle.volume.is_finite()
+        && candle.volume >= 0.0
+        && candle.high >= candle.low
+        && candle.time > 0
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn chart_history_request_is_a_single_fixed_two_thousand_bar_page() {
-        let now = Utc::now();
-        let url = history_url(
+    fn url_for(interval: Interval) -> String {
+        history_url(
             "https://api.sifting.io/",
             "XAUUSD",
-            now - Duration::days(HISTORY_LOOKBACK_DAYS),
-            now,
-            "15m",
-            "desc",
-            SIFTING_HISTORY_CANDLE_LIMIT,
-            None,
-        )
-        .unwrap();
-        assert!(
-            url.as_str()
-                .starts_with("https://api.sifting.io/v1/hist/commodities/XAUUSD/bars?")
-        );
-        assert!(url.as_str().contains("interval=15m"));
-        assert!(url.as_str().contains("order=desc"));
-        assert!(url.as_str().contains("limit=2000"));
-        assert!(url.as_str().contains("start="));
-        assert!(url.as_str().contains("end="));
-    }
-
-    #[test]
-    fn profile_history_request_carries_interval_and_encoded_cursor() {
-        let now = Utc::now();
-        let url = history_url(
-            "https://api.sifting.io",
-            "XAUUSD",
-            now - Duration::days(7),
-            now,
-            "1m",
+            Utc::now() - Duration::days(7),
+            Utc::now(),
+            interval.as_str(),
             "asc",
-            PROFILE_HISTORY_PAGE_LIMIT,
+            PAGE_LIMIT,
             Some("cursor/with+reserved=chars"),
         )
-        .unwrap();
-        assert!(url.as_str().contains("interval=1m"));
-        assert!(url.as_str().contains("order=asc"));
-        assert!(url.as_str().contains("limit=2000"));
-        assert!(
-            url.as_str()
-                .contains("cursor=cursor%2Fwith%2Breserved%3Dchars")
-        );
+        .expect("url")
+        .to_string()
     }
 
-    #[test]
-    fn history_tail_drops_the_boundary_bar_and_keeps_the_newer_ones() {
-        let edge = 1_700_000_000_000;
-        let candles = vec![bar(edge), bar(edge + 15 * 60_000), bar(edge + 30 * 60_000)];
-        let tail = newer_than(candles, edge);
-        assert_eq!(tail.len(), 2);
-        assert_eq!(tail[0].time, edge + 15 * 60_000);
-        assert_eq!(tail[1].time, edge + 30 * 60_000);
-    }
-
-    fn bar(time: i64) -> VpCandle {
-        VpCandle {
-            time,
-            open: 4100.0,
-            high: 4101.0,
-            low: 4099.0,
-            close: 4100.5,
-            volume: 1.0,
-            source: "sifting".into(),
-        }
-    }
-
-    /// A dense minute series covering the whole window is accepted. A gold
-    /// week is ~119 trading hours inside a 120-hour Sunday-18:00 → Friday-18:00
-    /// window (the last hour is the daily 17:00 NY break).
-    #[test]
-    fn complete_profile_history_passes_the_density_check() {
-        let start = 1_700_000_000_000;
-        let week: i64 = 5 * 86_400_000;
-        let candles: Vec<VpCandle> = (0..(119 * 60)).map(|i| bar(start + i * 60_000)).collect();
-        assert!(profile_history_covers(
-            &candles,
-            start,
-            start + week,
-            60_000,
-            2 * 3_600_000
-        ));
-    }
-
-    /// ...while a page that only *reaches* the ends but is mostly empty fails.
-    #[test]
-    fn a_sparse_profile_page_is_rejected_even_when_it_reaches_both_ends() {
-        let start = 1_700_000_000_000;
-        let week: i64 = 5 * 86_400_000;
-        // One bar every 30 minutes right across the window: the endpoints look
-        // fine, the coverage does not.
-        let candles: Vec<VpCandle> = (0..(week / 1_800_000) - 1)
-            .map(|i| bar(start + i * 1_800_000))
-            .collect();
-        assert!(!profile_history_covers(
-            &candles,
-            start,
-            start + week,
-            60_000,
-            2 * 3_600_000
-        ));
-        // Nothing at all, or nothing near the far end, is rejected too.
-        assert!(!profile_history_covers(&[], start, start + week, 60_000, 0));
-        assert!(!profile_history_covers(
-            &candles,
-            start,
-            start + 2 * week,
-            60_000,
-            0
-        ));
-    }
-
-    #[test]
-    fn a_short_chart_response_is_rejected_instead_of_seeding_a_partial_page() {
-        let response: SiftingBarsResponse = serde_json::from_value(serde_json::json!({
-            "data": [],
-            "meta": {"symbol":"XAUUSD", "interval":"15m"}
+    fn page(rows: serde_json::Value, interval: &str) -> SiftingBarsResponse {
+        serde_json::from_value(serde_json::json!({
+            "data": rows,
+            "meta": { "symbol": "XAUUSD", "interval": interval }
         }))
-        .unwrap();
-        let (candles, _) = parse_page(response, "XAUUSD", "15m").unwrap();
-        assert!(require_chart_seed(candles).is_err());
+        .expect("page")
+    }
+
+    #[test]
+    fn history_requests_carry_interval_order_limit_and_cursor() {
+        let url = url_for(Interval::M1);
+        assert!(url.starts_with("https://api.sifting.io/v1/hist/commodities/XAUUSD/bars?"));
+        assert!(url.contains("interval=1m"));
+        assert!(url.contains("order=asc"));
+        assert!(url.contains("limit=2000"));
+        assert!(url.contains("cursor=cursor%2Fwith%2Breserved%3Dchars"));
+        assert!(url.contains("start="));
+        assert!(url.contains("end="));
+
+        assert!(url_for(Interval::H1).contains("interval=1h"));
+        assert!(url_for(Interval::M15).contains("interval=15m"));
+    }
+
+    #[test]
+    fn the_seed_lookback_covers_the_bars_it_asks_for() {
+        assert!(lookback(Interval::M15) >= Duration::days(21));
+        assert!(lookback(Interval::H1) >= Duration::days(84));
+        assert!(lookback(Interval::M1) >= Duration::days(12));
+    }
+
+    #[test]
+    fn a_page_is_sorted_ascending_and_typed() {
+        let response = page(
+            serde_json::json!([
+                { "t": 1_700_000_900_000_i64, "o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5, "v": 10.0 },
+                { "t": 1_700_000_000_000_i64, "o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5, "v": 10.0 }
+            ]),
+            "15m",
+        );
+        let (candles, next) = parse_page(response, "XAUUSD", Interval::M15).expect("page");
+        assert!(next.is_none());
+        assert_eq!(candles[0].time, 1_700_000_000_000);
+        assert_eq!(candles[1].time, 1_700_000_900_000);
+        assert_eq!(candles[0].symbol, SYMBOL);
+        assert_eq!(candles[0].interval, "15m");
+        assert_eq!(candles[0].source, "sifting");
+        assert!(candles.iter().all(|candle| candle.closed));
     }
 
     #[test]
     fn response_validation_rejects_wrong_symbol_or_interval() {
         let response: SiftingBarsResponse = serde_json::from_value(serde_json::json!({
             "data": [],
-            "meta": {"symbol":"XAGUSD", "interval":"1m"}
+            "meta": { "symbol": "XAGUSD", "interval": "1m" }
         }))
         .unwrap();
-        assert!(parse_page(response, "XAUUSD", "1m").is_err());
+        assert!(parse_page(response, "XAUUSD", Interval::M1).is_err());
+
+        let response: SiftingBarsResponse = serde_json::from_value(serde_json::json!({
+            "data": [],
+            "meta": { "symbol": "XAUUSD", "interval": "5m" }
+        }))
+        .unwrap();
+        assert!(parse_page(response, "XAUUSD", Interval::M1).is_err());
+    }
+
+    #[test]
+    fn impossible_bars_and_duplicate_timestamps_are_rejected() {
+        let response = page(
+            serde_json::json!([
+                { "t": 1_700_000_000_000_i64, "o": 1.0, "h": 0.5, "l": 2.0, "c": 1.5, "v": 10.0 }
+            ]),
+            "15m",
+        );
+        assert!(parse_page(response, "XAUUSD", Interval::M15).is_err());
+
+        let response = page(
+            serde_json::json!([
+                { "t": 1_700_000_000_000_i64, "o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5, "v": 10.0 },
+                { "t": 1_700_000_000_000_i64, "o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5, "v": 11.0 }
+            ]),
+            "15m",
+        );
+        assert!(parse_page(response, "XAUUSD", Interval::M15).is_err());
+    }
+
+    #[test]
+    fn an_empty_page_is_not_an_error() {
+        let response = page(serde_json::json!([]), "1h");
+        let (candles, _) = parse_page(response, "XAUUSD", Interval::H1).expect("empty page");
+        assert!(candles.is_empty());
+    }
+
+    #[test]
+    fn truncate_never_splits_a_utf8_boundary() {
+        assert_eq!(truncate("abcdef", 3), "abc");
+        assert_eq!(truncate("abc", 99), "abc");
+        assert_eq!(truncate("é", 1), "é");
     }
 }

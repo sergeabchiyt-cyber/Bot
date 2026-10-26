@@ -278,13 +278,6 @@ impl McpClient {
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         self.call_tool(&read, json!({})).await.context("page read")
     }
-
-    /// How many tools the connected MCP server exposes (logged for proof
-    /// that the configured server — e.g. the 31-tool browser — is in use).
-    pub async fn tool_count(&self) -> Option<usize> {
-        self.initialize().await.ok()?;
-        self.list_tools().await.ok().map(|t| t.len())
-    }
 }
 
 fn extract_text(result: &Value) -> Option<String> {

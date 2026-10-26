@@ -1,9 +1,9 @@
 //! Bounded, shared history of live tick-volume bars.
 //!
-//! The SiftingIO stream adapter writes here *before* broadcasting, so a client
-//! that subscribes mid-bucket gets the in-progress bar in its replay and then
-//! sees every following update. Clients upsert by `time`, which makes the
-//! overlap harmless.
+//! The market stream writes here *before* broadcasting, so a client that
+//! subscribes mid-bucket gets the in-progress bar in its replay and then sees
+//! every following update. Clients upsert by `time`, which makes the overlap
+//! harmless.
 //!
 //! A std `Mutex` is used (not tokio's `RwLock`) because the writer is the
 //! synchronous tick handler and every critical section is a few pointer moves;
@@ -32,17 +32,20 @@ impl TickVolumeStore {
     /// and never holding more than `capacity`.
     pub fn upsert(&self, bar: TickVolumeBar) {
         let mut buf = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        match buf.back() {
+        let last = buf.back().map(|last| last.time);
+        match last {
             // Hot path: every tick updates the newest bar in place.
-            Some(last) if last.time == bar.time => {
-                *buf.back_mut().unwrap() = bar;
+            Some(time) if time == bar.time => {
+                if let Some(slot) = buf.back_mut() {
+                    *slot = bar;
+                }
             }
-            Some(last) if last.time < bar.time => buf.push_back(bar),
+            Some(time) if time < bar.time => buf.push_back(bar),
             None => buf.push_back(bar),
             // Out-of-order (not expected from the adapter, but stay correct).
             Some(_) => match buf.binary_search_by_key(&bar.time, |b| b.time) {
-                Ok(i) => buf[i] = bar,
-                Err(i) => buf.insert(i, bar),
+                Ok(index) => buf[index] = bar,
+                Err(index) => buf.insert(index, bar),
             },
         }
         while buf.len() > self.capacity {
@@ -55,14 +58,25 @@ impl TickVolumeStore {
         let buf = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         buf.iter().cloned().collect()
     }
+
+    pub fn len(&self) -> usize {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{Interval, SYMBOL};
 
     fn bar(time: i64, ticks: u64) -> TickVolumeBar {
         TickVolumeBar {
+            symbol: SYMBOL.into(),
+            interval: Interval::M15.as_str().into(),
             time,
             ticks,
             up_ticks: 0,
@@ -78,37 +92,46 @@ mod tests {
 
     #[test]
     fn upsert_replaces_the_live_bar_and_appends_new_ones() {
-        let s = TickVolumeStore::new(10);
-        s.upsert(bar(0, 1));
-        s.upsert(bar(0, 2));
-        s.upsert(bar(900_000, 1));
-        let snap = s.snapshot();
-        assert_eq!(snap.len(), 2);
-        assert_eq!(snap[0].ticks, 2);
-        assert_eq!(snap[1].time, 900_000);
+        let store = TickVolumeStore::new(10);
+        store.upsert(bar(0, 1));
+        store.upsert(bar(0, 2));
+        store.upsert(bar(900_000, 1));
+        let snapshot = store.snapshot();
+        assert_eq!(snapshot.len(), 2);
+        assert_eq!(snapshot[0].ticks, 2);
+        assert_eq!(snapshot[1].time, 900_000);
     }
 
     #[test]
     fn capacity_is_enforced_oldest_first() {
-        let s = TickVolumeStore::new(3);
-        for i in 0..5 {
-            s.upsert(bar(i * 900_000, 1));
+        let store = TickVolumeStore::new(3);
+        for index in 0..5 {
+            store.upsert(bar(index * 900_000, 1));
         }
-        let times: Vec<i64> = s.snapshot().iter().map(|b| b.time).collect();
+        let times: Vec<i64> = store.snapshot().iter().map(|b| b.time).collect();
         assert_eq!(times, vec![1_800_000, 2_700_000, 3_600_000]);
+        assert_eq!(store.len(), 3);
+        assert!(!store.is_empty());
     }
 
     #[test]
     fn out_of_order_bars_stay_sorted() {
-        let s = TickVolumeStore::new(10);
-        s.upsert(bar(1_800_000, 1));
-        s.upsert(bar(0, 1));
-        s.upsert(bar(1_800_000, 5));
-        let snap = s.snapshot();
+        let store = TickVolumeStore::new(10);
+        store.upsert(bar(1_800_000, 1));
+        store.upsert(bar(0, 1));
+        store.upsert(bar(1_800_000, 5));
+        let snapshot = store.snapshot();
         assert_eq!(
-            snap.iter().map(|b| b.time).collect::<Vec<_>>(),
+            snapshot.iter().map(|b| b.time).collect::<Vec<_>>(),
             vec![0, 1_800_000]
         );
-        assert_eq!(snap[1].ticks, 5);
+        assert_eq!(snapshot[1].ticks, 5);
+    }
+
+    #[test]
+    fn an_empty_store_snapshots_empty() {
+        let store = TickVolumeStore::new(4);
+        assert!(store.snapshot().is_empty());
+        assert!(store.is_empty());
     }
 }

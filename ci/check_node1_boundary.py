@@ -1,177 +1,201 @@
 #!/usr/bin/env python3
-"""Static guard for the Node1 service boundary.
+"""Static guard for the C1 v2 Node 1 boundary.
 
-Node1 is the market-data / volume-profile service plus the built-in strategy
-evaluator and the **demo (paper) simulator**. It is still not an execution
-venue: no broker credential, no MT5 bridge, no node3-execution, no write route
-and no way to reach a broker from the strategy or demo modules.
+Node 1 is a **read-only market-data and calendar feed**. It must not compute a
+level, choose a side, size a trade, simulate one, or register a single write
+route. Everything that used to do those things has moved:
 
-This script fails when a broker/execution shape reappears, when the removed
-order-flow path comes back (exchange aggTrade adapters + the bubbles analyzer),
-or when one of the demo contract's fixed invariants (1:1000 leverage, 0.10
-spread, 0.01-1.00 lots) drifts.
+    src/strategy.rs, src/demo_engine.rs        deleted (Node 1 has no strategy)
+    src/volume_profile*.rs                     handoff/node3-vp/   (Node 3)
+    src/econ_monitor.rs, src/ai_cache.rs       handoff/node3-ai/   (Node 3, optional)
+    /levels /vp /ai /strategy /demo            no longer routed
 
-Note: this file is the *denylist*, so it is the one place in the branch where
-the forbidden identifiers legitimately appear as text. It is skipped when
-scanning itself. Everywhere else they are banned.
+This script fails when any of that comes back, when the published surface loses
+a route or a topic the contract promises, or when the handoff packs drift from
+their manifest.
+
+Scanned surfaces: `src/`, `ci/`, `.github/`, `Cargo.toml`, `Dockerfile`
+(executable and configuration files). Deliberately **not** scanned:
+
+  * this file — it is the denylist, so it quotes every pattern;
+  * `handoff/` — that is Node 3 source stored here until Agent 3 ports it;
+  * `contracts/` — the signed contract names the forbidden vocabulary inside
+    its `not` clause on purpose, and `ci/contract_sync.py` pins its bytes;
+  * `ci/live/` — recorded output of whatever build is deployed, including the
+    v0.4.0 fixtures Node 3 needs for parity;
+  * `*.md` — prose has to be able to explain the removal. The acceptance
+    criterion is `src/`, and `src/` is scanned in full.
 
 usage: check_node1_boundary.py [repo-root]
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
 
-# Patterns that must never appear in Node1 *executable* surface.
+# ---------------------------------------------------------------------------
+# Denylist: (token, pattern, message)
+# ---------------------------------------------------------------------------
+
 FORBIDDEN: list[tuple[str, re.Pattern[str], str]] = [
     (
-        "execution module declaration",
-        re.compile(r"^\s*mod\s+execution", re.M),
-        "src/main.rs still declares an execution module",
+        "retired module",
+        re.compile(r"^\s*(?:pub\s+)?mod\s+(?:strategy|demo_engine|volume_profile|econ_monitor|ai_cache)\b", re.M),
+        "a retired module is declared again",
     ),
     (
-        "ExecutionManager",
-        re.compile(r"\bExecutionManager\b"),
-        "execution manager still referenced",
+        "retired type",
+        re.compile(r"\b(?:StrategyEngine|DemoEngine|VolumeProfile|ProfileMeta|VpCandle|VpWindow|vp_audit|nearest_high_impact_event)\b"),
+        "a retired type or helper is referenced",
     ),
     (
-        "execution venue type",
-        re.compile(r"\bExecutionVenue\b"),
-        "execution venue type still referenced",
+        "sl-tp-rr setting",
+        re.compile(r"\b(?:SL|TP|RR)_[A-Z][A-Z0-9_]*\b"),
+        "a stop/target/risk-reward setting is back (Node 3 owns those)",
     ),
     (
-        "execution files",
-        re.compile(r"src/execution(_deriv|_chelsea)?\.rs"),
-        "execution source file still referenced",
+        "intent type",
+        re.compile(r"\b(?:TradeIntent|IntentSide|intent_id|trade_intent)\b"),
+        "a trade-intent identifier is back",
     ),
     (
-        "node3-execution service",
-        re.compile(r"node3-execution"),
-        "execution service still referenced",
+        "broker identifier",
+        re.compile(r"\b(?:broker|venue|Deriv|MT5|MetaTrader|AggTrade|OrderFlowAnalyzer|ExecutionManager)\b"),
+        "a broker/execution identifier is back",
     ),
     (
-        "mt5 bridge",
-        re.compile(r"mt5-bridge"),
-        "MT5 bridge still referenced",
+        "execution field",
+        re.compile(r'"(?:side|stop_loss|take_profit|lots|risk_usd|action|leverage|position|equity)"\s*:'),
+        "a published payload carries a trade field",
     ),
     (
-        "broker credential env var",
-        re.compile(r"\b(DERIV_DEMO_API|DERIV_APP_ID|DERIV_API_URL|MCP_CHELSEA_URL|EXECUTION_VENUE)\b"),
-        "broker/execution env var still read",
+        "execution crate",
+        re.compile(r"node3-execution|mt5-bridge"),
+        "an execution service is referenced",
     ),
     (
-        "account stake / lot config",
-        re.compile(r"\b(ORDER_SIZE|DERIV_MIN_STAKE|MT5_VOLUME_LOTS|STAKE_|LOT_?SIZE)\b"),
-        "stake/lot-size setting still present (the demo uses DEMO_MIN_LOTS/DEMO_MAX_LOTS)",
-    ),
-    (
-        "execution SL/TP/RR config",
-        re.compile(r"\b(SL_MIN_PIPS|SL_MAX_PIPS|TP_MIN_PIPS|TP_MAX_PIPS|RR_MIN|RR_MAX)\b"),
-        "execution-only SL/TP/RR field still present",
-    ),
-    (
-        "execution venue in a payload",
-        re.compile(r'"venue"\s*:'),
-        "a recorded payload still carries an execution venue",
-    ),
-    (
-        "trades WS topic",
-        re.compile(r'"trades"'),
-        "the bidirectional `trades` topic is still in use",
-    ),
-    (
-        "broker write route",
-        re.compile(r"\.route\([^)]*,\s*(post|put|delete|patch)\("),
+        "write route",
+        re.compile(r"\.route\(\s*[^)]*,\s*(?:post|put|patch|delete)\("),
         "a write route is registered on the router",
     ),
-    # ---- Order flow was removed from Node1; it must not come back ----
     (
-        "order-flow analyzer",
-        re.compile(r"\bOrderFlowAnalyzer\b"),
-        "the removed order-flow analyzer is still referenced",
+        "write method",
+        re.compile(r"Method::(?:POST|PUT|PATCH|DELETE)"),
+        "a write method is allowed through CORS",
     ),
     (
-        "exchange aggTrade adapter",
-        re.compile(r"\bAggTrade\b"),
-        "the removed exchange aggTrade adapter is still referenced",
+        "retired surface name",
+        re.compile(r'"(?:levels|vp|strategy|demo|ai|volume_profile)"'),
+        "a retired surface is named in the code",
     ),
     (
-        "order-flow delta history",
-        re.compile(r"\bdelta_history\b"),
-        "order-flow delta state is still referenced",
-    ),
-    (
-        "bubbles WS frame",
-        re.compile(r'#\[serde\(rename = "bubbles"\)\]'),
-        "the removed order-flow `bubbles` frame is back in the wire contract",
-    ),
-    (
-        "order-flow feed switch",
-        re.compile(r"\bFEED_(BINANCE|BYBIT|OKX|BITGET|GATE|KRAKEN|ALLTICK|ITICK)\b"),
-        "an exchange order-flow feed switch is still read",
+        "retired env var",
+        re.compile(r"\b(?:STRATEGY|DEMO|ECON|VP)_[A-Z][A-Z0-9_]*\b"),
+        "a retired environment variable is read",
     ),
 ]
 
-# Paths whose *content* is checked (source, CI, deployment, docs).
-CHECK_SUFFIXES = {
-    ".rs", ".toml", ".yml", ".yaml", ".py", ".sh", ".md", ".json",
-    ".jsonl", ".code", ".err", "",  # "" = extensionless (Dockerfile)
+# Sites where a finding is deliberate, keyed by the exact *token* allowed there.
+# Every entry is an audit trail: negative tests that assert Node 1 refuses an
+# execution shape have to spell that shape out.
+ALLOWED: dict[str, set[str]] = {
+    # REJECTED_KINDS: the list of inbound frame kinds that are dropped, and the
+    # test that proves a status document carries none of those fields.
+    "src/types.rs": {"intent type", "broker identifier"},
+    # `no_route_accepts_a_broker_write` and `removed_routes_are_not_served`.
+    "src/ws_server.rs": {"broker identifier", "retired surface name"},
+    # The verifiers' own denylists and the "retired surfaces" sweep.
+    "ci/c1_schema.py": {"intent type", "broker identifier"},
+    "ci/verify_contract.py": {"retired surface name"},
+    "ci/verify_ws.py": {
+        "intent type",
+        "broker identifier",
+        "execution field",
+        "retired surface name",
+    },
+    "ci/live_report.py": {"retired surface name", "retired type"},
+    "ci/live-probe.sh": {"retired surface name"},
+    "ci/smoke.sh": {"retired surface name", "retired type"},
 }
 
-# Generated CI artefacts: not hand-maintained, so they are not part of the
-# contract this guard enforces.
-GENERATED = {
-    Path("ci") / "PROOF.md",
-    Path("ci") / "LIVE.md",
-    Path("ci") / "check_node1_boundary.py",  # this file quotes every pattern
-}
+CHECK_SUFFIXES = {".rs", ".toml", ".py", ".sh", ".yml", ".yaml"}
+SKIP_DIRS = {".git", "target", "__pycache__", "node_modules", ".venv", "handoff", "contracts"}
+SKIP_PREFIXES = {("ci", "live")}
 
-# Directories of *recorded* output from whatever build is currently deployed
-# (`ci/live-probe.sh` snapshots the live service). They describe the
-# deployment, not this branch, so a stale field from a build that predates
-# this cleanup must not fail CI — redeploying refreshes them.
-RECORDED_DIRS = {"live"}
+# ---------------------------------------------------------------------------
+# What the contract promises, pinned so a refactor cannot quietly drop it
+# ---------------------------------------------------------------------------
 
-# Sites where a forbidden pattern is intentional, mapped to the finding names
-# allowed there. Every entry needs a reason: this is the audit trail for
-# "the remaining matches are deliberate".
-ALLOWED_SITES: dict[str, set[str]] = {
-    # Negative tests: each one asserts that Node1 *rejects* an execution frame
-    # or that the removed order-flow topic no longer parses.
-    "src/types.rs": {"trades WS topic"},
-    "src/ws_server.rs": {"trades WS topic"},
-    "ci/verify_ws.py": {"trades WS topic"},
-}
-
-# Directories never walked.
-SKIP_DIRS = {".git", "target", "__pycache__", "node_modules", ".venv"}
-
-MARKET_TOPICS_REQUIRED = [
-    "levels", "candle", "tick_volume", "calendar", "status", "strategy", "demo",
+EXPECTED_ROUTES = {"/health", "/status", "/candles", "/tick-volume", "/calendar", "/ws"}
+EXPECTED_TOPICS = {"candle", "tick_volume", "calendar", "status"}
+REJECTED_KINDS = [
+    "trades", "trade_intent", "execution_hello", "execution_report", "order", "bubbles",
 ]
-MARKET_ROUTES_REQUIRED = [
-    "/health", "/status", "/levels", "/vp", "/candles", "/tick-volume",
-    "/calendar", "/ai", "/strategy", "/demo", "/ws",
+EXPECTED_MODULES = [
+    "calendar", "candles", "config", "mcp_client", "publish", "session",
+    "sifting_rest", "sifting_ws", "status", "synthetic", "tick_volume", "types",
+    "ws_server",
+]
+RETIRED_MODULES = ["strategy", "demo_engine", "volume_profile", "econ_monitor", "ai_cache"]
+RETIRED_FILES = [
+    "src/strategy.rs",
+    "src/demo_engine.rs",
+    "src/volume_profile.rs",
+    "src/volume_profile",
+    "src/econ_monitor.rs",
+    "src/ai_cache.rs",
+    "FRONTEND_NEXT.md",
+    "ci/verify_demo.py",
+    "ci/verify_levels.py",
+    "ci/verify_vp.py",
+    "ci/verify_econ_audio.py",
+    "ci/live/strategy.json",
+    "ci/live/strategy.code",
+    "ci/live/strategy.err",
+    "ci/live/demo.json",
+    "ci/live/demo.code",
+    "ci/live/demo.err",
+]
+REQUIRED_FILES = [
+    "contracts/MANIFEST.sha256",
+    "contracts/NODE1_FEED_CONTRACT_v2.md",
+    "contracts/c1-market-feed.schema.json",
+    "ci/contract_sync.py",
+    "ci/smoke.sh",
+    "ci/verify_ws.py",
+    "ci/verify_contract.py",
+    "ci/verify_candles.py",
+    "ci/verify_tick_volume.py",
+    "ci/verify_calendar.py",
+    "handoff/README.md",
+    "handoff/MANIFEST.sha256",
+    "handoff/node3-vp/volume_profile.rs",
+    "handoff/node3-ai/econ_monitor.rs",
+    "src/calendar.rs",
+]
+# The build must actually run the checks this guard belongs to.
+REQUIRED_BUILD_STEPS = [
+    "cargo fmt --all -- --check",
+    "cargo check --all-targets",
+    "cargo clippy --all-targets -- -D warnings",
+    "cargo test --all-targets",
+    "cargo build --release",
+    "python3 ci/contract_sync.py",
+    "python3 ci/check_node1_boundary.py",
+    "bash ci/smoke.sh",
 ]
 
-# The demo contract the desk asked for, pinned so a refactor cannot silently
-# turn the simulator into something else.
-DEMO_CONTRACT = [
-    (r'env_f64\("DEMO_LEVERAGE", 1000\.0\)', "1:1000 leverage default"),
-    (r'env_f64\("DEMO_SPREAD", 0\.10\)', "0.10 spread default"),
-    (r'env_f64\("DEMO_MIN_LOTS", 0\.01\)', "0.01 minimum lot"),
-    (r'env_f64\("DEMO_MAX_LOTS", 1\.0\)', "1.00 maximum lot"),
-    (r'env_f64\("DEMO_START_BALANCE", 10_000\.0\)', "10,000 starting balance"),
-]
 
-# Modules that must stay offline: a simulator that could open a socket is one
-# refactor away from being an execution path.
-OFFLINE_MODULES = ["src/strategy.rs", "src/demo_engine.rs"]
-NETWORK_PATTERN = re.compile(r"\breqwest\b|connect_async|\bTcpStream\b|https?://|wss?://")
+def read(rel: str) -> str:
+    path = ROOT / rel
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 def iter_files():
@@ -181,12 +205,11 @@ def iter_files():
         rel = path.relative_to(ROOT)
         if any(part in SKIP_DIRS for part in rel.parts):
             continue
-        if rel in GENERATED:
+        if len(rel.parts) >= 2 and (rel.parts[0], rel.parts[1]) in SKIP_PREFIXES:
             continue
-        # ci/live/** is recorded output from the deployed build.
-        if len(rel.parts) > 2 and rel.parts[0] == "ci" and rel.parts[1] in RECORDED_DIRS:
+        if rel.as_posix() == "ci/check_node1_boundary.py":
             continue
-        if rel.suffix not in CHECK_SUFFIXES:
+        if rel.name != "Dockerfile" and rel.suffix not in CHECK_SUFFIXES:
             continue
         yield rel
 
@@ -195,82 +218,112 @@ def main() -> int:
     failures: list[str] = []
     files = list(iter_files())
 
+    # ---- 1. denylist ------------------------------------------------------
     for rel in files:
-        try:
-            text = (ROOT / rel).read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:  # pragma: no cover - unreadable file
-            failures.append(f"{rel}: unreadable ({exc})")
-            continue
-
-        allowed = ALLOWED_SITES.get(rel.as_posix(), set())
-        for name, pattern, message in FORBIDDEN:
-            if name in allowed:
+        key = rel.as_posix()
+        text = (ROOT / rel).read_text(encoding="utf-8", errors="replace")
+        allowed = ALLOWED.get(key, set())
+        for token, pattern, message in FORBIDDEN:
+            if token in allowed:
                 continue
             for match in pattern.finditer(text):
                 line = text[: match.start()].count("\n") + 1
                 snippet = text.splitlines()[line - 1].strip()[:120]
-                failures.append(f"{rel}:{line}: {message}\n      {snippet}")
+                failures.append(f"{key}:{line}: {message}\n      {snippet}")
 
-    # Positive checks: the market + strategy surface must survive the cleanup.
-    def has(path: str, pattern: str) -> bool:
-        p = ROOT / path
-        return p.is_file() and re.search(pattern, p.read_text(encoding="utf-8", errors="replace"))
+    # ---- 2. the published surface is complete -----------------------------
+    ws_server = read("src/ws_server.rs")
+    routes = set(re.findall(r'\.route\(\s*"([^"]+)"', ws_server))
+    if routes != EXPECTED_ROUTES:
+        failures.append(
+            f"src/ws_server.rs: routes are {sorted(routes)}, expected {sorted(EXPECTED_ROUTES)}"
+        )
+    for match in re.finditer(r'\.route\(\s*"([^"]+)"\s*,\s*([a-z_]+)\(', ws_server):
+        if match.group(2) != "get":
+            failures.append(
+                f"src/ws_server.rs: {match.group(1)} is registered with "
+                f"`{match.group(2)}`, not `get` — Node 1 has no write route"
+            )
+    if "fn no_route_accepts_a_broker_write" not in ws_server:
+        failures.append(
+            "src/ws_server.rs: the `no_route_accepts_a_broker_write` test is missing"
+        )
 
-    for route in MARKET_ROUTES_REQUIRED:
-        if not has("src/ws_server.rs", re.escape(f'"{route}"')):
-            failures.append(f"src/ws_server.rs: market route {route} is missing")
+    types = read("src/types.rs")
+    if set(re.findall(r'Topic::\w+ => "([a-z_]+)"', types)) != EXPECTED_TOPICS:
+        failures.append(f"src/types.rs: Topic::as_str does not map to {sorted(EXPECTED_TOPICS)}")
+    for kind in REJECTED_KINDS:
+        if f'"{kind}"' not in types:
+            failures.append(f"src/types.rs: REJECTED_KINDS no longer covers {kind!r}")
+    if 'CONTRACT_VERSION: &str = "2.0"' not in types:
+        failures.append('src/types.rs: CONTRACT_VERSION is not "2.0"')
 
-    for topic in MARKET_TOPICS_REQUIRED:
-        if not has("src/ws_server.rs", re.escape(f'"{topic}"')):
-            failures.append(f"src/ws_server.rs: market WS topic {topic} is missing")
+    # ---- 3. module wiring -------------------------------------------------
+    main_rs = read("src/main.rs")
+    declared = set(re.findall(r"^mod\s+(\w+)\s*;", main_rs, re.M))
+    if declared != set(EXPECTED_MODULES):
+        missing = sorted(set(EXPECTED_MODULES) - declared)
+        extra = sorted(declared - set(EXPECTED_MODULES))
+        failures.append(f"src/main.rs: modules differ from the feed (missing {missing}, extra {extra})")
+    for module in RETIRED_MODULES:
+        if (ROOT / "src" / f"{module}.rs").exists() or (ROOT / "src" / module).is_dir():
+            failures.append(f"src/{module}: the retired module is back on Node 1")
+    # Only `subscribe` and `heartbeat` are inbound frames (`type` names the
+    # discriminant field of the outbound envelope and is not a frame kind).
+    inbound = set(re.findall(r'#\[serde\(rename = "(\w+)"\)\]', types))
+    if inbound - {"type", "subscribe", "heartbeat"}:
+        failures.append(f"src/types.rs: unexpected inbound frame kind(s) {sorted(inbound)}")
+    if not {"subscribe", "heartbeat"} <= inbound:
+        failures.append("src/types.rs: the `subscribe`/`heartbeat` inbound frames are missing")
 
-    if not has("src/strategy.rs", r"pub struct StrategyEngine"):
-        failures.append("src/strategy.rs: the strategy evaluator is missing")
+    # ---- 4. files that must and must not exist ----------------------------
+    for rel in REQUIRED_FILES:
+        if not (ROOT / rel).exists():
+            failures.append(f"{rel}: required file is missing")
+    for rel in RETIRED_FILES:
+        if (ROOT / rel).exists():
+            failures.append(f"{rel}: removed Node 1 asset is still present")
+    if not read("src/calendar.rs").count("pub struct CalendarSource"):
+        failures.append("src/calendar.rs: the ForexFactory/MCP calendar source is missing")
 
-    if not has("src/demo_engine.rs", r"pub struct DemoEngine"):
-        failures.append("src/demo_engine.rs: the demo engine is missing")
+    # ---- 5. the handoff packs are pinned ----------------------------------
+    manifest = ROOT / "handoff" / "MANIFEST.sha256"
+    if manifest.is_file():
+        for line in manifest.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            digest, _, name = line.partition("  ")
+            path = ROOT / "handoff" / name.strip()
+            if not path.is_file():
+                failures.append(f"handoff/{name.strip()}: listed in the manifest but missing")
+                continue
+            actual = hashlib.sha256(path.read_bytes()).hexdigest()
+            if actual != digest:
+                failures.append(
+                    f"handoff/{name.strip()}: manifest hash drifted "
+                    f"({actual[:12]}… != {digest[:12]}…) — Node 3 ports these byte-for-byte"
+                )
 
-    # Nothing may sit between the strategy/demo modules and a network socket.
-    for module in OFFLINE_MODULES:
-        p = ROOT / module
-        if not p.is_file():
-            failures.append(f"{module}: missing")
-            continue
-        text = p.read_text(encoding="utf-8", errors="replace")
-        if NETWORK_PATTERN.search(text):
-            failures.append(f"{module}: the strategy/demo path must stay offline")
+    # ---- 6. deployment ----------------------------------------------------
+    dockerfile = read("Dockerfile")
+    if "xauusd-engine" not in dockerfile:
+        failures.append("Dockerfile: does not build xauusd-engine")
+    for tool in ("ffmpeg", "yt-dlp"):
+        if tool in dockerfile:
+            failures.append(f"Dockerfile: still installs {tool} (the audio relay left Node 1)")
 
-    # The 1:1000 / 0.10 / 0.01-1.00 demo contract.
-    config_text = ""
-    if (ROOT / "src/config.rs").is_file():
-        config_text = (ROOT / "src/config.rs").read_text(encoding="utf-8", errors="replace")
-    for pattern, label in DEMO_CONTRACT:
-        if not re.search(pattern, config_text):
-            failures.append(f"src/config.rs: demo contract drifted — missing {label}")
+    build = read(".github/workflows/build.yml")
+    for step in REQUIRED_BUILD_STEPS:
+        if step not in build:
+            failures.append(f".github/workflows/build.yml: missing step `{step}`")
 
-    # Deployment builds only the engine crate.
-    dockerfile = ROOT / "Dockerfile"
-    if dockerfile.is_file():
-        text = dockerfile.read_text(encoding="utf-8")
-        if "xauusd-engine" not in text:
-            failures.append("Dockerfile: does not build xauusd-engine")
-        if re.search(r"COPY\s+(node3-execution|mt5-bridge)", text):
-            failures.append("Dockerfile: copies an execution/MT5 crate")
-
-    # No execution subtree survived on the branch, and the order-flow files
-    # that were removed must not come back.
-    for gone in ["node3-execution", "mt5-bridge", "docs/mt5", "ci/mt5", "ci/deriv",
-                 "ci/deriv_probe.py", "src/execution.rs", "src/execution_deriv.rs",
-                 "src/execution_chelsea.rs", ".github/workflows/deriv-probe.yml",
-                 "src/order_flow.rs", "src/binance_ws.rs", "src/multi_exchange.rs"]:
-        if (ROOT / gone).exists():
-            failures.append(f"{gone}: removed Node1 asset is still present")
-
+    # ---- verdict ----------------------------------------------------------
     if failures:
         print(f"NODE1 BOUNDARY CHECK FAILED ({len(failures)} finding(s))")
         print()
-        for f in failures:
-            print(" -", f)
+        for finding in failures:
+            print(" -", finding)
         return 1
 
     print(f"NODE1 BOUNDARY CHECK PASSED ({len(files)} files scanned)")
