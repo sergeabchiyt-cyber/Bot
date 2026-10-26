@@ -1,15 +1,41 @@
-use crate::risk::RiskProjector;
-use crate::types::{ScannedLevelSetup, ScanningSnapshot, VpCandle, VpLevels};
-use std::collections::{HashMap, VecDeque};
+//! Break and retest state machine over the published volume-profile levels.
+//!
+//! Per level: a closed candle that breaks through the level flips it to
+//! `BrokenAbove` or `BrokenBelow`. A later closed candle whose range touches
+//! the ±$0.50 retest zone confirms it. A close beyond the $2.00 invalidation
+//! distance cancels the break. At most one trigger is emitted per closed
+//! candle, and levels are evaluated in sorted id order so the result is
+//! deterministic.
+//!
+//! The volume gate is optional and OFF by default (decision D6). When enabled
+//! with a positive threshold, a retest only confirms on a candle whose tick
+//! volume reaches it.
+
+use std::collections::{BTreeMap, HashMap, VecDeque};
+
 use tracing::{debug, info};
 
-pub const PROXIMITY_DOLLARS: f64 = 0.50;
-pub const INVALIDATION_DOLLARS: f64 = 2.00;
+use crate::drawings::level_identity;
+use crate::risk::{RiskProjector, ATR_PERIOD, PIP_SIZE};
+use crate::types::{ScannedLevelSetup, ScanningSnapshot, VpCandle, VpLevels};
 
-#[derive(Debug, Clone)]
+/// Retest zone half-width in price units ($0.50).
+pub const PROXIMITY_DOLLARS: f64 = 0.50;
+/// Distance beyond the level that cancels a break ($2.00).
+pub const INVALIDATION_DOLLARS: f64 = 2.00;
+/// Bars retained for ATR. Wilder smoothing converges within a few multiples of the period.
+const HISTORY_CAPACITY: usize = 200;
+
+/// One published level the strategy watches.
+#[derive(Debug, Clone, PartialEq)]
 pub struct LevelTarget {
+    /// Short id, e.g. `PW_POC`. Sort key for deterministic evaluation.
+    pub id: String,
+    /// Display name, e.g. `PW PoC`.
     pub name: String,
     pub window: String,
+    /// Level identity `(window, kind, start, end)` rendered as the drawing id.
+    pub drawing_id: String,
     pub price: f64,
 }
 
@@ -27,9 +53,21 @@ pub struct LevelDiagnosticsMeta {
     pub last_note: String,
 }
 
+/// A confirmed retest, ready to become an intent.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Trigger {
+    /// `buy` or `sell`.
+    pub side: &'static str,
+    pub reference_price: f64,
+    pub level_id: String,
+    pub level_name: String,
+    pub drawing_id: String,
+    pub source_candle_time: i64,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CandleEvalReport {
-    pub triggered: Option<(&'static str, f64, String)>,
+    pub triggered: Option<Trigger>,
     pub breaks_detected: u64,
     pub breaks_invalidated: u64,
     pub retests_rejected_low_volume: u64,
@@ -37,473 +75,441 @@ pub struct CandleEvalReport {
     pub events: Vec<(String, String)>,
 }
 
+#[derive(Debug, Default)]
 pub struct StrategyEngine {
-    pub levels: HashMap<String, LevelTarget>,
-    pub candle_history: VecDeque<VpCandle>,
-    pub break_states: HashMap<String, BreakState>,
-    pub level_meta: HashMap<String, LevelDiagnosticsMeta>,
-    pub last_triggered_candle: i64,
+    levels: BTreeMap<String, LevelTarget>,
+    history: VecDeque<VpCandle>,
+    break_states: HashMap<String, BreakState>,
+    level_meta: HashMap<String, LevelDiagnosticsMeta>,
+    last_triggered_candle: i64,
+}
+
+fn level_name(window: &str, kind: &str) -> String {
+    let label = match kind {
+        "poc" => "PoC",
+        "vah" => "VaH",
+        _ => "VaL",
+    };
+    format!("{window} {label}")
+}
+
+fn true_range(prev: &VpCandle, curr: &VpCandle) -> f64 {
+    let high_low = curr.high - curr.low;
+    let high_close = (curr.high - prev.close).abs();
+    let low_close = (curr.low - prev.close).abs();
+    high_low.max(high_close).max(low_close)
 }
 
 impl StrategyEngine {
-    pub fn new() -> Self {
-        Self {
-            levels: HashMap::new(),
-            candle_history: VecDeque::with_capacity(50),
-            break_states: HashMap::new(),
-            level_meta: HashMap::new(),
-            last_triggered_candle: 0,
+    /// Replace the watched levels with the published set. Levels whose identity
+    /// changed (week reset, new window bounds) lose their break state. Unchanged
+    /// levels keep theirs.
+    pub fn sync_levels(&mut self, levels: &[VpLevels]) {
+        let mut next: BTreeMap<String, LevelTarget> = BTreeMap::new();
+        for level in levels {
+            let prices = [
+                ("poc", Some(level.poc)),
+                ("vah", level.vah),
+                ("val", level.val),
+            ];
+            for (kind, price) in prices {
+                let Some(price) = price else { continue };
+                if !price.is_finite() || price <= 0.0 {
+                    continue;
+                }
+                let id = format!("{}_{}", level.window, kind.to_uppercase());
+                next.insert(
+                    id.clone(),
+                    LevelTarget {
+                        id,
+                        name: level_name(&level.window, kind),
+                        window: level.window.clone(),
+                        drawing_id: level_identity(&level.window, kind, level.start, level.end),
+                        price,
+                    },
+                );
+            }
         }
+
+        let mut replaced = Vec::new();
+        for (id, old) in &self.levels {
+            let unchanged = matches!(next.get(id), Some(new) if new.drawing_id == old.drawing_id);
+            if !unchanged {
+                replaced.push(id.clone());
+            }
+        }
+        for id in replaced {
+            self.break_states.remove(&id);
+            self.level_meta.remove(&id);
+        }
+        self.levels = next;
     }
 
-    fn upsert_level(&mut self, id: &str, name: &str, window: &str, price: f64) {
-        if !price.is_finite() || price <= 0.0 {
+    /// Record a closed bar for ATR without evaluating any level. Used for bars
+    /// replayed on connect and for bars that must not trigger.
+    pub fn seed(&mut self, candle: &VpCandle) {
+        if self
+            .history
+            .back()
+            .is_some_and(|last| candle.time <= last.time)
+        {
             return;
         }
-        self.levels.insert(
-            id.to_string(),
-            LevelTarget {
-                name: name.to_string(),
-                window: window.to_string(),
-                price,
-            },
-        );
-        self.level_meta
-            .entry(id.to_string())
-            .or_insert_with(|| LevelDiagnosticsMeta {
-                broken_at: None,
-                broken_price: None,
-                last_note: format!("Watching {name} @ {price:.2} for clean candle break"),
-            });
-    }
-
-    pub fn update_levels(&mut self, lvl: &VpLevels) {
-        match lvl.window.as_str() {
-            "PW" => {
-                self.upsert_level("PW_POC", "PW PoC", "PW", lvl.poc);
-                self.upsert_level("PW_VAH", "PW VaH", "PW", lvl.vah);
-                self.upsert_level("PW_VAL", "PW VaL", "PW", lvl.val);
-                info!(
-                    "Updated PW Levels: PoC={:.2}, VaH={:.2}, VaL={:.2}",
-                    lvl.poc, lvl.vah, lvl.val
-                );
-            }
-            "PS" => {
-                self.upsert_level("PS_POC", "PS PoC", "PS", lvl.poc);
-                info!("Updated PS Level: PoC={:.2}", lvl.poc);
-            }
-            "CW" => {
-                self.upsert_level("CW_POC", "CW PoC", "CW", lvl.poc);
-                self.upsert_level("CW_VAH", "CW VaH", "CW", lvl.vah);
-                self.upsert_level("CW_VAL", "CW VaL", "CW", lvl.val);
-                info!(
-                    "Updated CW Levels: PoC={:.2}, VaH={:.2}, VaL={:.2}",
-                    lvl.poc, lvl.vah, lvl.val
-                );
-            }
-            _ => {}
+        self.history.push_back(candle.clone());
+        while self.history.len() > HISTORY_CAPACITY {
+            self.history.pop_front();
         }
     }
 
-    pub fn calculate_atr(&self) -> f64 {
-        if self.candle_history.len() < 2 {
-            return 3.0;
+    /// ATR(`ATR_PERIOD`) in price units, Wilder-smoothed. `None` until enough
+    /// bars have been seen. Strategy output then stays suppressed.
+    pub fn atr(&self) -> Option<f64> {
+        let bars: Vec<&VpCandle> = self.history.iter().collect();
+        if bars.len() < ATR_PERIOD + 1 {
+            return None;
         }
-
-        let mut tr_sum = 0.0;
-        let mut count = 0;
-
-        for pair in self.candle_history.iter().collect::<Vec<_>>().windows(2) {
-            let prev = pair[0];
-            let curr = pair[1];
-
-            let hl = curr.high - curr.low;
-            let hc = (curr.high - prev.close).abs();
-            let lc = (curr.low - prev.close).abs();
-
-            let tr = hl.max(hc).max(lc);
-            tr_sum += tr;
-            count += 1;
+        let ranges: Vec<f64> = bars
+            .windows(2)
+            .map(|pair| true_range(pair[0], pair[1]))
+            .collect();
+        let period = ATR_PERIOD as f64;
+        let mut atr = ranges[..ATR_PERIOD].iter().sum::<f64>() / period;
+        for range in &ranges[ATR_PERIOD..] {
+            atr = (atr * (period - 1.0) + range) / period;
         }
-
-        if count > 0 {
-            tr_sum / count as f64
-        } else {
-            3.0
-        }
+        Some(atr).filter(|value| value.is_finite() && *value > 0.0)
     }
 
-    pub fn evaluate_candle_with_diagnostics(
-        &mut self,
-        candle: &VpCandle,
-        volume_threshold: f64,
-    ) -> CandleEvalReport {
-        self.candle_history.push_back(candle.clone());
-        if self.candle_history.len() > 30 {
-            self.candle_history.pop_front();
-        }
-
+    /// Evaluate one newly closed bar against every watched level.
+    /// Callers pass only closed bars that are new for their interval.
+    pub fn evaluate(&mut self, candle: &VpCandle, volume_threshold: f64) -> CandleEvalReport {
+        self.seed(candle);
         let mut report = CandleEvalReport::default();
-
         if candle.time <= self.last_triggered_candle {
             return report;
         }
+        let gate = volume_threshold > 0.0;
+        let volume_ok = !gate || candle.volume >= volume_threshold;
 
-        let price = candle.close;
-        let is_green = candle.close > candle.open;
-        let is_red = candle.close < candle.open;
-        let vol_ok = candle.volume >= volume_threshold;
-
-        // Deterministic iteration order by level id
-        let mut level_ids: Vec<String> = self.levels.keys().cloned().collect();
-        level_ids.sort();
-
-        for id in level_ids {
+        let ids: Vec<String> = self.levels.keys().cloned().collect();
+        for id in ids {
             let Some(target) = self.levels.get(&id).cloned() else {
                 continue;
             };
-            let lvl_price = target.price;
-            let state = self
-                .break_states
-                .get(&id)
-                .copied()
-                .unwrap_or(BreakState::None);
-
-            match state {
-                BreakState::None => {
-                    if is_green && candle.close > lvl_price && candle.open <= lvl_price {
-                        debug!(
-                            "Level {} broken ABOVE by candle at {:.2}",
-                            target.name, candle.close
-                        );
-                        self.break_states
-                            .insert(id.clone(), BreakState::BrokenAbove);
-                        let note = format!(
-                            "Broken ABOVE @ {:.2} — awaiting bullish retest of {:.2} (±${:.2})",
-                            candle.close, lvl_price, PROXIMITY_DOLLARS
-                        );
-                        self.level_meta.insert(
-                            id.clone(),
-                            LevelDiagnosticsMeta {
-                                broken_at: Some(candle.time),
-                                broken_price: Some(candle.close),
-                                last_note: note.clone(),
-                            },
-                        );
-                        report.breaks_detected += 1;
-                        report
-                            .events
-                            .push(("info".into(), format!("{}: {}", target.name, note)));
-                    } else if is_red && candle.close < lvl_price && candle.open >= lvl_price {
-                        debug!(
-                            "Level {} broken BELOW by candle at {:.2}",
-                            target.name, candle.close
-                        );
-                        self.break_states
-                            .insert(id.clone(), BreakState::BrokenBelow);
-                        let note = format!(
-                            "Broken BELOW @ {:.2} — awaiting bearish retest of {:.2} (±${:.2})",
-                            candle.close, lvl_price, PROXIMITY_DOLLARS
-                        );
-                        self.level_meta.insert(
-                            id.clone(),
-                            LevelDiagnosticsMeta {
-                                broken_at: Some(candle.time),
-                                broken_price: Some(candle.close),
-                                last_note: note.clone(),
-                            },
-                        );
-                        report.breaks_detected += 1;
-                        report
-                            .events
-                            .push(("info".into(), format!("{}: {}", target.name, note)));
-                    }
-                }
-                BreakState::BrokenAbove => {
-                    let retested = candle.low <= lvl_price + PROXIMITY_DOLLARS
-                        && candle.close >= lvl_price - PROXIMITY_DOLLARS;
-                    if retested {
-                        if vol_ok {
-                            info!(
-                                "BULLISH SETUP CONFIRMED on {}! Retest @ {:.2}, Volume: {:.1} (> {:.1})",
-                                target.name, price, candle.volume, volume_threshold
-                            );
-                            self.break_states.insert(id.clone(), BreakState::None);
-                            self.last_triggered_candle = candle.time;
-                            let note = format!(
-                                "BULLISH RETEST CONFIRMED @ {:.2} (vol {:.0} >= {:.0}) — triggering BUY",
-                                price, candle.volume, volume_threshold
-                            );
-                            self.level_meta.insert(
-                                id.clone(),
-                                LevelDiagnosticsMeta {
-                                    broken_at: None,
-                                    broken_price: None,
-                                    last_note: note.clone(),
-                                },
-                            );
-                            report.signals_confirmed += 1;
-                            report
-                                .events
-                                .push(("signal".into(), format!("{}: {}", target.name, note)));
-                            report.triggered = Some(("buy", price, target.name.clone()));
-                            return report;
-                        } else {
-                            debug!(
-                                "Retest on {} but volume {:.1} < threshold {:.1}",
-                                target.name, candle.volume, volume_threshold
-                            );
-                            let note = format!(
-                                "Retested {:.2} (low {:.2}) but volume {:.0} < {:.0} threshold — waiting",
-                                lvl_price, candle.low, candle.volume, volume_threshold
-                            );
-                            if let Some(meta) = self.level_meta.get_mut(&id) {
-                                meta.last_note = note.clone();
-                            }
-                            report.retests_rejected_low_volume += 1;
-                            report
-                                .events
-                                .push(("warn".into(), format!("{}: {}", target.name, note)));
-                        }
-                    } else if candle.close < lvl_price - INVALIDATION_DOLLARS {
-                        self.break_states.insert(id.clone(), BreakState::None);
-                        let note = format!(
-                            "Bullish break invalidated (close {:.2} < {:.2})",
-                            candle.close,
-                            lvl_price - INVALIDATION_DOLLARS
-                        );
-                        self.level_meta.insert(
-                            id.clone(),
-                            LevelDiagnosticsMeta {
-                                broken_at: None,
-                                broken_price: None,
-                                last_note: note.clone(),
-                            },
-                        );
-                        report.breaks_invalidated += 1;
-                        report
-                            .events
-                            .push(("warn".into(), format!("{}: {}", target.name, note)));
-                    }
-                }
-                BreakState::BrokenBelow => {
-                    let retested = candle.high >= lvl_price - PROXIMITY_DOLLARS
-                        && candle.close <= lvl_price + PROXIMITY_DOLLARS;
-                    if retested {
-                        if vol_ok {
-                            info!(
-                                "BEARISH SETUP CONFIRMED on {}! Retest @ {:.2}, Volume: {:.1} (> {:.1})",
-                                target.name, price, candle.volume, volume_threshold
-                            );
-                            self.break_states.insert(id.clone(), BreakState::None);
-                            self.last_triggered_candle = candle.time;
-                            let note = format!(
-                                "BEARISH RETEST CONFIRMED @ {:.2} (vol {:.0} >= {:.0}) — triggering SELL",
-                                price, candle.volume, volume_threshold
-                            );
-                            self.level_meta.insert(
-                                id.clone(),
-                                LevelDiagnosticsMeta {
-                                    broken_at: None,
-                                    broken_price: None,
-                                    last_note: note.clone(),
-                                },
-                            );
-                            report.signals_confirmed += 1;
-                            report
-                                .events
-                                .push(("signal".into(), format!("{}: {}", target.name, note)));
-                            report.triggered = Some(("sell", price, target.name.clone()));
-                            return report;
-                        } else {
-                            debug!(
-                                "Retest on {} but volume {:.1} < threshold {:.1}",
-                                target.name, candle.volume, volume_threshold
-                            );
-                            let note = format!(
-                                "Retested {:.2} (high {:.2}) but volume {:.0} < {:.0} threshold — waiting",
-                                lvl_price, candle.high, candle.volume, volume_threshold
-                            );
-                            if let Some(meta) = self.level_meta.get_mut(&id) {
-                                meta.last_note = note.clone();
-                            }
-                            report.retests_rejected_low_volume += 1;
-                            report
-                                .events
-                                .push(("warn".into(), format!("{}: {}", target.name, note)));
-                        }
-                    } else if candle.close > lvl_price + INVALIDATION_DOLLARS {
-                        self.break_states.insert(id.clone(), BreakState::None);
-                        let note = format!(
-                            "Bearish break invalidated (close {:.2} > {:.2})",
-                            candle.close,
-                            lvl_price + INVALIDATION_DOLLARS
-                        );
-                        self.level_meta.insert(
-                            id.clone(),
-                            LevelDiagnosticsMeta {
-                                broken_at: None,
-                                broken_price: None,
-                                last_note: note.clone(),
-                            },
-                        );
-                        report.breaks_invalidated += 1;
-                        report
-                            .events
-                            .push(("warn".into(), format!("{}: {}", target.name, note)));
-                    }
-                }
+            if let Some(trigger) =
+                self.step(&id, &target, candle, volume_ok, volume_threshold, &mut report)
+            {
+                report.triggered = Some(trigger);
+                return report;
             }
         }
-
         report
     }
 
-    pub fn build_scanning_snapshot(
+    fn step(
+        &mut self,
+        id: &str,
+        target: &LevelTarget,
+        candle: &VpCandle,
+        volume_ok: bool,
+        volume_threshold: f64,
+        report: &mut CandleEvalReport,
+    ) -> Option<Trigger> {
+        let level = target.price;
+        let state = self.break_states.get(id).copied().unwrap_or(BreakState::None);
+        match state {
+            BreakState::None => {
+                let is_green = candle.close > candle.open;
+                let is_red = candle.close < candle.open;
+                if is_green && candle.close > level && candle.open <= level {
+                    self.record_break(id, target, candle, BreakState::BrokenAbove, report);
+                } else if is_red && candle.close < level && candle.open >= level {
+                    self.record_break(id, target, candle, BreakState::BrokenBelow, report);
+                }
+                None
+            }
+            BreakState::BrokenAbove => {
+                let retested = candle.low <= level + PROXIMITY_DOLLARS
+                    && candle.close >= level - PROXIMITY_DOLLARS;
+                if retested {
+                    return self.confirm(
+                        id,
+                        target,
+                        candle,
+                        "buy",
+                        volume_ok,
+                        volume_threshold,
+                        report,
+                    );
+                }
+                if candle.close < level - INVALIDATION_DOLLARS {
+                    let boundary = level - INVALIDATION_DOLLARS;
+                    self.invalidate(id, target, candle, "bullish", boundary, report);
+                }
+                None
+            }
+            BreakState::BrokenBelow => {
+                let retested = candle.high >= level - PROXIMITY_DOLLARS
+                    && candle.close <= level + PROXIMITY_DOLLARS;
+                if retested {
+                    return self.confirm(
+                        id,
+                        target,
+                        candle,
+                        "sell",
+                        volume_ok,
+                        volume_threshold,
+                        report,
+                    );
+                }
+                if candle.close > level + INVALIDATION_DOLLARS {
+                    let boundary = level + INVALIDATION_DOLLARS;
+                    self.invalidate(id, target, candle, "bearish", boundary, report);
+                }
+                None
+            }
+        }
+    }
+
+    fn record_break(
+        &mut self,
+        id: &str,
+        target: &LevelTarget,
+        candle: &VpCandle,
+        state: BreakState,
+        report: &mut CandleEvalReport,
+    ) {
+        let (direction, retest_word) = match state {
+            BreakState::BrokenAbove => ("ABOVE", "bullish"),
+            _ => ("BELOW", "bearish"),
+        };
+        debug!("Level {} broken {direction} at {:.2}", target.name, candle.close);
+        self.break_states.insert(id.to_string(), state);
+        let note = format!(
+            "Broken {direction} @ {:.2} — awaiting {retest_word} retest of {:.2} (±${:.2})",
+            candle.close, target.price, PROXIMITY_DOLLARS
+        );
+        self.level_meta.insert(
+            id.to_string(),
+            LevelDiagnosticsMeta {
+                broken_at: Some(candle.time),
+                broken_price: Some(candle.close),
+                last_note: note.clone(),
+            },
+        );
+        report.breaks_detected += 1;
+        report
+            .events
+            .push(("info".into(), format!("{}: {}", target.name, note)));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn confirm(
+        &mut self,
+        id: &str,
+        target: &LevelTarget,
+        candle: &VpCandle,
+        side: &'static str,
+        volume_ok: bool,
+        volume_threshold: f64,
+        report: &mut CandleEvalReport,
+    ) -> Option<Trigger> {
+        if !volume_ok {
+            debug!(
+                "Retest on {} but volume {:.1} < threshold {:.1}",
+                target.name, candle.volume, volume_threshold
+            );
+            let note = format!(
+                "Retested {:.2} but volume {:.0} < {:.0} threshold — waiting",
+                target.price, candle.volume, volume_threshold
+            );
+            if let Some(meta) = self.level_meta.get_mut(id) {
+                meta.last_note = note.clone();
+            }
+            report.retests_rejected_low_volume += 1;
+            report
+                .events
+                .push(("warn".into(), format!("{}: {}", target.name, note)));
+            return None;
+        }
+        info!(
+            "{} SETUP CONFIRMED on {} @ {:.2}",
+            if side == "buy" { "BULLISH" } else { "BEARISH" },
+            target.name,
+            candle.close
+        );
+        let verb = if side == "buy" { "BUY" } else { "SELL" };
+        self.break_states.insert(id.to_string(), BreakState::None);
+        self.last_triggered_candle = candle.time;
+        let note = format!("RETEST CONFIRMED @ {:.2} — triggering {verb}", candle.close);
+        self.level_meta.insert(
+            id.to_string(),
+            LevelDiagnosticsMeta {
+                broken_at: None,
+                broken_price: None,
+                last_note: note.clone(),
+            },
+        );
+        report.signals_confirmed += 1;
+        report
+            .events
+            .push(("signal".into(), format!("{}: {}", target.name, note)));
+        Some(Trigger {
+            side,
+            reference_price: candle.close,
+            level_id: target.id.clone(),
+            level_name: target.name.clone(),
+            drawing_id: target.drawing_id.clone(),
+            source_candle_time: candle.time,
+        })
+    }
+
+    fn invalidate(
+        &mut self,
+        id: &str,
+        target: &LevelTarget,
+        candle: &VpCandle,
+        direction: &str,
+        boundary: f64,
+        report: &mut CandleEvalReport,
+    ) {
+        self.break_states.insert(id.to_string(), BreakState::None);
+        let note = format!(
+            "{} break invalidated (close {:.2} beyond {:.2})",
+            capitalise(direction),
+            candle.close,
+            boundary
+        );
+        self.level_meta.insert(
+            id.to_string(),
+            LevelDiagnosticsMeta {
+                broken_at: None,
+                broken_price: None,
+                last_note: note.clone(),
+            },
+        );
+        report.breaks_invalidated += 1;
+        report
+            .events
+            .push(("warn".into(), format!("{}: {}", target.name, note)));
+    }
+
+    /// Scanning snapshot for `/scanning` and the `scanning` topic.
+    pub fn scanning(
         &self,
         risk: &RiskProjector,
-        volume_threshold: f64,
+        context: &ScanContext<'_>,
     ) -> ScanningSnapshot {
-        let last_candle = self.candle_history.back();
-        let last_price = last_candle.map(|c| c.close);
-        let current_volume = last_candle.map(|c| c.volume);
-        let volume_confirmed = current_volume
-            .map(|v| v >= volume_threshold)
-            .unwrap_or(false);
-        let atr = self.calculate_atr();
-        let atr_pips = atr * 100.0;
+        let last = self.history.back();
+        let price = last.map(|bar| bar.close);
+        let projection = risk.projection();
+        let gate = context.volume_threshold > 0.0;
+        let current_volume = last.map(|bar| bar.volume);
+        let volume_confirmed = if gate {
+            current_volume.map(|volume| volume >= context.volume_threshold)
+        } else {
+            None
+        };
 
-        let mut setups = Vec::with_capacity(self.levels.len());
-        let mut active_setups_count = 0;
-
-        for (id, target) in self.levels.iter() {
-            let break_state = self
-                .break_states
-                .get(id)
-                .copied()
-                .unwrap_or(BreakState::None);
-            let meta = self.level_meta.get(id);
-
-            let (state_str, state_label, pending_side, invalidation_price) = match break_state {
-                BreakState::None => (
-                    "scanning_break",
-                    "Watching for clean candle break",
-                    None,
-                    None,
+        let mut setups = Vec::new();
+        let mut active = 0;
+        for (id, target) in &self.levels {
+            let state = self.break_states.get(id).copied().unwrap_or(BreakState::None);
+            let meta = self.level_meta.get(id).cloned().unwrap_or_default();
+            let (state_name, state_label, pending_side, invalidation) = match state {
+                BreakState::None => ("scanning_break", "Scanning for break", None, None),
+                BreakState::BrokenAbove => (
+                    "broken_above",
+                    "Broken above — awaiting retest",
+                    Some("buy"),
+                    Some(target.price - INVALIDATION_DOLLARS),
                 ),
-                BreakState::BrokenAbove => {
-                    active_setups_count += 1;
-                    (
-                        "broken_above",
-                        "Broken Above — Awaiting Bullish Retest (BUY)",
-                        Some("buy".to_string()),
-                        Some(target.price - INVALIDATION_DOLLARS),
-                    )
-                }
-                BreakState::BrokenBelow => {
-                    active_setups_count += 1;
-                    (
-                        "broken_below",
-                        "Broken Below — Awaiting Bearish Retest (SELL)",
-                        Some("sell".to_string()),
-                        Some(target.price + INVALIDATION_DOLLARS),
-                    )
-                }
+                BreakState::BrokenBelow => (
+                    "broken_below",
+                    "Broken below — awaiting retest",
+                    Some("sell"),
+                    Some(target.price + INVALIDATION_DOLLARS),
+                ),
             };
-
-            let ref_entry = last_price.unwrap_or(target.price);
-            let projected_buy = risk.projected_order(
-                if break_state == BreakState::BrokenAbove {
-                    ref_entry
-                } else {
-                    target.price
-                },
-                "buy",
-            );
-            let projected_sell = risk.projected_order(
-                if break_state == BreakState::BrokenBelow {
-                    ref_entry
-                } else {
-                    target.price
-                },
-                "sell",
-            );
-
-            let active_projection = match break_state {
-                BreakState::BrokenAbove => Some(projected_buy.clone()),
-                BreakState::BrokenBelow => Some(projected_sell.clone()),
-                BreakState::None => None,
+            if state != BreakState::None {
+                active += 1;
+            }
+            let distance = price.map(|p| (p - target.price).abs());
+            let projected_buy = price.and_then(|p| risk.order(p, "buy"));
+            let projected_sell = price.and_then(|p| risk.order(p, "sell"));
+            let active_projection = match pending_side {
+                Some("buy") => projected_buy.clone(),
+                Some("sell") => projected_sell.clone(),
+                _ => None,
             };
-
-            let distance_dollars = last_price.map(|p| p - target.price);
-            let distance_pips = distance_dollars.map(|d| d.abs() * 100.0);
-
-            let last_note = meta
-                .map(|m| m.last_note.clone())
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| {
-                    format!(
-                        "Monitoring {} ({:.2}) for break & retest",
-                        target.name, target.price
-                    )
-                });
-
             setups.push(ScannedLevelSetup {
                 id: id.clone(),
                 name: target.name.clone(),
                 window: target.window.clone(),
                 level_price: target.price,
-                state: state_str.to_string(),
-                state_label: state_label.to_string(),
-                pending_side,
-                current_price: last_price,
-                distance_dollars,
-                distance_pips,
+                drawing_id: target.drawing_id.clone(),
+                state: state_name.into(),
+                state_label: state_label.into(),
+                pending_side: pending_side.map(str::to_string),
+                current_price: price,
+                distance_dollars: distance,
+                distance_pips: distance.map(|d| d / PIP_SIZE),
                 retest_zone_low: target.price - PROXIMITY_DOLLARS,
                 retest_zone_high: target.price + PROXIMITY_DOLLARS,
-                invalidation_price,
-                volume_required: volume_threshold,
-                current_volume,
+                invalidation_price: invalidation,
+                volume_required: gate.then_some(context.volume_threshold),
                 volume_confirmed,
                 projected_buy,
                 projected_sell,
                 active_projection,
-                broken_at: meta.and_then(|m| m.broken_at),
-                broken_price: meta.and_then(|m| m.broken_price),
-                last_note,
+                broken_at: meta.broken_at,
+                broken_price: meta.broken_price,
+                last_note: if meta.last_note.is_empty() {
+                    "Monitoring for a break".to_string()
+                } else {
+                    meta.last_note
+                },
             });
         }
 
-        // Sort armed setups (broken_above / broken_below) first, then by closest distance to current price.
-        setups.sort_by(|a, b| {
-            let a_armed = a.state != "scanning_break";
-            let b_armed = b.state != "scanning_break";
-            match b_armed.cmp(&a_armed) {
-                std::cmp::Ordering::Equal => {
-                    let da = a.distance_pips.unwrap_or(f64::MAX);
-                    let db = b.distance_pips.unwrap_or(f64::MAX);
-                    da.partial_cmp(&db)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                        .then_with(|| a.id.cmp(&b.id))
-                }
-                ord => ord,
-            }
-        });
-
         ScanningSnapshot {
-            active_setups_count,
-            total_levels_tracked: setups.len(),
+            active_setups_count: active,
+            total_levels_tracked: self.levels.len(),
             proximity_dollars: PROXIMITY_DOLLARS,
             invalidation_dollars: INVALIDATION_DOLLARS,
-            volume_threshold,
+            volume_filter_enabled: gate,
+            volume_threshold: context.volume_threshold,
             current_volume,
             volume_confirmed,
-            last_price,
-            atr,
-            atr_pips,
+            last_price: price,
+            strategy_interval: context.strategy_interval.to_string(),
+            tradeable: context.tradeable,
+            freshness_state: context.freshness_state.to_string(),
+            atr: projection.map(|p| p.atr),
+            atr_pips: projection.map(|p| p.atr_pips),
+            sl_pips: projection.map(|p| p.sl_pips),
+            tp_pips: projection.map(|p| p.tp_pips),
+            rr: projection.map(|p| p.rr),
             setups,
-            timestamp: chrono::Utc::now().timestamp_millis(),
+            timestamp: context.timestamp,
         }
+    }
+}
+
+/// Inputs to the scanning snapshot that come from outside the state machine.
+pub struct ScanContext<'a> {
+    pub tradeable: bool,
+    pub freshness_state: &'a str,
+    pub strategy_interval: &'a str,
+    pub volume_threshold: f64,
+    pub timestamp: i64,
+}
+
+fn capitalise(value: &str) -> String {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
     }
 }
 
@@ -511,74 +517,206 @@ impl StrategyEngine {
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::risk::RiskProjector;
+    use crate::types::ProfileMeta;
+
+    fn bar(time: i64, open: f64, high: f64, low: f64, close: f64, volume: f64) -> VpCandle {
+        VpCandle {
+            time,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            source: "test".into(),
+        }
+    }
+
+    fn meta() -> ProfileMeta {
+        ProfileMeta {
+            row_mode: "rows".into(),
+            row_height: 0.01,
+            rows: 128,
+            range_low: 4000.0,
+            range_high: 4200.0,
+            va_pct: 0.7,
+            total_volume: 1.0,
+            input_interval: "5m".into(),
+            input_bars: 1,
+        }
+    }
+
+    fn pw_level(poc: f64) -> VpLevels {
+        VpLevels {
+            window: "PW".into(),
+            poc,
+            vah: Some(poc + 30.0),
+            val: Some(poc - 30.0),
+            start: 1_000,
+            end: 2_000,
+            timestamp: 0,
+            sunday_open: Some(poc),
+            meta: meta(),
+        }
+    }
+
+    fn engine_with_poc(poc: f64) -> StrategyEngine {
+        let mut engine = StrategyEngine::default();
+        engine.sync_levels(&[pw_level(poc)]);
+        engine
+    }
 
     #[test]
-    fn break_and_retest_populates_scanning_diagnostics_and_triggers_signal() {
-        let cfg = Config::from_env();
-        let risk = RiskProjector::new(cfg.clone());
-        let mut engine = StrategyEngine::new();
+    fn break_then_retest_emits_exactly_one_buy_intent_trigger() {
+        let mut engine = engine_with_poc(4100.0);
+        // Breaks above: green, close beyond 4100, open at or below it.
+        let brk = engine.evaluate(&bar(1_000, 4099.8, 4101.2, 4099.5, 4101.0, 10.0), 0.0);
+        assert_eq!(brk.breaks_detected, 1);
+        assert!(brk.triggered.is_none());
+        // Retest: low inside the zone (<= 4100.5) and close back above 4099.5.
+        let retest = engine.evaluate(&bar(2_000, 4101.0, 4101.3, 4099.8, 4100.2, 10.0), 0.0);
+        let trigger = retest.triggered.expect("one trigger");
+        assert_eq!(trigger.side, "buy");
+        assert_eq!(trigger.level_id, "PW_POC");
+        assert_eq!(trigger.drawing_id, "PW:poc:1000:2000");
+        assert_eq!(trigger.source_candle_time, 2_000);
+        assert!((trigger.reference_price - 4100.2).abs() < 1e-9);
+        assert_eq!(retest.signals_confirmed, 1);
+        // The same candle time can never trigger twice.
+        let again = engine.evaluate(&bar(2_000, 4101.0, 4101.3, 4099.8, 4100.2, 10.0), 0.0);
+        assert!(again.triggered.is_none());
+    }
 
-        engine.update_levels(&VpLevels {
-            window: "PW".into(),
-            poc: 2650.0,
-            vah: 2660.0,
-            val: 2640.0,
-            start: 0,
-            end: 0,
-            timestamp: 1000,
-            direction: "neutral".into(),
-            swing_high: None,
-            swing_low: None,
-            sunday_open: None,
-        });
-
-        // 1. Bullish break candle across PW PoC (2650.0)
-        let c1 = VpCandle {
-            time: 1000,
-            open: 2649.0,
-            high: 2652.0,
-            low: 2648.5,
-            close: 2651.5,
-            volume: 8000.0,
-            source: "sifting".into(),
+    #[test]
+    fn break_and_retest_are_deterministic_across_identical_runs() {
+        let run = || {
+            let mut engine = engine_with_poc(4100.0);
+            let mut out = Vec::new();
+            let bars = [
+                bar(1_000, 4099.8, 4101.2, 4099.5, 4101.0, 10.0),
+                bar(2_000, 4101.0, 4101.3, 4099.8, 4100.2, 10.0),
+            ];
+            for candle in &bars {
+                out.push(engine.evaluate(candle, 0.0).triggered);
+            }
+            out
         };
-        let r1 = engine.evaluate_candle_with_diagnostics(&c1, 10_500.0);
-        assert!(r1.triggered.is_none());
-        assert_eq!(r1.breaks_detected, 1);
+        assert_eq!(run(), run());
+    }
 
-        let snap1 = engine.build_scanning_snapshot(&risk, 10_500.0);
-        assert_eq!(snap1.active_setups_count, 1);
-        assert_eq!(snap1.setups[0].id, "PW_POC");
-        assert_eq!(snap1.setups[0].state, "broken_above");
-        assert_eq!(snap1.setups[0].pending_side.as_deref(), Some("buy"));
-
-        // 2. Retest with low volume (< 10,500) -> rejected, remains armed
-        let c2 = VpCandle {
-            time: 2000,
-            open: 2651.5,
-            high: 2651.8,
-            low: 2650.1,
-            close: 2650.4,
-            volume: 9000.0,
-            source: "sifting".into(),
+    #[test]
+    fn a_close_beyond_invalidation_cancels_the_break() {
+        let mut engine = engine_with_poc(4100.0);
+        engine.evaluate(&bar(1_000, 4099.8, 4101.2, 4099.5, 4101.0, 10.0), 0.0);
+        let report = engine.evaluate(&bar(2_000, 4099.0, 4099.2, 4097.0, 4097.5, 10.0), 0.0);
+        assert_eq!(report.breaks_invalidated, 1);
+        assert!(report.triggered.is_none());
+        // Back to scanning: a later retest of a fresh break is needed.
+        let context = ScanContext {
+            tradeable: true,
+            freshness_state: "live",
+            strategy_interval: "15m",
+            volume_threshold: 0.0,
+            timestamp: 0,
         };
-        let r2 = engine.evaluate_candle_with_diagnostics(&c2, 10_500.0);
-        assert!(r2.triggered.is_none());
-        assert_eq!(r2.retests_rejected_low_volume, 1);
+        let scan = engine.scanning(&RiskProjector::new(&Config::default()), &context);
+        assert_eq!(scan.active_setups_count, 0);
+    }
 
-        // 3. Retest with volume >= 10,500 -> triggers BUY signal
-        let c3 = VpCandle {
-            time: 3000,
-            open: 2650.4,
-            high: 2651.2,
-            low: 2649.9,
-            close: 2650.3,
-            volume: 12_000.0,
-            source: "sifting".into(),
+    #[test]
+    fn volume_gate_is_off_by_default_so_a_thin_retest_still_triggers() {
+        let mut engine = engine_with_poc(4100.0);
+        engine.evaluate(&bar(1_000, 4099.8, 4101.2, 4099.5, 4101.0, 10.0), 0.0);
+        // Volume 1 is far below any sensible threshold, yet the gate is off.
+        let report = engine.evaluate(&bar(2_000, 4101.0, 4101.3, 4099.8, 4100.2, 1.0), 0.0);
+        assert!(report.triggered.is_some());
+        assert_eq!(report.retests_rejected_low_volume, 0);
+    }
+
+    #[test]
+    fn enabled_volume_gate_rejects_low_volume_then_confirms_on_volume() {
+        let mut engine = engine_with_poc(4100.0);
+        engine.evaluate(&bar(1_000, 4099.8, 4101.2, 4099.5, 4101.0, 50.0), 10.0);
+        let rejected = engine.evaluate(&bar(2_000, 4101.0, 4101.3, 4099.8, 4100.2, 5.0), 10.0);
+        assert!(rejected.triggered.is_none());
+        assert_eq!(rejected.retests_rejected_low_volume, 1);
+        let confirmed = engine.evaluate(&bar(3_000, 4100.2, 4100.6, 4099.9, 4100.3, 20.0), 10.0);
+        assert!(confirmed.triggered.is_some());
+    }
+
+    #[test]
+    fn bearish_break_and_retest_sell_on_the_same_mirror_rules() {
+        let mut engine = engine_with_poc(4100.0);
+        // Breaks below: red, close beneath 4100, open at or above it.
+        engine.evaluate(&bar(1_000, 4100.2, 4100.4, 4098.8, 4099.0, 10.0), 0.0);
+        // Retest: high reaches 4099.5 and close stays at or below 4100.5.
+        let report = engine.evaluate(&bar(2_000, 4099.2, 4099.9, 4099.0, 4099.8, 10.0), 0.0);
+        assert_eq!(report.triggered.map(|t| t.side), Some("sell"));
+    }
+
+    #[test]
+    fn one_trigger_per_candle_even_when_several_levels_retest() {
+        let mut engine = StrategyEngine::default();
+        let mut level = pw_level(4100.0);
+        level.vah = Some(4100.2);
+        level.val = Some(4099.9);
+        engine.sync_levels(&[level]);
+        engine.evaluate(&bar(1_000, 4099.8, 4101.2, 4099.5, 4101.0, 10.0), 0.0);
+        let report = engine.evaluate(&bar(2_000, 4101.0, 4101.3, 4099.8, 4100.2, 10.0), 0.0);
+        assert!(report.triggered.is_some());
+        assert_eq!(report.signals_confirmed, 1);
+    }
+
+    #[test]
+    fn seed_builds_history_without_triggering() {
+        let mut engine = engine_with_poc(4100.0);
+        engine.seed(&bar(1_000, 4099.8, 4101.2, 4099.5, 4101.0, 10.0));
+        engine.seed(&bar(2_000, 4101.0, 4101.3, 4099.8, 4100.2, 10.0));
+        assert_eq!(engine.atr(), None, "two bars are not enough for ATR(14)");
+        // Seeding never changes break state.
+        let report = engine.evaluate(&bar(3_000, 4100.2, 4100.4, 4100.0, 4100.3, 10.0), 0.0);
+        assert!(report.triggered.is_none());
+    }
+
+    #[test]
+    fn atr_needs_fifteen_bars_then_follows_wilder_smoothing() {
+        let mut engine = StrategyEngine::default();
+        for index in 0..14 {
+            let t = 1_000 * (index + 1);
+            engine.seed(&bar(t, 4100.0, 4101.0, 4099.0, 4100.0, 1.0));
+        }
+        assert!(engine.atr().is_none(), "14 bars is one short of ATR(14)");
+        engine.seed(&bar(15_000, 4100.0, 4101.0, 4099.0, 4100.0, 1.0));
+        let atr = engine.atr().expect("ATR available");
+        // Constant true range 2.0 gives ATR exactly 2.0.
+        assert!((atr - 2.0).abs() < 1e-9, "atr {atr}");
+    }
+
+    #[test]
+    fn replaced_levels_drop_state_and_unchanged_levels_keep_it() {
+        let mut engine = engine_with_poc(4100.0);
+        engine.evaluate(&bar(1_000, 4099.8, 4101.2, 4099.5, 4101.0, 10.0), 0.0);
+        // Same identity: the break survives a re-sync.
+        engine.sync_levels(&[pw_level(4100.0)]);
+        let kept = engine.evaluate(&bar(2_000, 4101.0, 4101.3, 4099.8, 4100.2, 10.0), 0.0);
+        assert!(kept.triggered.is_some());
+        // New week bounds: a different identity, so the state resets.
+        engine.evaluate(&bar(3_000, 4099.8, 4101.2, 4099.5, 4101.0, 10.0), 0.0);
+        let mut next_week = pw_level(4100.0);
+        next_week.start = 5_000;
+        next_week.end = 6_000;
+        engine.sync_levels(&[next_week]);
+        let after = engine.evaluate(&bar(4_000, 4101.0, 4101.3, 4099.8, 4100.2, 10.0), 0.0);
+        assert!(after.triggered.is_none());
+    }
+
+    #[test]
+    fn levels_are_watched_in_sorted_id_order() {
+        let engine = {
+            let mut e = StrategyEngine::default();
+            e.sync_levels(&[pw_level(4100.0)]);
+            e
         };
-        let r3 = engine.evaluate_candle_with_diagnostics(&c3, 10_500.0);
-        assert_eq!(r3.signals_confirmed, 1);
-        assert_eq!(r3.triggered, Some(("buy", 2650.3, "PW PoC".to_string())));
+        let ids: Vec<&str> = engine.levels.keys().map(String::as_str).collect();
+        assert_eq!(ids, vec!["PW_POC", "PW_VAH", "PW_VAL"]);
     }
 }

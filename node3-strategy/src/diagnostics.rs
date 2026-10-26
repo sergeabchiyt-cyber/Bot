@@ -5,15 +5,21 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 
 use crate::config::Config;
+use crate::feed::Freshness;
+use crate::market::MarketBook;
+use crate::strategy::CandleEvalReport;
 use crate::types::{
-    ActivityLogEntry, DiagnosticsSnapshot, ExecutionReport, ScanningSnapshot, SignalSnapshot,
-    StrategyWorkDiagnostics, TradeIntent, VpCandle, WsFrame, INTENT_SCHEMA_VERSION,
+    ActivityLogEntry, DiagnosticsSnapshot, DrawingsPayload, ExecutionReport, HealthSnapshot,
+    ScanningSnapshot, SignalSnapshot, StrategyWorkDiagnostics, TradeIntent, VpCandle, VpLevels,
+    WsFrame, INTENT_SCHEMA_VERSION,
 };
+use crate::vp::VpAudit;
 
 const MAX_RECENT_EVENTS: usize = 50;
 const MAX_RECENT_INTENTS: usize = 100;
 const MAX_EXECUTION_REPORTS: usize = 100;
-const CANDLE_BUFFER_CAPACITY: usize = 30;
+/// No Node 1 frame for this long means the feed is silent. Trading is then blocked.
+pub const FEED_SILENCE_MS: i64 = 90_000;
 
 fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
@@ -32,6 +38,7 @@ struct DiagnosticsInner {
 #[derive(Clone)]
 pub struct DiagnosticsHub {
     inner: Arc<RwLock<DiagnosticsInner>>,
+    market: Arc<RwLock<MarketBook>>,
     tx: broadcast::Sender<WsFrame>,
     public_ws_clients: Arc<AtomicUsize>,
     execution_client_connected: Arc<AtomicBool>,
@@ -43,18 +50,26 @@ impl DiagnosticsHub {
         let (tx, _) = broadcast::channel(512);
         let started_at = now_ms();
         let node4_token_configured = config.node4_link_configured();
+        let settings = config.window_settings();
 
         let scanning = ScanningSnapshot {
             active_setups_count: 0,
             total_levels_tracked: 0,
-            proximity_dollars: 0.50,
-            invalidation_dollars: 2.00,
+            proximity_dollars: crate::strategy::PROXIMITY_DOLLARS,
+            invalidation_dollars: crate::strategy::INVALIDATION_DOLLARS,
+            volume_filter_enabled: config.volume_filter_enabled(),
             volume_threshold: config.volume_threshold,
             current_volume: None,
-            volume_confirmed: false,
+            volume_confirmed: None,
             last_price: None,
-            atr: 3.0,
-            atr_pips: 300.0,
+            strategy_interval: config.strategy_interval.clone(),
+            tradeable: false,
+            freshness_state: "starting".into(),
+            atr: None,
+            atr_pips: None,
+            sl_pips: None,
+            tp_pips: None,
+            rr: None,
             setups: Vec::new(),
             timestamp: started_at,
         };
@@ -69,22 +84,48 @@ impl DiagnosticsHub {
             node1_connected: false,
             node1_state: "starting".into(),
             node1_reconnect_count: 0,
+            contract_version: crate::feed::CONTRACT_VERSION.into(),
             last_node1_msg_ts: None,
             last_candle_ts: None,
-            last_levels_ts: None,
-            candles_received: 0,
-            levels_received: 0,
+            last_tick_volume_ts: None,
+            last_calendar_ts: None,
             ws_messages_received: 0,
-            candle_buffer_len: 0,
-            candle_buffer_capacity: CANDLE_BUFFER_CAPACITY,
+            closed_bars_stored: 0,
+            duplicate_bars_ignored: 0,
+            open_bars_ignored: 0,
+            replayed_bars: 0,
+            tick_volume_frames: 0,
+            last_tick_volume: None,
+            calendar_items: 0,
+            contract_violations: 0,
+            last_violation: None,
+            last_violation_ts: None,
+            feed_state: "starting".into(),
+            freshness_state: "starting".into(),
+            freshness_age_ms: None,
+            market_open: None,
+            tradeable: false,
+            store_series: Vec::new(),
+            retention_days: config.retention_days,
+            week_anchor: config.week_anchor.clone(),
+            vp_ready: false,
+            windows: Vec::new(),
+            va_pct: settings.model.va_pct,
+            vp_rows: settings.model.rows,
+            vp_row_mode: settings.model.row_mode.as_str().into(),
+            vp_bin_size: settings.model.bin_size,
+            vp_lower_tf: settings.lower_tf.as_str().into(),
+            ps_mode: settings.ps_mode.as_str().into(),
+            cw_first_publish: config.cw_first_publish.clone(),
+            strategy_interval: config.strategy_interval.clone(),
             last_price: None,
             last_candle: None,
-            atr: 3.0,
-            atr_pips: 300.0,
-            current_sl_pips: config.sl_min_pips,
-            current_tp_pips: config.tp_min_pips,
-            current_rr: (config.tp_min_pips / config.sl_min_pips.max(1.0))
-                .clamp(config.rr_min, config.rr_max),
+            atr: None,
+            atr_pips: None,
+            current_sl_pips: None,
+            current_tp_pips: None,
+            current_rr: None,
+            volume_filter_enabled: config.volume_filter_enabled(),
             volume_threshold: config.volume_threshold,
             last_candle_volume: None,
             volume_ratio: None,
@@ -131,6 +172,7 @@ impl DiagnosticsHub {
                 recent_events,
                 max_pending_intents: config.max_pending_intents,
             })),
+            market: Arc::new(RwLock::new(MarketBook::new(config))),
             tx,
             public_ws_clients: Arc::new(AtomicUsize::new(0)),
             execution_client_connected: Arc::new(AtomicBool::new(false)),
@@ -245,6 +287,37 @@ impl DiagnosticsHub {
         )
     }
 
+    pub async fn health_snapshot(&self) -> HealthSnapshot {
+        let inner = self.inner.read().await;
+        let work = &inner.work;
+        let status = if work.node1_connected && work.vp_ready && work.freshness_state == "live" {
+            "ok"
+        } else if work.node1_connected {
+            "degraded"
+        } else {
+            "disconnected"
+        };
+        let timestamp = now_ms();
+        HealthSnapshot {
+            status: status.into(),
+            ok: status == "ok",
+            service: work.service.clone(),
+            version: work.version.clone(),
+            timestamp,
+            uptime_secs: ((timestamp - work.started_at).max(0) / 1_000) as u64,
+            contract_version: work.contract_version.clone(),
+            node1_connected: work.node1_connected,
+            node1_state: work.node1_state.clone(),
+            freshness_state: work.freshness_state.clone(),
+            tradeable: work.tradeable,
+            vp_ready: work.vp_ready,
+            contract_violations: work.contract_violations,
+            intents_pending: inner.pending_intents.len(),
+            node4_connected: self.node4_connected(),
+            node4_token_configured: self.node4_token_configured,
+        }
+    }
+
     pub async fn scanning_snapshot(&self) -> ScanningSnapshot {
         self.inner.read().await.scanning.clone()
     }
@@ -266,6 +339,59 @@ impl DiagnosticsHub {
             .collect()
     }
 
+    /// Whether trading is currently allowed, and the freshness label behind it.
+    pub async fn trading_state(&self) -> (bool, String) {
+        let inner = self.inner.read().await;
+        (inner.work.tradeable, inner.work.freshness_state.clone())
+    }
+
+    pub async fn market_levels(&self) -> Vec<VpLevels> {
+        self.market.read().await.levels()
+    }
+
+    pub async fn drawings_payload(&self) -> DrawingsPayload {
+        self.market.read().await.drawings()
+    }
+
+    /// Published audit for `PW`/`PS`/`CW`, optionally rebuilt with `rows`.
+    pub async fn market_audit(&self, window: &str, rows: Option<usize>) -> Option<VpAudit> {
+        let market = self.market.read().await;
+        match rows {
+            Some(rows) => market.audit_with_rows(window, rows, now_ms()),
+            None => market.audit(window),
+        }
+    }
+
+    pub async fn custom_audit(
+        &self,
+        start: i64,
+        end: i64,
+        rows: Option<usize>,
+    ) -> Result<VpAudit, String> {
+        self.market.read().await.custom_audit(start, end, rows)
+    }
+
+    /// Frames a new public subscriber receives first, so it starts from a full view.
+    pub async fn market_replay_frames(&self) -> Vec<WsFrame> {
+        let market = self.market.read().await;
+        let mut frames = vec![
+            WsFrame::Levels {
+                data: market.levels(),
+            },
+            WsFrame::Drawing {
+                data: market.drawings(),
+            },
+        ];
+        for window in ["PW", "PS", "CW"] {
+            if let Some(audit) = market.audit(window) {
+                frames.push(WsFrame::Vp {
+                    data: Box::new(audit),
+                });
+            }
+        }
+        frames
+    }
+
     pub async fn record_ws_message(&self) {
         let mut inner = self.inner.write().await;
         inner.work.ws_messages_received += 1;
@@ -279,6 +405,11 @@ impl DiagnosticsHub {
             inner.work.node1_state = state.into();
             if reconnect {
                 inner.work.node1_reconnect_count += 1;
+            }
+            if !connected {
+                // Without a live connection nothing can be trusted for trading.
+                inner.work.tradeable = false;
+                inner.work.freshness_state = "disconnected".into();
             }
             let event = Self::push_event_locked(
                 &mut inner,
@@ -300,26 +431,21 @@ impl DiagnosticsHub {
         });
     }
 
-    pub async fn record_levels_update(
-        &self,
-        window: &str,
-        poc: f64,
-        vah: f64,
-        val: f64,
-        scanning: ScanningSnapshot,
-    ) {
+    /// A contract violation: the connection is dropped and the frame ignored.
+    pub async fn record_violation(&self, message: &str) {
         let (event, snapshot) = {
             let mut inner = self.inner.write().await;
             let timestamp = now_ms();
-            inner.work.levels_received += 1;
-            inner.work.last_levels_ts = Some(timestamp);
-            inner.work.last_node1_msg_ts = Some(timestamp);
-            inner.scanning = scanning.clone();
+            inner.work.contract_violations += 1;
+            inner.work.last_violation = Some(message.to_string());
+            inner.work.last_violation_ts = Some(timestamp);
+            inner.work.tradeable = false;
+            inner.work.freshness_state = "violation".into();
             let event = Self::push_event_locked(
                 &mut inner,
-                "info",
-                "levels",
-                format!("Updated {window} levels (PoC {poc:.2}, VaH {vah:.2}, VaL {val:.2})"),
+                "error",
+                "node1",
+                format!("Node 1 contract violation, reconnecting: {message}"),
             );
             let snapshot = Self::build_snapshot_locked(
                 &inner,
@@ -329,79 +455,186 @@ impl DiagnosticsHub {
             );
             (event, snapshot)
         };
-        let _ = self.tx.send(WsFrame::Scanning { data: scanning });
         let _ = self.tx.send(WsFrame::DiagnosticEvent { data: event });
         let _ = self.tx.send(WsFrame::Diagnostics {
             data: Box::new(snapshot),
         });
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn record_candle_update(
-        &self,
-        candle: &VpCandle,
-        atr: f64,
-        sl_pips: f64,
-        tp_pips: f64,
-        risk_reward: f64,
-        candle_buffer_len: usize,
-        breaks_delta: u64,
-        invalidated_delta: u64,
-        low_volume_delta: u64,
-        signals_delta: u64,
-        eval_events: Vec<(String, String)>,
-        scanning: ScanningSnapshot,
-    ) {
-        let (events, snapshot) = {
-            let mut inner = self.inner.write().await;
-            let timestamp = now_ms();
-            inner.work.candles_received += 1;
-            inner.work.last_candle_ts = Some(timestamp);
-            inner.work.last_node1_msg_ts = Some(timestamp);
-            inner.work.candle_buffer_len = candle_buffer_len;
-            inner.work.last_price = Some(candle.close);
-            inner.work.last_candle = Some(candle.clone());
-            inner.work.atr = atr;
-            inner.work.atr_pips = atr * 100.0;
-            inner.work.current_sl_pips = sl_pips;
-            inner.work.current_tp_pips = tp_pips;
-            inner.work.current_rr = risk_reward;
-            inner.work.last_candle_volume = Some(candle.volume);
-            inner.work.volume_ratio = (inner.work.volume_threshold > 0.0)
-                .then_some(candle.volume / inner.work.volume_threshold);
-            inner.work.breaks_detected += breaks_delta;
-            inner.work.breaks_invalidated += invalidated_delta;
-            inner.work.retests_rejected_low_volume += low_volume_delta;
-            inner.work.signals_confirmed += signals_delta;
-            inner.scanning = scanning.clone();
+    /// Apply the freshness reported on a validated frame.
+    pub async fn record_freshness(&self, freshness: &Freshness) {
+        let mut inner = self.inner.write().await;
+        inner.work.feed_state = "receiving".into();
+        inner.work.freshness_state = freshness.state.clone();
+        inner.work.freshness_age_ms = freshness.age_ms;
+        inner.work.market_open = freshness.market_open;
+        inner.work.tradeable = freshness.tradeable();
+    }
 
-            let events: Vec<_> = eval_events
-                .into_iter()
-                .map(|(level, message)| {
-                    Self::push_event_locked(&mut inner, &level, "scanner", message)
-                })
-                .collect();
+    /// Block trading when the feed has gone quiet.
+    pub async fn check_silence(&self, now: i64) {
+        let mut inner = self.inner.write().await;
+        let silent = match inner.work.last_node1_msg_ts {
+            Some(last) => now - last > FEED_SILENCE_MS,
+            None => false,
+        };
+        if silent && inner.work.freshness_state != "silent" && inner.work.node1_connected {
+            inner.work.freshness_state = "silent".into();
+            inner.work.tradeable = false;
+            inner.work.feed_state = "silent".into();
+            let _ = Self::push_event_locked(
+                &mut inner,
+                "warn",
+                "node1",
+                "No Node 1 frame for over 90 seconds; trading is blocked until the feed resumes".into(),
+            );
+        }
+    }
+
+    pub async fn record_tick_volume(&self, ticks: u64, last_tick_ms: Option<i64>) {
+        let mut inner = self.inner.write().await;
+        inner.work.tick_volume_frames += 1;
+        inner.work.last_tick_volume = Some(ticks);
+        inner.work.last_tick_volume_ts = last_tick_ms.or(Some(now_ms()));
+    }
+
+    pub async fn record_calendar(&self, items: usize) {
+        let mut inner = self.inner.write().await;
+        inner.work.calendar_items = items;
+        inner.work.last_calendar_ts = Some(now_ms());
+    }
+
+    /// Store a validated closed bar and update the per-frame counters.
+    pub async fn record_bar(
+        &self,
+        interval: &str,
+        candle: &VpCandle,
+        closed: bool,
+        is_new: bool,
+        replay: bool,
+    ) {
+        if !closed {
+            self.inner.write().await.work.open_bars_ignored += 1;
+            return;
+        }
+        if !is_new {
+            self.inner.write().await.work.duplicate_bars_ignored += 1;
+        }
+        // Store every closed bar, including duplicates, so a corrected re-send overwrites.
+        let stored = self.market.write().await.upsert_closed(interval, candle.clone());
+        let mut inner = self.inner.write().await;
+        if stored {
+            inner.work.closed_bars_stored += 1;
+        }
+        if replay {
+            inner.work.replayed_bars += 1;
+        }
+        if interval == inner.work.strategy_interval {
+            inner.work.last_candle_ts = Some(candle.time);
+            inner.work.last_candle = Some(candle.clone());
+            inner.work.last_candle_volume = Some(candle.volume);
+        }
+    }
+
+    /// Rebuild profiles. When anything visible changed, broadcast the market frames.
+    pub async fn recompute_market(&self, now: i64) -> bool {
+        let changed = self.market.write().await.recompute(now);
+        let (series, windows, vp_ready) = {
+            let market = self.market.read().await;
+            (market.series_stats(), market.windows(), market.vp_ready())
+        };
+        {
+            let mut inner = self.inner.write().await;
+            inner.work.store_series = series;
+            inner.work.windows = windows;
+            inner.work.vp_ready = vp_ready;
+        }
+        if changed {
+            for frame in self.market_replay_frames().await {
+                let _ = self.tx.send(frame);
+            }
+        }
+        changed
+    }
+
+    /// Record one evaluated closed bar. Trade intents are recorded separately.
+    pub async fn record_evaluation(&self, scanning: ScanningSnapshot, report: &CandleEvalReport) {
+        let (events, signal_snapshot, snapshot, scanning_frame) = {
+            let mut inner = self.inner.write().await;
+            inner.work.breaks_detected += report.breaks_detected;
+            inner.work.breaks_invalidated += report.breaks_invalidated;
+            inner.work.retests_rejected_low_volume += report.retests_rejected_low_volume;
+            inner.work.signals_confirmed += report.signals_confirmed;
+            inner.work.last_price = scanning.last_price;
+            inner.work.atr = scanning.atr;
+            inner.work.atr_pips = scanning.atr_pips;
+            inner.work.current_sl_pips = scanning.sl_pips;
+            inner.work.current_tp_pips = scanning.tp_pips;
+            inner.work.current_rr = scanning.rr;
+            inner.work.volume_ratio = match (scanning.current_volume, scanning.volume_threshold) {
+                (Some(volume), threshold) if threshold > 0.0 => Some(volume / threshold),
+                _ => None,
+            };
+            inner.work.tradeable = scanning.tradeable;
+            inner.work.freshness_state = scanning.freshness_state.clone();
+
+            let mut events = Vec::new();
+            for (level, message) in &report.events {
+                events.push(Self::push_event_locked(
+                    &mut inner,
+                    level,
+                    "strategy",
+                    message.clone(),
+                ));
+            }
+            inner.scanning = scanning.clone();
+            let signals = Self::build_signals_locked(
+                &inner,
+                self.node4_connected(),
+                self.node4_token_configured,
+            );
             let snapshot = Self::build_snapshot_locked(
                 &inner,
                 self.public_clients(),
                 self.node4_connected(),
                 self.node4_token_configured,
             );
-            (events, snapshot)
+            (events, signals, snapshot, scanning)
         };
-
-        let _ = self.tx.send(WsFrame::Scanning { data: scanning });
         for event in events {
             let _ = self.tx.send(WsFrame::DiagnosticEvent { data: event });
         }
+        let _ = self.tx.send(WsFrame::Scanning {
+            data: scanning_frame,
+        });
+        let _ = self.tx.send(WsFrame::Signals {
+            data: signal_snapshot,
+        });
         let _ = self.tx.send(WsFrame::Diagnostics {
             data: Box::new(snapshot),
         });
     }
 
-    /// Queue and broadcast an immutable intent. Returns false when the bounded
-    /// replay queue is full of still-valid intents; in that case nothing is
-    /// sent to Node 4, which is safer than producing an untracked order.
+    /// Record a scanning refresh for a bar that did not evaluate (replay or stale).
+    pub async fn record_scanning(&self, scanning: ScanningSnapshot) {
+        let snapshot = {
+            let mut inner = self.inner.write().await;
+            inner.work.last_price = scanning.last_price;
+            inner.work.atr = scanning.atr;
+            inner.work.atr_pips = scanning.atr_pips;
+            inner.work.current_sl_pips = scanning.sl_pips;
+            inner.work.current_tp_pips = scanning.tp_pips;
+            inner.work.current_rr = scanning.rr;
+            inner.work.tradeable = scanning.tradeable;
+            inner.work.freshness_state = scanning.freshness_state.clone();
+            inner.scanning = scanning.clone();
+            scanning
+        };
+        let _ = self.tx.send(WsFrame::Scanning { data: snapshot });
+    }
+
+    /// Record and publish an intent. Returns false when the intent was dropped
+    /// because the queue was full, or suppressed as a duplicate `intent_id`.
     pub async fn record_intent(&self, intent: TradeIntent) -> bool {
         let (accepted, event, signal_snapshot, snapshot) = {
             let mut inner = self.inner.write().await;
@@ -410,7 +643,30 @@ impl DiagnosticsHub {
                 .pending_intents
                 .retain(|pending| !pending.is_expired_at(timestamp));
 
-            if inner.pending_intents.len() >= inner.max_pending_intents {
+            let duplicate = inner
+                .recent_intents
+                .iter()
+                .any(|known| known.intent_id == intent.intent_id);
+            if duplicate {
+                let event = Self::push_event_locked(
+                    &mut inner,
+                    "info",
+                    "strategy",
+                    format!("Intent {} already emitted; duplicate suppressed", intent.intent_id),
+                );
+                let signals = Self::build_signals_locked(
+                    &inner,
+                    self.node4_connected(),
+                    self.node4_token_configured,
+                );
+                let snapshot = Self::build_snapshot_locked(
+                    &inner,
+                    self.public_clients(),
+                    self.node4_connected(),
+                    self.node4_token_configured,
+                );
+                (false, event, signals, snapshot)
+            } else if inner.pending_intents.len() >= inner.max_pending_intents {
                 inner.work.intents_dropped += 1;
                 inner.work.last_error = Some("pending intent queue is full".into());
                 let event = Self::push_event_locked(
@@ -447,13 +703,14 @@ impl DiagnosticsHub {
                     "signal",
                     "strategy",
                     format!(
-                        "Emitted {} {} intent {} from {} (SL {:.2}, TP {:.2})",
+                        "Emitted {} {} intent {} from {} (SL {:.2}, TP {:.2}, RR {:.2})",
                         intent.side.to_uppercase(),
                         intent.symbol,
                         intent.intent_id,
                         intent.level_name,
                         intent.stop_loss,
-                        intent.take_profit
+                        intent.take_profit,
+                        intent.risk_reward
                     ),
                 );
                 let signals = Self::build_signals_locked(
@@ -562,30 +819,37 @@ impl DiagnosticsHub {
         });
         Ok(())
     }
+
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::INTENT_SCHEMA_VERSION;
+    use crate::types::{INTENT_SCHEMA_VERSION, STRATEGY_NAME, STRATEGY_VERSION};
 
     fn intent(id: &str) -> TradeIntent {
         let timestamp = now_ms();
         TradeIntent {
             schema_version: INTENT_SCHEMA_VERSION,
             intent_id: id.into(),
-            strategy: "vp_break_retest_v1".into(),
+            strategy: STRATEGY_NAME.into(),
             symbol: "XAUUSD".into(),
             side: "buy".into(),
             order_type: "market".into(),
             reference_price: 2_650.0,
-            stop_loss: 2_647.0,
+            stop_loss: 2_648.0,
             take_profit: 2_656.0,
-            risk_reward: 2.0,
+            risk_reward: 3.0,
             level_name: "PW PoC".into(),
             source_candle_time: timestamp,
             created_at: timestamp,
             expires_at: timestamp + 60_000,
+            atr: None,
+            atr_pips: None,
+            level_id: None,
+            drawing_id: None,
+            strategy_version: Some(STRATEGY_VERSION.into()),
+            volume_confirmed: None,
         }
     }
 
@@ -603,14 +867,14 @@ mod tests {
             schema_version: INTENT_SCHEMA_VERSION,
             intent_id: "intent-1".into(),
             status: "accepted".into(),
-            venue: "deriv_mt5_demo".into(),
+            venue: "node4_venue".into(),
             symbol: "XAUUSD".into(),
             side: "buy".into(),
             timestamp: now_ms(),
             execution_id: None,
             filled_price: None,
-            quantity: Some(0.01),
-            quantity_unit: Some("lots".into()),
+            quantity: None,
+            quantity_unit: None,
             error_code: None,
             error_message: None,
         })
@@ -630,5 +894,46 @@ mod tests {
         assert!(hub.record_intent(intent("intent-1")).await);
         assert!(!hub.record_intent(intent("intent-2")).await);
         assert_eq!(hub.signal_snapshot().await.pending_count, 1);
+    }
+
+    #[tokio::test]
+    async fn duplicate_intent_id_is_suppressed_not_queued_twice() {
+        let hub = DiagnosticsHub::new(&Config::default());
+        assert!(hub.record_intent(intent("same")).await);
+        assert!(!hub.record_intent(intent("same")).await);
+        assert_eq!(hub.signal_snapshot().await.pending_count, 1);
+    }
+
+    #[tokio::test]
+    async fn silence_blocks_trading_until_the_feed_resumes() {
+        let hub = DiagnosticsHub::new(&Config::default());
+        hub.set_node1_state(true, "connected", false).await;
+        hub.record_ws_message().await;
+        hub.record_freshness(&Freshness {
+            state: "live".into(),
+            age_ms: Some(10),
+            market_open: Some(true),
+            last_tick_ms: None,
+        })
+        .await;
+        assert!(hub.snapshot().await.work.tradeable);
+        hub.check_silence(now_ms() + FEED_SILENCE_MS + 1_000).await;
+        let work = hub.snapshot().await.work;
+        assert!(!work.tradeable);
+        assert_eq!(work.freshness_state, "silent");
+    }
+
+    #[tokio::test]
+    async fn health_reports_degraded_until_the_feed_is_live_and_profiles_exist() {
+        let hub = DiagnosticsHub::new(&Config::default());
+        assert_eq!(hub.health_snapshot().await.status, "disconnected");
+        hub.set_node1_state(true, "connected", false).await;
+        assert_eq!(hub.health_snapshot().await.status, "degraded");
+    }
+
+    #[test]
+    fn strategy_identity_is_versioned() {
+        assert_eq!(STRATEGY_NAME, "vp_break_retest_v1");
+        assert_eq!(STRATEGY_VERSION, "2.0.0");
     }
 }

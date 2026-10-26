@@ -55,18 +55,24 @@ docker run --env-file node3-strategy/.env -p 10000:10000 xauusd-node3-strategy
 
 ### Node 1 → Node 3
 
-Node 3 connects to `NODE1_WS_URL`, subscribes only to `candle` and `levels`,
-and never publishes trades back to Node 1.
+Node 3 connects to `NODE1_WS_URL` and subscribes to Node 1 contract v2 topics
+`candle`, `tick_volume`, `calendar`, and `status`. It builds every volume
+profile itself from closed 1m, 15m, and 1H bars. It does **not** use Node 1's
+`/levels`, and it never publishes trades back to Node 1. Any contract violation
+drops the connection, and Node 3 reconnects without trading on that frame.
 
 ### Public diagnostics (Node 2/operator)
 
 | Resource | Purpose |
 |---|---|
-| `GET /health` | platform health probe |
+| `GET /health` | JSON probe. HTTP 200 while the process is alive. `status` is `ok`, `degraded`, or `disconnected` |
+| `GET /levels` | published PW, PS, and CW levels (`sunday_open` included) |
+| `GET /vp?window=PW\|PS\|CW` or `GET /vp?start=&end=` | one FRVP profile |
+| `GET /drawings` | FRVP rectangles, daily rays, and the Sunday-open marker |
 | `GET /diagnostics` (`/status`) | strategy health, counters, scanner, and signal delivery state |
-| `GET /scanning` | current level scanner state and strategy-side SL/TP projections |
+| `GET /scanning` | current level scanner state, ATR, and SL/TP/RR in pips |
 | `GET /signals` | pending/recent intents and Node 4 reports (no credentials) |
-| `WS /ws` | `diagnostics`, `scanning`, `signals`, `diagnostic_event`, `heartbeat` |
+| `WS /ws` | topics `levels`, `drawing`, `vp`, `scanning`, `signals`, `diagnostics`, with a replay on subscribe |
 
 ### Private execution link (Node 4 only)
 
