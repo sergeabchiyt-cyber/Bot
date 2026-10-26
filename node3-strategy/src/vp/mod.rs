@@ -121,7 +121,10 @@ mod golden {
             &model,
         )
         .expect("row grid");
-        assert!((height - row_height).abs() < 1e-9, "{expected_window} row height");
+        assert!(
+            (height - row_height).abs() < 1e-9,
+            "{expected_window} row height"
+        );
         assert_eq!(count, rows.len(), "{expected_window} row count");
         assert!((grid_lo - number(&doc, "range_low")).abs() < 1e-9);
 

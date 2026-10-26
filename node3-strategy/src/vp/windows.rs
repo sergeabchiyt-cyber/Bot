@@ -15,7 +15,7 @@ use super::histogram::{histogram as build_histogram, Histogram, ProfileModel};
 use super::timeframe::{prepare_input, LowerTf};
 use crate::ny::{
     close_on, is_weekend_close, last_trading_close_date, latest_close_date, shift_days,
-    weekday_name, weekday_rank, week_open_date,
+    week_open_date, weekday_name, weekday_rank,
 };
 use crate::store::CandleStore;
 use crate::types::{PendingWindow, VpCandle};
@@ -136,7 +136,12 @@ pub fn compute_windows(store: &CandleStore, now_ms: i64, settings: &WindowSettin
         });
     }
 
-    WindowSet { pw, ps, cw, pending }
+    WindowSet {
+        pw,
+        ps,
+        cw,
+        pending,
+    }
 }
 
 /// Walk back from the `anchor` close over whole sessions. Weekend closes are
@@ -296,7 +301,11 @@ mod tests {
         assert_eq!(ps.end, close_on(date(2026, 10, 23)));
         assert_eq!(ps.input_interval, "1m");
         // The weekend filler at 4200 never leaks into the profile.
-        assert!((ps.histogram.poc() - 4100.1).abs() < 0.6, "PoC {}", ps.histogram.poc());
+        assert!(
+            (ps.histogram.poc() - 4100.1).abs() < 0.6,
+            "PoC {}",
+            ps.histogram.poc()
+        );
     }
 
     #[test]

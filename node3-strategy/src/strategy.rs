@@ -196,9 +196,14 @@ impl StrategyEngine {
             let Some(target) = self.levels.get(&id).cloned() else {
                 continue;
             };
-            if let Some(trigger) =
-                self.step(&id, &target, candle, volume_ok, volume_threshold, &mut report)
-            {
+            if let Some(trigger) = self.step(
+                &id,
+                &target,
+                candle,
+                volume_ok,
+                volume_threshold,
+                &mut report,
+            ) {
                 report.triggered = Some(trigger);
                 return report;
             }
@@ -216,7 +221,11 @@ impl StrategyEngine {
         report: &mut CandleEvalReport,
     ) -> Option<Trigger> {
         let level = target.price;
-        let state = self.break_states.get(id).copied().unwrap_or(BreakState::None);
+        let state = self
+            .break_states
+            .get(id)
+            .copied()
+            .unwrap_or(BreakState::None);
         match state {
             BreakState::None => {
                 let is_green = candle.close > candle.open;
@@ -283,7 +292,10 @@ impl StrategyEngine {
             BreakState::BrokenAbove => ("ABOVE", "bullish"),
             _ => ("BELOW", "bearish"),
         };
-        debug!("Level {} broken {direction} at {:.2}", target.name, candle.close);
+        debug!(
+            "Level {} broken {direction} at {:.2}",
+            target.name, candle.close
+        );
         self.break_states.insert(id.to_string(), state);
         let note = format!(
             "Broken {direction} @ {:.2} — awaiting {retest_word} retest of {:.2} (±${:.2})",
@@ -395,11 +407,7 @@ impl StrategyEngine {
     }
 
     /// Scanning snapshot for `/scanning` and the `scanning` topic.
-    pub fn scanning(
-        &self,
-        risk: &RiskProjector,
-        context: &ScanContext<'_>,
-    ) -> ScanningSnapshot {
+    pub fn scanning(&self, risk: &RiskProjector, context: &ScanContext<'_>) -> ScanningSnapshot {
         let last = self.history.back();
         let price = last.map(|bar| bar.close);
         let projection = risk.projection();
@@ -414,7 +422,11 @@ impl StrategyEngine {
         let mut setups = Vec::new();
         let mut active = 0;
         for (id, target) in &self.levels {
-            let state = self.break_states.get(id).copied().unwrap_or(BreakState::None);
+            let state = self
+                .break_states
+                .get(id)
+                .copied()
+                .unwrap_or(BreakState::None);
             let meta = self.level_meta.get(id).cloned().unwrap_or_default();
             let (state_name, state_label, pending_side, invalidation) = match state {
                 BreakState::None => ("scanning_break", "Scanning for break", None, None),

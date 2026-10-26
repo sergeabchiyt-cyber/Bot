@@ -86,13 +86,19 @@ Every frame is checked before it reaches the store or the strategy
 (`src/feed.rs`). A failed check returns an error, which drops the connection
 and triggers a reconnect.
 
-- `contract_version` must be `2.0`.
-- `symbol` must be `XAUUSD` where present, and required on candle and tick frames.
-- `boot_id` must not change within a connection. A change means Node 1 restarted.
-- Live frames carry a contiguous `seq`. A gap, duplicate, or out-of-order value fails. Replay frames carry no `seq`.
-- `gap: true` fails.
-- `freshness.state` must be `live`, `stale`, `offline`, or `closed_market`.
-- Candles must use a supported `interval` and carry `closed`.
+Wire shape (`contracts/c1-market-feed.schema.json`): `{type, seq}` for live
+frames or `{type, replay: true}` for replay frames, with the payload in `data`.
+
+- Live `candle`, `tick_volume`, `calendar`, and `status` frames carry a `seq`
+  that strictly increases. Replay frames carry `replay: true` and no `seq`.
+- A `gap` frame (`data.dropped`) fails. Node 1 sends it when a subscriber
+  overruns its buffer, so closed bars may be missing.
+- `status` data must carry `contract_version` `2.0`, a `boot_id` that does not
+  change within a connection, and `freshness` (`state` one of `live`, `stale`,
+  `offline`, `closed_market`).
+- Candle data must name `XAUUSD`, a supported `interval`, and `closed`.
+- Candles and ticks take freshness from the last `status` frame. Before the
+  first `status` frame, freshness is `unknown` and never tradeable.
 
 A silent feed for more than 90 seconds blocks trading until frames resume.
 

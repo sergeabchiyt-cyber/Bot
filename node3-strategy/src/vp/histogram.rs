@@ -198,7 +198,11 @@ pub fn value_area(bins: &[f64], va_pct: f64) -> Option<(usize, usize, usize)> {
     let mut lo = poc;
     let mut hi = poc;
     while va_sum < target && (lo > 0 || hi + 1 < count) {
-        let lo_vol = if lo > 0 { bins[lo - 1] } else { f64::NEG_INFINITY };
+        let lo_vol = if lo > 0 {
+            bins[lo - 1]
+        } else {
+            f64::NEG_INFINITY
+        };
         let hi_vol = if hi + 1 < count {
             bins[hi + 1]
         } else {
@@ -273,7 +277,10 @@ pub fn histogram(candles: &[VpCandle], model: &ProfileModel) -> Option<Histogram
         return None;
     }
     let raw_lo = valid.iter().map(|c| c.low).fold(f64::INFINITY, f64::min);
-    let raw_hi = valid.iter().map(|c| c.high).fold(f64::NEG_INFINITY, f64::max);
+    let raw_hi = valid
+        .iter()
+        .map(|c| c.high)
+        .fold(f64::NEG_INFINITY, f64::max);
     let (lo, row_height, count) = row_grid(raw_lo, raw_hi, &model)?;
     let grid_hi = lo + count as f64 * row_height;
     let top = match model.row_mode {

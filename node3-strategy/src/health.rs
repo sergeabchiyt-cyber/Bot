@@ -302,12 +302,18 @@ async fn handle_public_ws(stream: TcpStream, hub: DiagnosticsHub) {
                             match frame {
                                 WsFrame::Subscribe { topics: requested } => {
                                     topics = requested;
-                                    if send_public_replay(&mut sender, &hub, &topics).await.is_err() {
+                                    if send_public_replay(&mut sender, &hub, &topics)
+                                        .await
+                                        .is_err()
+                                    {
                                         break;
                                     }
                                 }
                                 WsFrame::Snapshot => {
-                                    if send_public_replay(&mut sender, &hub, &topics).await.is_err() {
+                                    if send_public_replay(&mut sender, &hub, &topics)
+                                        .await
+                                        .is_err()
+                                    {
                                         break;
                                     }
                                 }

@@ -10,10 +10,10 @@ use crate::config::Config;
 use crate::drawings;
 use crate::ny::DAY_MS;
 use crate::store::CandleStore;
-use crate::types::{
-    DrawingsPayload, ProfileMeta, SeriesStat, VpCandle, VpLevels, WindowStatus,
+use crate::types::{DrawingsPayload, ProfileMeta, SeriesStat, VpCandle, VpLevels, WindowStatus};
+use crate::vp::windows::{
+    compute_windows, custom_profile, BuiltProfile, WindowSet, WindowSettings,
 };
-use crate::vp::windows::{compute_windows, custom_profile, BuiltProfile, WindowSettings, WindowSet};
 use crate::vp::{audit_from_profile, VpAudit};
 
 pub struct MarketBook {
@@ -278,12 +278,21 @@ mod tests {
         assert_eq!(pw.sunday_open, Some(4150.0), "open of the first PW bar");
 
         let ps = levels.iter().find(|l| l.window == "PS").expect("PS level");
-        assert!(ps.vah.is_none() && ps.val.is_none(), "PS publishes PoC only");
+        assert!(
+            ps.vah.is_none() && ps.val.is_none(),
+            "PS publishes PoC only"
+        );
         assert!(ps.sunday_open.is_none());
-        assert!(levels.iter().all(|l| l.window != "CW"), "CW not published before Monday close");
+        assert!(
+            levels.iter().all(|l| l.window != "CW"),
+            "CW not published before Monday close"
+        );
 
         let drawings = book.drawings();
-        assert!(drawings.items.iter().any(|item| item.kind == "frvp" && item.window == "PW"));
+        assert!(drawings
+            .items
+            .iter()
+            .any(|item| item.kind == "frvp" && item.window == "PW"));
         assert!(drawings.items.iter().any(|item| item.kind == "sunday_open"));
         assert!(drawings.pending.iter().any(|p| p.window == "CW"));
     }
@@ -301,7 +310,10 @@ mod tests {
         let now = utc_ms(2026, 10, 18, 22, 30);
         assert!(book.recompute(now));
         let first_timestamp = book.levels()[0].timestamp;
-        assert!(!book.recompute(now + 5_000), "same content must not re-publish");
+        assert!(
+            !book.recompute(now + 5_000),
+            "same content must not re-publish"
+        );
         assert_eq!(book.levels()[0].timestamp, first_timestamp);
     }
 
@@ -322,9 +334,15 @@ mod tests {
         book.recompute(now);
         let before = book.levels();
         let custom = book
-            .custom_audit(close_on(date(2026, 10, 12)), close_on(date(2026, 10, 13)), Some(64))
+            .custom_audit(
+                close_on(date(2026, 10, 12)),
+                close_on(date(2026, 10, 13)),
+                Some(64),
+            )
             .expect("custom");
-        assert_eq!(custom.rows, 64);
+        // The span is about 1.00 (4149.6..4150.6). 1.00 / 64 rows is 1.56 cents, so row
+        // heights snap to whole ticks: 2 cents gives 50 rows, the closest achievable count.
+        assert_eq!(custom.rows, 50);
         assert_eq!(custom.window, "CUSTOM");
         assert_eq!(book.levels(), before);
         assert!(book.audit_with_rows("PW", 32, now).is_some());
