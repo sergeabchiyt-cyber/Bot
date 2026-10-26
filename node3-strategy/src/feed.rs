@@ -105,7 +105,7 @@ pub enum FeedEvent {
         freshness: Freshness,
     },
     Heartbeat,
-    /// Known-harmless frame types that carry nothing Node 3 uses.
+    /// Frame types Node 3 does not use (for example, future additions to contract v2).
     Ignored,
 }
 
@@ -128,6 +128,16 @@ impl FeedValidator {
             "tick_volume" => self.tick_volume(envelope),
             "calendar" => self.calendar(envelope),
             "status" => self.status(envelope),
+            // Node 1 sends `gap` when a subscriber overran its broadcast buffer, so closed bars
+            // may be missing. That is a violation, never a harmless frame.
+            "gap" => Err(format!(
+                "Node 1 reported a feed gap (dropped {})",
+                envelope
+                    .data
+                    .get("dropped")
+                    .and_then(Value::as_u64)
+                    .map_or_else(|| "unknown".to_string(), |n| n.to_string())
+            )),
             _ => Ok(FeedEvent::Ignored),
         }
     }
@@ -208,7 +218,11 @@ impl FeedValidator {
     }
 
     /// Checks shared by every data frame. Returns the validated freshness.
-    fn check_envelope(&mut self, envelope: &Envelope, require_symbol: bool) -> Result<Freshness, String> {
+    fn check_envelope(
+        &mut self,
+        envelope: &Envelope,
+        require_symbol: bool,
+    ) -> Result<Freshness, String> {
         match envelope.contract_version.as_deref() {
             Some(CONTRACT_VERSION) => {}
             Some(other) => {
@@ -359,7 +373,8 @@ mod tests {
             .expect("seq 1");
         let gap = validator.accept(&live_frame(3, &candle_body("15m", 1_800_000, true, "live")));
         assert!(gap.is_err());
-        let duplicate = validator.accept(&live_frame(1, &candle_body("15m", 1_800_000, true, "live")));
+        let duplicate =
+            validator.accept(&live_frame(1, &candle_body("15m", 1_800_000, true, "live")));
         assert!(duplicate.is_err());
     }
 
@@ -375,6 +390,14 @@ mod tests {
         validator
             .accept(&live_frame(1, &candle_body("1m", 180_000, true, "live")))
             .expect("live seq 1 after replay");
+    }
+
+    #[test]
+    fn rejects_standalone_gap_frame() {
+        let mut validator = FeedValidator::default();
+        let gap = r#"{"type":"gap","data":{"dropped":12}}"#;
+        let error = validator.accept(gap).expect_err("gap frame must be a violation");
+        assert!(error.contains("dropped 12"), "{error}");
     }
 
     #[test]
