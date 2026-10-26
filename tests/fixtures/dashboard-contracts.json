@@ -1,0 +1,33 @@
+{
+  "node3": {
+    "health": {
+      "status": "ok", "freshness_state": "live", "tradeable": true, "node1_connected": true,
+      "vp_ready": true, "contract_violations": 0, "intents_pending": 1, "node4_connected": false,
+      "node4_token_configured": false, "uptime_secs": 86400, "contract_version": "2.0"
+    },
+    "levels": [
+      { "window": "PW", "poc": 3312.5, "vah": 3324.0, "val": 3301.0, "start": 1761000000000, "end": 1761600000000, "timestamp": 1761600000000, "sunday_open": 3310.0, "meta": { "row_mode": "ticks", "row_height": 1, "rows": 24, "range_low": 3300, "range_high": 3330, "va_pct": 0.7, "total_volume": 5000, "input_interval": "1h", "input_bars": 168 } },
+      { "window": "PS", "poc": 3298.0, "start": 1761000000000, "end": 1761600000000, "timestamp": 1761600000000, "meta": { "row_mode": "ticks", "row_height": 1, "rows": 1, "range_low": 3298, "range_high": 3298, "va_pct": 0.7, "total_volume": 700, "input_interval": "1h", "input_bars": 168 } },
+      { "window": "CW", "poc": 3320.0, "vah": 3330.0, "val": 3310.0, "start": 1761600000000, "end": 1761686400000, "timestamp": 1761686400000, "meta": { "row_mode": "ticks", "row_height": 1, "rows": 20, "range_low": 3310, "range_high": 3330, "va_pct": 0.7, "total_volume": 1800, "input_interval": "1h", "input_bars": 24 } }
+    ],
+    "drawings": { "items": [
+      { "id": "PW:level:1761000000000:1761600000000", "kind": "level", "window": "PW", "label": "PW PoC", "timeframe": "1H", "color": "#f0b90b", "line_style": "solid", "price": 3312.5, "start": 1761000000000, "end": 1761600000000, "ray_from_time": 1761000000000 },
+      { "id": "PW:level:1761000000000:1761600000000", "kind": "level", "window": "PW", "label": "PW PoC daily", "timeframe": "daily", "color": "#f0b90b", "line_style": "dotted", "price": 3312.5, "start": 1761000000000, "end": 1761600000000, "ray_from_time": 1761000000000 },
+      { "id": "PW:frvp:1761000000000:1761600000000", "kind": "frvp", "window": "PW", "label": "PW profile", "timeframe": "1H", "color": "#3c8d9f", "line_style": "rectangle", "start": 1761000000000, "end": 1761600000000, "rows": [{ "low": 3311, "high": 3312, "price": 3311.5, "volume": 250, "up_volume": 150, "down_volume": 100 }] }
+    ] },
+    "scanning": { "setups": [{ "id": "PW:poc-retest", "name": "PW PoC retest", "window": "PW", "level_price": 3312.5, "drawing_id": "PW:level:1761000000000:1761600000000", "state": "watching", "state_label": "Waiting for retest", "pending_side": "buy", "current_price": 3310.0, "distance_dollars": 2.5, "distance_pips": 25, "retest_zone_low": 3311, "retest_zone_high": 3314, "invalidation_price": 3308, "volume_required": true, "volume_confirmed": false, "projected_buy": { "side": "buy", "entry": 3312.5, "stop_loss": 3308, "take_profit": 3321.5, "sl_pips": 45, "tp_pips": 90, "risk_reward": 2, "sizing": "node4_managed" }, "projected_sell": null, "active_projection": null, "last_note": "waiting for approach" }], "atr": 4.5, "atr_pips": 45, "sl_pips": 45, "tp_pips": 90, "rr": 2, "last_price": 3310, "tradeable": true, "freshness_state": "live", "volume_filter_enabled": true, "volume_threshold": 1.2 },
+    "signals": { "pending": [{ "id": "intent-1", "side": "buy", "state": "pending", "timestamp": 1761686400000 }], "recent": [], "execution_reports": [], "pending_count": 1, "node4_connected": false, "node4_token_configured": false },
+    "diagnostics": { "contract_version": "2.0", "last_violation": null, "service": "node3", "checks": { "node1_connected": true, "vp_ready": true } },
+    "vp": { "window": "PW", "rows": [{ "low": 3311, "high": 3312, "volume": 250 }] }
+  },
+  "node1": {
+    "candles": {
+      "1m": [{ "symbol": "XAUUSD", "interval": "1m", "time": 1761686400000, "open": 3310, "high": 3311, "low": 3309, "close": 3310.5, "volume": 26, "source": "fixture", "closed": true }],
+      "15m": [{ "symbol": "XAUUSD", "interval": "15m", "time": 1761685500000, "open": 3309, "high": 3312, "low": 3308, "close": 3311, "volume": 135, "source": "fixture", "closed": true }],
+      "1h": [{ "symbol": "XAUUSD", "interval": "1h", "time": 1761682800000, "open": 3305, "high": 3315, "low": 3304, "close": 3311, "volume": 420, "source": "fixture", "closed": true }]
+    },
+    "tick_volume": { "ticks": 280, "up_ticks": 145, "down_ticks": 120, "flat_ticks": 15, "ticks_per_sec": 2.8, "last_tick": 1761686400000, "closed": false },
+    "calendar": { "events": [{ "timestamp": 1761686400000, "currency": "USD", "impact": "high", "title": "Employment data" }] },
+    "status": { "contract_version": "1.0", "boot_id": "fixture-boot", "freshness": { "feed": "fixture", "last_tick_ms": 1761686400000, "age_ms": 250, "state": "live", "market_open": true } }
+  }
+}

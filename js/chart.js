@@ -5,10 +5,8 @@
 (function (App) {
   "use strict";
 
-  const { $, setStatus, toSec, numberOrNull, fetchPublicJson } = App.utils;
+  const { $, setStatus, toSec, numberOrNull } = App.utils;
   const format = App.format;
-  const cfg = App.config;
-
   const el = $("chart");
 
   if (typeof LightweightCharts === "undefined") {
@@ -49,7 +47,8 @@
     };
   }
 
-  const axis = App.axis ? App.axis.create() : passthroughAxis();
+  let activeInterval = "15m";
+  let axis = App.axis ? App.axis.create({ bucket: 15 * 60 }) : passthroughAxis();
   const isClosedMarketBar = App.axis
     ? App.axis.isClosedMarketBar
     : (bar) => !!bar && bar.open === bar.close;
@@ -167,6 +166,7 @@
   let wsCandleRevision = 0;
   let wsTickVolumeRevision = 0;
   let historyFetchInProgress = false;
+  let pendingInterval = null;
 
   /** Notified after a full `setData` reload, so overlays can re-apply markers
    *  and price lines that a history snapshot replaces. */
@@ -240,11 +240,11 @@
    *   { time, open, high, low, close, volume, source }
    * Binance REST is never called from the browser.
    */
-  function parseCandles(raw) {
+  function parseCandles(raw, interval = activeInterval) {
     if (!Array.isArray(raw)) return [];
     const byTime = new Map();
     for (const c of raw) {
-      if (!c) continue;
+      if (!c || (c.interval && c.interval !== interval)) continue;
       const time = toSec(c.time);
       const open = numberOrNull(c.open);
       const high = numberOrNull(c.high);
@@ -257,6 +257,7 @@
         low,
         close,
         volume: numberOrNull(c.volume) ?? 0,
+        closed: c.closed !== false,
       };
       if (time == null || open === null || high === null || low === null || close === null) {
         continue;
@@ -285,16 +286,20 @@
     return axis.append(realSec);
   }
 
-  async function loadHistory() {
-    if (historyFetchInProgress || !cfg.endpoints.candles) return;
+  async function loadHistory(interval = activeInterval) {
+    if (historyFetchInProgress) { pendingInterval = interval; return; }
+    activeInterval = interval;
+    const requestInterval = interval;
     historyFetchInProgress = true;
     const requestCandleRevision = wsCandleRevision;
     const requestTickVolumeRevision = wsTickVolumeRevision;
     setStatus("loading", "busy");
     try {
-      const raw = await fetchPublicJson(cfg.endpoints.candles);
-      const data = parseCandles(raw);
+      const raw = await App.api.fetchCandles(requestInterval);
+      const data = parseCandles(raw, requestInterval);
+      if (requestInterval !== activeInterval) return;
       if (!data.length) throw new Error("market candles: empty payload");
+      if (App.node3 && App.node3.clearNode1Error) App.node3.clearNode1Error("candles");
 
       // A newer candle frame makes this whole REST snapshot stale. Do not reset
       // the series, timeline, or last price with a slower response.
@@ -315,6 +320,7 @@
         for (const listener of resetListeners) {
           try { listener(); } catch (error) { console.error("Chart reset listener failed:", error); }
         }
+        renderDrawings();
         const newest = view.bars.length ? view.bars[view.bars.length - 1] : data[data.length - 1];
         updateLastPrice(newest.close);
 
@@ -322,30 +328,31 @@
           console.info(`chart: dropped ${view.dropped} closed-market filler bars`);
         }
 
-        if (cfg.endpoints.tickVolume && wsTickVolumeRevision === requestTickVolumeRevision) {
+        if (wsTickVolumeRevision === requestTickVolumeRevision) {
           try {
-            const tvBars = await fetchPublicJson(cfg.endpoints.tickVolume);
-            if (wsCandleRevision === requestCandleRevision &&
-                wsTickVolumeRevision === requestTickVolumeRevision && Array.isArray(tvBars)) {
-              for (const bar of tvBars) updateTickVolume(bar, "rest");
-            }
-          } catch {
-            // Non-fatal: the market WebSocket remains the primary feed.
-          }
+            const tickVolume = await App.api.fetchTickVolume();
+            if (App.node3 && App.node3.clearNode1Error) App.node3.clearNode1Error("tick-volume");
+            if (wsCandleRevision === requestCandleRevision && wsTickVolumeRevision === requestTickVolumeRevision) updateTickVolume(tickVolume, "rest");
+          } catch (error) { if (App.node3 && App.node3.reportNode1Error) App.node3.reportNode1Error("tick-volume", error.message); }
         }
       }
       setStatus("ready", "busy");
     } catch (error) {
       console.error("Market history load failed:", error);
+      if (App.node3 && App.node3.reportNode1Error) App.node3.reportNode1Error("candles", error.message);
       setStatus("history error", "error");
     } finally {
       historyFetchInProgress = false;
+      if (pendingInterval !== null) {
+        const nextInterval = pendingInterval; pendingInterval = null;
+        loadHistory(nextInterval);
+      }
     }
   }
 
   /** Live candle from the backend WebSocket (same shape as `/candles`). */
   function updateCandle(c) {
-    if (!c) return;
+    if (!c || (c.interval && c.interval !== activeInterval)) return;
     const time = toSec(c.time);
     if (time == null) return;
     const open = numberOrNull(c.open);
@@ -359,6 +366,7 @@
       low,
       close,
       volume: numberOrNull(c.volume) ?? 0,
+      closed: c.closed !== false,
     };
     if (open === null || high === null || low === null || close === null) {
       return;
@@ -373,6 +381,7 @@
       prev.high = Math.max(prev.high, candle.high);
       prev.low = Math.min(prev.low, candle.low);
       prev.close = candle.close;
+      prev.closed = candle.closed;
       if (c.volume != null) prev.volume = candle.volume;
     } else {
       candlesByTime.set(time, candle);
@@ -386,13 +395,15 @@
     for (const listener of candleListeners) {
       try { listener(displaySec, candle); } catch (error) { console.error("Chart candle listener failed:", error); }
     }
+    renderDrawings();
   }
 
   /** Live tick volume bar from Node 1, or a guarded /tick-volume snapshot. */
   function updateTickVolume(bar, source = "ws") {
     if (!bar) return;
-    const time = toSec(bar.time);
-    if (time == null) return;
+    const tickTime = toSec(bar.time ?? bar.last_tick);
+    if (tickTime == null) return;
+    const time = Math.floor(tickTime / axis.bucket) * axis.bucket;
 
     const ticks = numberOrNull(bar.ticks) ?? numberOrNull(bar.volume) ?? 0;
     if (source !== "rest") wsTickVolumeRevision += 1;
@@ -455,7 +466,35 @@
     delete priceLines[key];
   }
 
-  new ResizeObserver(() => chart.applyOptions(size())).observe(el);
+  let publishedDrawings = [];
+  const drawingCanvas = document.createElement("canvas");
+  drawingCanvas.setAttribute("aria-hidden", "true");
+  drawingCanvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3";
+  el.style.position = "relative";
+  el.appendChild(drawingCanvas);
+  function renderDrawings(items = publishedDrawings) {
+    publishedDrawings = Array.isArray(items) ? items : publishedDrawings;
+    const rect = el.getBoundingClientRect(), dpr = Math.max(1, window.devicePixelRatio || 1);
+    drawingCanvas.width = Math.max(1, Math.floor(rect.width * dpr)); drawingCanvas.height = Math.max(1, Math.floor(rect.height * dpr));
+    const ctx = drawingCanvas.getContext("2d"); ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,rect.width,rect.height);
+    const unique = new Map(); publishedDrawings.forEach((item) => unique.set(`${item.id}|${item.timeframe||""}`,item));
+    const profiles=[...unique.values()].filter((item)=>item.kind==="frvp"), maxVol=Math.max(1,...profiles.flatMap((item)=>(item.rows||[]).map((row)=>Number(row.volume)||0)));
+    const xFor=(timeMs,fallback)=>{const sec=Math.floor(Number(timeMs)/1000),display=axis.displayForReal(sec),x=display==null?null:chart.timeScale().timeToCoordinate(display);return x==null?fallback:x;};
+    const right=Math.max(0,rect.width-58);
+    for(const item of unique.values()){
+      if(item.kind==="frvp"){
+        const x0=xFor(item.start,0),x1=Math.min(right,xFor(item.end,right)),range=Math.max(24,Math.abs(x1-x0));
+        for(const row of item.rows||[]){const y1=series.priceToCoordinate(Number(row.high)),y2=series.priceToCoordinate(Number(row.low));if(y1==null||y2==null)continue;const total=Math.max(0,Number(row.volume)||0),w=Math.min(range,total/maxVol*range),up=Math.min(w,(Number(row.up_volume)||0)/maxVol*range),down=Math.min(w-up,(Number(row.down_volume)||0)/maxVol*range),y=Math.min(y1,y2),h=Math.max(1,Math.abs(y2-y1));ctx.fillStyle=item.color;ctx.globalAlpha=.25;ctx.fillRect(x1-w,y,w,h);ctx.globalAlpha=.95;ctx.fillRect(x1-w,y,up,h);ctx.globalAlpha=.55;ctx.fillRect(x1-w+up,y,down,h);ctx.globalAlpha=1;}
+      }else{const y=series.priceToCoordinate(Number(item.price));if(y==null)continue;const ray=item.timeframe==="daily"&&item.ray_from_time!=null,x0=ray?xFor(item.ray_from_time,0):xFor(item.start,0),x1=ray?right:xFor(item.end,right);ctx.beginPath();ctx.strokeStyle=item.color;ctx.lineWidth=1;ctx.setLineDash(item.line_style==="dotted"?[2,3]:[]);ctx.moveTo(Math.min(x0,x1),y);ctx.lineTo(Math.max(x0,x1),y);ctx.stroke();ctx.setLineDash([]);}
+    }
+    const forming=[...candlesByTime.values()].find((bar)=>bar.closed===false);
+    if(forming){const display=axis.displayFor(forming.time),x=display==null?null:chart.timeScale().timeToCoordinate(display),y1=series.priceToCoordinate(forming.open),y2=series.priceToCoordinate(forming.close);if(x!=null&&y1!=null&&y2!=null){ctx.save();ctx.strokeStyle=forming.close>=forming.open?COLOR_UP:COLOR_DOWN;ctx.setLineDash([3,2]);ctx.strokeRect(x-3,Math.min(y1,y2),6,Math.max(2,Math.abs(y2-y1)));ctx.restore();}}
+  }
+  function changeInterval(interval){if(!["1m","15m","1h"].includes(interval)||interval===activeInterval)return;activeInterval=interval;axis=App.axis.create({bucket:interval==="1m"?60:interval==="1h"?3600:900});candlesByTime.clear();series.setData([]);volumeSeries.setData([]);document.querySelectorAll("[data-interval]").forEach((button)=>{const selected=button.dataset.interval===interval;button.classList.toggle("active",selected);button.setAttribute("aria-pressed",String(selected));});loadHistory(interval);}
+  document.querySelectorAll("[data-interval]").forEach((button)=>button.addEventListener("click",()=>changeInterval(button.dataset.interval)));
+  new ResizeObserver(() => { chart.applyOptions(size()); renderDrawings(); }).observe(el);
+  chart.timeScale().subscribeVisibleLogicalRangeChange(() => renderDrawings());
+  chart.timeScale().subscribeVisibleTimeRangeChange(() => renderDrawings());
 
   App.chart = {
     series,
@@ -467,5 +506,6 @@
     removePriceLine,
     onReset,
     onCandleUpdate,
+    renderDrawings,
   };
 })((window.App = window.App || {}));

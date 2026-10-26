@@ -12,7 +12,7 @@
   "use strict";
 
   const cfg = App.config.socket;
-  const endpoint = App.config.endpoints.ws;
+  const endpoint = App.config.client.websocketUrl("node1");
   const topics = cfg.topics.slice();
   const handlers = Object.create(null);
   const stateListeners = new Set();
@@ -47,6 +47,7 @@
   let lastDataAt = null;
   let lastError = "";
   let receivedFrames = 0;
+  let lastSeq = null;
 
   function isOpen(candidate) {
     return !!(typeof WebSocket !== "undefined" && candidate &&
@@ -205,6 +206,7 @@
     candidate.onopen = () => {
       if (socket !== candidate) return;
       openedAt = Date.now();
+      lastSeq = null;
       phase = "live";
       lastMessageAt = null;
       lastError = "";
@@ -243,6 +245,11 @@
       lastMessageAt = Date.now();
       receivedFrames += 1;
       if (frame.type !== "heartbeat") lastDataAt = lastMessageAt;
+      if (frame.replay !== true && Number.isFinite(Number(frame.seq))) {
+        const sequence = Number(frame.seq);
+        if (lastSeq !== null && sequence > lastSeq + 1) dispatch({ type: "gap", data: { expected: lastSeq + 1, received: sequence } });
+        lastSeq = sequence;
+      }
       publish();
       dispatch(frame);
     };

@@ -1,31 +1,18 @@
-/* ============================================================
- * XAUUSD Terminal — read-only REST snapshots.
- *
- * Only GET requests exist in this dashboard. These routes send
- * `Cache-Control: no-store` server-side; the client also asks for no-store
- * and never sends a body, credential, or authorization header.
- * ============================================================ */
+/* Typed read-only route facade; transports and payload validation live in node2-client.js. */
 (function (App) {
   "use strict";
-
-  const { fetchPublicJson } = App.utils;
-
-  function fetchStrategy() {
-    return fetchPublicJson(App.config.endpoints.strategy, 8000);
-  }
-
-  function fetchDemo() {
-    return fetchPublicJson(App.config.endpoints.demo, 8000);
-  }
-
-  function fetchStatus() {
-    return fetchPublicJson(App.config.endpoints.status, 8000);
-  }
-
-  /** Node 4 `GET /diagnostics` — a bare `ExecutionSnapshot`, no envelope. */
-  function fetchExecutionDiagnostics() {
-    return fetchPublicJson(App.config.endpoints.executionDiagnostics, 8000);
-  }
-
-  App.api = { fetchStrategy, fetchDemo, fetchStatus, fetchExecutionDiagnostics };
+  const client = App.config.client;
+  App.api = {
+    fetchCandles: (interval) => client.node1.candles(interval),
+    fetchTickVolume: () => client.node1.tickVolume(),
+    fetchCalendar: () => client.node1.calendar(),
+    fetchStatus: () => client.node1.status(),
+    fetchHealth: () => client.node3.health(),
+    fetchLevels: () => client.node3.levels(),
+    fetchDrawings: () => client.node3.drawings(),
+    fetchVp: (query) => client.node3.vp(query),
+    fetchScanning: () => client.node3.scanning(),
+    fetchSignals: () => client.node3.signals(),
+    fetchDiagnostics: () => client.node3.diagnostics(),
+  };
 })((window.App = window.App || {}));

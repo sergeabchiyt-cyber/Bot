@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0B0E11" />
-  <meta name="description" content="Read-only XAUUSD terminal: market chart, Node 1 strategy decisions, the simulated demo account and Node 4 execution diagnostics." />
+  <meta name="description" content="Read-only XAUUSD dashboard with Node 1 market data and Node 3 published signals." />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>XAUUSD Terminal</title>
@@ -19,6 +19,9 @@
         <span class="socket-dot" aria-hidden="true"></span>
         <span class="socket-status-value">CONNECTING</span>
       </span>
+      <span id="node3-badge" class="socket-badge" data-state="connecting"><span class="socket-dot"></span><span id="node3-status">NODE 3 CONNECTING</span></span>
+      <span id="node1-freshness" class="socket-badge" data-state="connecting"><span class="socket-dot"></span><span id="node1-freshness-label">NODE 1 —</span></span>
+      <span id="node1-contract" class="socket-badge" data-state="offline">N1 contract —</span>
       <span id="delayed-badge" class="delayed-badge" hidden role="status" aria-live="polite">DELAYED</span>
       <span id="status" class="sr-only" aria-live="polite">Starting market data</span>
     </div>
@@ -38,32 +41,20 @@
     </div>
   </header>
 
-  <section id="demo-strip" class="demo-strip" aria-label="Demo paper account — simulated fills">
-    <div class="demo-id">
-      <span id="demo-mode" class="demo-mode">DEMO</span>
-      <span id="demo-spec" class="demo-spec tnum">—</span>
-      <span id="demo-engine" class="demo-engine" hidden>demo engine off</span>
-    </div>
-    <dl class="demo-stats">
-      <div class="demo-stat"><dt>Balance</dt><dd id="demo-balance" class="tnum">—</dd></div>
-      <div class="demo-stat"><dt>Equity</dt><dd id="demo-equity" class="tnum">—</dd></div>
-      <div class="demo-stat"><dt>Free margin</dt><dd id="demo-free-margin" class="tnum">—</dd></div>
-      <div class="demo-stat"><dt>Margin level</dt><dd id="demo-margin-level" class="tnum">—</dd></div>
-      <div class="demo-stat"><dt>Open PnL</dt><dd id="demo-open-pnl" class="tnum">—</dd></div>
-    </dl>
-    <span id="demo-updated" class="demo-updated">—</span>
+  <div id="connection-banner" class="dry-run-banner" hidden role="status" aria-live="polite"></div>
+  <section id="node3-summary-strip" class="demo-strip" aria-label="Node 3 scanning summary">
+    <div class="demo-id"><span class="demo-mode">NODE 3</span><span id="node3-summary-state" class="demo-spec tnum">CONNECTING</span></div>
+    <dl class="demo-stats" id="scan-summary"></dl>
+    <span id="node3-contract" class="demo-updated">Contract —</span>
   </section>
-
-  <div id="dry-run-banner" class="dry-run-banner" hidden role="status" aria-live="polite">
-    <span class="dry-run-tag">DRY RUN</span>
-    <span id="dry-run-text">Venue “none” — intents are recorded but no broker order is placed.</span>
-  </div>
 
   <div id="next-event" class="next-event" hidden aria-live="polite"></div>
 
   <nav class="tfbar" aria-label="Chart timeframe and level legend">
     <div class="tf-tabs" aria-label="Timeframe">
-      <span class="tf active tf-static" aria-current="true">15M</span>
+      <button class="tf" type="button" data-interval="1m">1M</button>
+      <button class="tf active" type="button" data-interval="15m" aria-pressed="true">15M</button>
+      <button class="tf" type="button" data-interval="1h">1H</button>
     </div>
     <div class="legend" aria-label="Chart legend">
       <span class="legend-item"><i class="swatch poc"></i>PW PoC</span>
@@ -73,112 +64,29 @@
       <span class="legend-item legend-cw"><i class="swatch cw-poc"></i>CW PoC</span>
       <span class="legend-item legend-cw"><i class="swatch cw-vah"></i>CW VaH</span>
       <span class="legend-item legend-cw"><i class="swatch cw-val"></i>CW VaL</span>
-      <span class="legend-item"><i class="swatch swing-bull-poc"></i>Bull Swing</span>
-      <span class="legend-item"><i class="swatch swing-bear-poc"></i>Bear Swing</span>
-      <span class="legend-sep" aria-hidden="true"></span>
-      <span class="legend-item"><i class="swatch pos-entry"></i>Entry</span>
-      <span class="legend-item"><i class="swatch pos-sl"></i>SL</span>
-      <span class="legend-item"><i class="swatch pos-tp"></i>TP</span>
     </div>
   </nav>
 
   <main class="layout">
-    <div id="chart" role="img" aria-label="XAUUSD candlestick chart with tick volume and demo position levels"></div>
+    <div id="chart" role="img" aria-label="XAUUSD candlestick chart with Node 3 published drawings"></div>
 
-    <aside class="sidebar" aria-label="Execution, strategy and demo account">
-      <section id="panel-exec-feed" class="panel panel-exec" aria-labelledby="exec-feed-title">
-        <header class="panel-head">
-          <span id="exec-feed-title" class="panel-title">Market data</span>
-          <span id="exec-feed-mode" class="panel-state">—</span>
-        </header>
-        <div id="exec-feed-body" class="panel-body">
-          <div class="empty">Loading Node 4 diagnostics…</div>
-        </div>
+    <aside class="sidebar" aria-label="Market data and Node 3 dashboard panels">
+      <section id="panel-market" class="panel panel-exec" aria-labelledby="market-title">
+        <header class="panel-head"><span id="market-title" class="panel-title">Market data</span><span id="market-state" class="panel-state">—</span></header>
+        <div id="market-body" class="panel-body"><div class="empty">Waiting for Node 1 status…</div></div>
       </section>
-
-      <section id="panel-exec-strategy" class="panel panel-exec" aria-labelledby="exec-strategy-title">
-        <header class="panel-head">
-          <span id="exec-strategy-title" class="panel-title">Local strategy</span>
-          <span id="exec-strategy-mode" class="panel-state">—</span>
-        </header>
-        <div id="exec-strategy-body" class="panel-body">
-          <div class="empty">Loading Node 4 diagnostics…</div>
-        </div>
+      <section id="panel-scanning" class="panel panel-strategy" aria-labelledby="scanning-title">
+        <header class="panel-head"><span id="scanning-title" class="panel-title">Setup scanner</span><span id="scanner-state" class="panel-state">CONNECTING</span></header>
+        <div id="setups-body" class="panel-body"><div class="empty">Waiting for Node 3 scanning…</div></div>
       </section>
-
-      <section id="panel-exec-venue" class="panel panel-exec" aria-labelledby="exec-venue-title">
-        <header class="panel-head">
-          <span id="exec-venue-title" class="panel-title">Execution venue</span>
-          <span id="exec-venue-mode" class="panel-state">—</span>
-        </header>
-        <div id="exec-venue-body" class="panel-body">
-          <div class="empty">Loading Node 4 diagnostics…</div>
-        </div>
+      <section id="panel-signals" class="panel" aria-labelledby="signals-title">
+        <header class="panel-head"><span id="signals-title" class="panel-title">Signals &amp; reports</span><span id="signals-count" class="panel-count">—</span></header>
+        <div id="signals-body" class="panel-body"><div class="empty">Waiting for Node 3 signals…</div></div>
       </section>
-
-      <section id="panel-exec-node3" class="panel panel-exec" aria-labelledby="exec-node3-title">
-        <header class="panel-head">
-          <span id="exec-node3-title" class="panel-title">Node 3 intent link</span>
-          <span id="exec-node3-mode" class="panel-state">—</span>
-        </header>
-        <div id="exec-node3-body" class="panel-body">
-          <div class="empty">Loading Node 4 diagnostics…</div>
-        </div>
-      </section>
-
-      <section id="panel-strategy" class="panel panel-strategy" aria-labelledby="strategy-title">
-        <header class="panel-head">
-          <span id="strategy-title" class="panel-title">Strategy</span>
-          <span id="strategy-state" class="panel-state">CONNECTING</span>
-        </header>
-        <div id="strategy-body" class="panel-body">
-          <div class="strat-skeleton" aria-busy="true">
-            <div class="skeleton-line w40"></div>
-            <div class="skeleton-line w70"></div>
-            <div class="skeleton-line w55"></div>
-          </div>
-          <div class="empty">Waiting for the first evaluation…</div>
-        </div>
-      </section>
-
-      <section id="panel-position" class="panel" aria-labelledby="position-title">
-        <header class="panel-head">
-          <span id="position-title" class="panel-title">Open position</span>
-          <span id="position-state" class="panel-state">—</span>
-        </header>
-        <div id="position-body" class="panel-body">
-          <div class="empty">Loading the demo account…</div>
-        </div>
-      </section>
-
-      <section id="panel-performance" class="panel" aria-labelledby="performance-title">
-        <header class="panel-head">
-          <span id="performance-title" class="panel-title">Performance</span>
-          <span class="panel-state">demo</span>
-        </header>
-        <div id="performance-body" class="panel-body">
-          <div class="empty">Waiting for demo statistics…</div>
-        </div>
-      </section>
-
-      <section id="panel-trades" class="panel" aria-labelledby="trades-title">
-        <header class="panel-head">
-          <span id="trades-title" class="panel-title">Trade history</span>
-          <span id="trades-count" class="panel-count">0</span>
-        </header>
-        <div id="trades-body" class="panel-body">
-          <div class="empty">No closed demo trades yet.</div>
-        </div>
-      </section>
-
       <section id="panel-levels" class="panel" aria-labelledby="levels-title">
-        <header class="panel-head">
-          <span id="levels-title" class="panel-title">Levels</span>
-          <span id="levels-count" class="panel-count">0</span>
-        </header>
-        <div id="levels-list" class="panel-body"><div class="empty">Awaiting Node 1 levels…</div></div>
+        <header class="panel-head"><span id="levels-title" class="panel-title">Levels</span><span id="levels-count" class="panel-count">0</span></header>
+        <div id="levels-list" class="panel-body"><div class="empty">Awaiting Node 3 levels…</div></div>
       </section>
-
       <section id="panel-calendar" class="panel" aria-labelledby="calendar-title">
         <header class="panel-head">
           <span id="calendar-title" class="panel-title">Impact</span>
@@ -189,6 +97,10 @@
           </div>
         </header>
         <div id="calendar-list" class="panel-body"><div class="empty">Loading calendar events…</div></div>
+      </section>
+      <section id="panel-diagnostics" class="panel" aria-labelledby="diagnostics-title">
+        <header class="panel-head"><span id="diagnostics-title" class="panel-title">Node 3 diagnostics</span><span id="diagnostics-state" class="panel-state">—</span></header>
+        <div id="diagnostics-body" class="panel-body"><div class="empty">Waiting for diagnostics…</div></div>
       </section>
     </aside>
   </main>
@@ -205,22 +117,21 @@
       <button id="settings-close" class="icon-btn" type="button" aria-label="Close status and settings">×</button>
     </header>
     <div id="settings-body" class="drawer-body">
-      <div class="empty">Loading /status…</div>
+      <div class="empty">Loading service status…</div>
     </div>
   </aside>
 
   <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
-  <!-- Optional host-only override can be placed before config.js:
-       <script>
-         window.XAUUSD_CONFIG = {
-           MARKET_HOST: "https://your-node1-host",
-           NODE4_HOST: "https://your-node4-host",
-         };
-       </script> -->
+  <script>
+    window.XAUUSD_CONFIG = window.XAUUSD_CONFIG || {
+      NODE1_BASE_URL: "https://engine-southeastasia-sng-main.onrender.com",
+      NODE3_BASE_URL: "https://strategy-api-vp-levels.onrender.com"
+    };
+  </script>
+  <script src="js/node2-client.js"></script>
   <script src="js/config.js"></script>
   <script src="js/normalize.js"></script>
   <script src="js/format.js"></script>
-  <script src="js/strategy-math.js"></script>
   <script src="js/utils.js"></script>
   <script src="js/api.js"></script>
   <script src="js/socket.js"></script>
@@ -228,11 +139,8 @@
   <script src="js/chart.js"></script>
   <script src="js/levels.js"></script>
   <script src="js/calendar.js"></script>
-  <script src="js/strategy.js"></script>
-  <script src="js/demo.js"></script>
-  <script src="js/overlays.js"></script>
   <script src="js/status.js"></script>
-  <script src="js/execution.js"></script>
+  <script src="js/node3-dashboard.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
