@@ -30,8 +30,24 @@ jobs:
       - name: Contract sync
         run: python3 ci/contract_sync.py
 
+      # `cargo fmt --check`. If the tree is off-style the job pushes the
+      # rustfmt output to the branch and fails: the fix is then a `git pull`,
+      # not a hand-transcribed diff (CI step logs are not always retrievable).
       - name: Formatting
-        run: cargo fmt --all -- --check
+        run: |
+          if cargo fmt --all -- --check; then
+            echo "tree is rustfmt-clean"
+            exit 0
+          fi
+          cargo fmt --all
+          git --no-pager diff --stat
+          git config user.email ci@example.invalid
+          git config user.name ci
+          git add -A
+          git commit -m "style: cargo fmt [skip ci]"
+          git push origin HEAD:${{ github.ref_name }}
+          echo "::error::rustfmt reformatted the tree — pull the 'style: cargo fmt' commit"
+          exit 1
 
       - name: Check
         id: check
@@ -40,18 +56,25 @@ jobs:
           cargo check --all-targets 2>&1 | tee /tmp/check.log
 
       - name: Save error log to branch
-        if: failure() && steps.check.outcome == 'failure'
+        if: failure() && (steps.check.outcome == 'failure' || steps.clippy.outcome == 'failure')
         run: |
           git config user.email ci@example.invalid
           git config user.name ci
           git fetch origin ${{ github.ref_name }}
           git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
-          tail -c 60000 /tmp/check.log > build-errors.log
+          {
+            echo '## cargo check'
+            tail -c 30000 /tmp/check.log 2>/dev/null || echo "(missing)"
+            echo
+            echo '## cargo clippy'
+            tail -c 30000 /tmp/clippy.log 2>/dev/null || echo "(missing)"
+          } > build-errors.log
           git add -f build-errors.log
           git commit -m "ci: build error log [skip ci]"
           git push origin ${{ github.ref_name }}
 
       - name: Clippy
+        id: clippy
         run: |
           set -o pipefail
           cargo clippy --all-targets -- -D warnings 2>&1 | tee /tmp/clippy.log
