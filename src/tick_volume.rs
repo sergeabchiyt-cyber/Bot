@@ -59,10 +59,13 @@ impl TickVolumeStore {
         buf.iter().cloned().collect()
     }
 
+    /// Test-only accessor: the feed counts bars from `snapshot()`.
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.inner.lock().unwrap_or_else(|e| e.into_inner()).len()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

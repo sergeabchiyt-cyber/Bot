@@ -205,7 +205,7 @@ mod tests {
     use crate::types::{Interval, SYMBOL, Sequencer};
     use tokio::sync::broadcast;
 
-    const T0: i64 = 1_700_000_100_000 - 1_700_000_100_000 % (15 * 60_000);
+    const T0: i64 = 1_700_000_123_000 - 1_700_000_123_000 % (15 * 60_000);
     const NOW: i64 = T0 + 3_600_000;
 
     fn tick(price: f64, ts: i64) -> String {

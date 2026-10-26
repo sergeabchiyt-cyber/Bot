@@ -73,11 +73,11 @@ pub fn current_session(now_ms: i64) -> Session {
     // before `now`, and a DST shift only moves it by an hour.
     for back in 0..=3 {
         let date = today - Duration::days(back);
-        if let Some(candidate) = anchor_ms(date, New_York) {
-            if candidate <= now_ms {
-                open_ms = Some(candidate);
-                break;
-            }
+        if let Some(candidate) = anchor_ms(date, New_York)
+            && candidate <= now_ms
+        {
+            open_ms = Some(candidate);
+            break;
         }
     }
     let open_ms = open_ms.unwrap_or(now_ms);
