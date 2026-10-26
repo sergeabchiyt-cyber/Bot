@@ -291,6 +291,10 @@ mod reconnect_tests {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Node 1 is reached over wss://. Select the ring provider explicitly; an error here only
+    // means a provider was already installed, which is fine.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
