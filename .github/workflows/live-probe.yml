@@ -18,6 +18,7 @@ on:
       - "ci/c1_schema.py"
       - "contracts/**"
       - ".github/workflows/live-probe.yml"
+      - "ci/diag_probe.py"
 
 permissions:
   contents: write
