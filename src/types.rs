@@ -473,7 +473,10 @@ mod tests {
         assert_eq!(Interval::parse("60m"), Some(Interval::H1));
         assert_eq!(Interval::parse("5m"), None);
         assert_eq!(Interval::parse(""), None);
-        assert_eq!([0, 1, 2], [Interval::M1, Interval::M15, Interval::H1].map(Interval::index));
+        assert_eq!(
+            [0, 1, 2],
+            [Interval::M1, Interval::M15, Interval::H1].map(Interval::index)
+        );
     }
 
     #[test]
@@ -531,12 +534,18 @@ mod tests {
         let live = serde_json::to_value(Publication::live("candle", 7, serde_json::json!({})))
             .expect("serialize live");
         assert_eq!(live["seq"], 7);
-        assert!(live.get("replay").is_none(), "live frame carries replay: {live}");
+        assert!(
+            live.get("replay").is_none(),
+            "live frame carries replay: {live}"
+        );
 
         let replay =
             serde_json::to_value(Publication::replay("candle", serde_json::json!({}))).unwrap();
         assert_eq!(replay["replay"], true);
-        assert!(replay.get("seq").is_none(), "replay frame carries seq: {replay}");
+        assert!(
+            replay.get("seq").is_none(),
+            "replay frame carries seq: {replay}"
+        );
 
         let beat = serde_json::to_value(Publication::heartbeat()).unwrap();
         assert_eq!(beat, serde_json::json!({ "type": "heartbeat" }));
@@ -649,11 +658,7 @@ mod tests {
     #[test]
     fn freshness_serializes_with_the_contract_state_names() {
         let wire = serde_json::to_value(Freshness::evaluate(
-            "sifting",
-            true,
-            1_000_000,
-            1_100_000,
-            false,
+            "sifting", true, 1_000_000, 1_100_000, false,
         ))
         .unwrap();
         assert_eq!(wire["state"], "closed_market");

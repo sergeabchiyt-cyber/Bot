@@ -115,7 +115,10 @@ mod tests {
         assert!(market_open(ny(2026, 10, 23, 16, 59)));
         assert!(!market_open(ny(2026, 10, 23, 17, 0)));
         assert!(!market_open(ny(2026, 10, 24, 12, 0)), "Saturday is closed");
-        assert!(!market_open(ny(2026, 10, 25, 12, 0)), "Sunday before 18:00 is closed");
+        assert!(
+            !market_open(ny(2026, 10, 25, 12, 0)),
+            "Sunday before 18:00 is closed"
+        );
     }
 
     #[test]

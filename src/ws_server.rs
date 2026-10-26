@@ -493,7 +493,13 @@ mod tests {
 
     const ALLOWED: &str = "https://static-dash-frontend.onrender.com";
     const FOREIGN: &str = "https://evil.example";
-    const REST_ROUTES: [&str; 5] = ["/health", "/status", "/candles", "/tick-volume", "/calendar"];
+    const REST_ROUTES: [&str; 5] = [
+        "/health",
+        "/status",
+        "/candles",
+        "/tick-volume",
+        "/calendar",
+    ];
 
     fn candle(interval: Interval, time: i64) -> Candle {
         Candle {
@@ -778,17 +784,16 @@ mod tests {
             body["boot_id"]
         );
         assert_eq!(body["freshness"]["feed"], "sifting");
-        let state = body["freshness"]["state"].as_str().expect("freshness state");
+        let state = body["freshness"]["state"]
+            .as_str()
+            .expect("freshness state");
         assert!(
             ["live", "stale", "offline", "closed_market"].contains(&state),
             "unexpected freshness state {state}"
         );
         assert!(body["market_open"].is_boolean());
         assert_eq!(body["session"]["anchor"], "18:00 America/New_York");
-        assert_eq!(
-            body["candles"]["intervals"]["1h"]["bars"].as_u64(),
-            Some(1)
-        );
+        assert_eq!(body["candles"]["intervals"]["1h"]["bars"].as_u64(), Some(1));
         assert!(body["candles"]["counters"]["accepted"].as_u64().is_some());
         assert!(body["feeds"].is_object());
         assert_eq!(body["ws"]["heartbeat_secs"], 30);
@@ -797,7 +802,14 @@ mod tests {
         for gone in ["volume_profile", "strategy", "demo", "ai"] {
             assert!(body.get(gone).is_none(), "{gone} must not be reported");
         }
-        for key in ["side", "stop_loss", "take_profit", "lots", "action", "venue"] {
+        for key in [
+            "side",
+            "stop_loss",
+            "take_profit",
+            "lots",
+            "action",
+            "venue",
+        ] {
             assert!(
                 !body.to_string().contains(&format!("\"{key}\"")),
                 "{key} leaked into /status"

@@ -171,7 +171,7 @@ impl BootInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{FreshnessState, FRESH_AGE_MS};
+    use crate::types::{FRESH_AGE_MS, FreshnessState};
 
     const NOW: i64 = 1_792_781_867_153;
 
@@ -268,6 +268,10 @@ mod tests {
         let boot = BootInfo::new(NOW);
         assert!(boot.boot_id.starts_with("boot-1792781867153-"));
         assert_eq!(boot.uptime_ms(NOW + 1_000), 1_000);
-        assert_eq!(boot.uptime_ms(1), 0, "a clock that steps back reads as zero");
+        assert_eq!(
+            boot.uptime_ms(1),
+            0,
+            "a clock that steps back reads as zero"
+        );
     }
 }

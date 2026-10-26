@@ -161,10 +161,7 @@ fn parse_tick(text: &str, symbol: &str) -> Option<(f64, i64, Option<f64>)> {
             warn!(
                 "Sifting server error frame: code={} message={}",
                 value.get("code").and_then(|c| c.as_str()).unwrap_or("?"),
-                value
-                    .get("message")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("?")
+                value.get("message").and_then(|m| m.as_str()).unwrap_or("?")
             );
             return None;
         }
@@ -177,16 +174,15 @@ fn parse_tick(text: &str, symbol: &str) -> Option<(f64, i64, Option<f64>)> {
     }
 
     // Prefer the last-trade price `p`, fall back to the bid/ask mid.
-    let price = value
-        .get("p")
-        .and_then(|v| v.as_f64())
-        .or_else(|| match (
+    let price = value.get("p").and_then(|v| v.as_f64()).or_else(|| {
+        match (
             value.get("b").and_then(|v| v.as_f64()),
             value.get("a").and_then(|v| v.as_f64()),
         ) {
             (Some(bid), Some(ask)) if bid > 0.0 && ask > 0.0 => Some((bid + ask) / 2.0),
             _ => None,
-        })?;
+        }
+    })?;
     let ts = value
         .get("t")
         .and_then(|v| v.as_i64())
@@ -206,7 +202,7 @@ mod tests {
     use crate::candles::DropReason;
     use crate::status::FreshnessTracker;
     use crate::tick_volume::TickVolumeStore;
-    use crate::types::{Interval, Sequencer, SYMBOL};
+    use crate::types::{Interval, SYMBOL, Sequencer};
     use tokio::sync::broadcast;
 
     const T0: i64 = 1_700_000_100_000 - 1_700_000_100_000 % (15 * 60_000);
@@ -308,14 +304,28 @@ mod tests {
     #[test]
     fn a_second_based_timestamp_is_counted_as_a_drop() {
         let (book, publisher, _store, status, _rx) = harness();
-        handle_text(&tick(3380.0, T0 / 1000), SYMBOL, &book, &publisher, &status, NOW);
+        handle_text(
+            &tick(3380.0, T0 / 1000),
+            SYMBOL,
+            &book,
+            &publisher,
+            &status,
+            NOW,
+        );
         assert_eq!(book.counters().seconds_timestamp, 1);
     }
 
     #[test]
     fn a_tick_ahead_of_the_clock_is_dropped() {
         let (book, publisher, _store, status, _rx) = harness();
-        handle_text(&tick(3380.0, NOW + 6_000), SYMBOL, &book, &publisher, &status, NOW);
+        handle_text(
+            &tick(3380.0, NOW + 6_000),
+            SYMBOL,
+            &book,
+            &publisher,
+            &status,
+            NOW,
+        );
         assert_eq!(book.counters().future, 1);
     }
 

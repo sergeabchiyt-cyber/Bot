@@ -133,7 +133,10 @@ mod tests {
     fn event() -> TickEvent {
         TickEvent {
             dropped: None,
-            closed: vec![candle(Interval::M1, 0, true), candle(Interval::M15, 0, true)],
+            closed: vec![
+                candle(Interval::M1, 0, true),
+                candle(Interval::M15, 0, true),
+            ],
             live: vec![
                 candle(Interval::M1, 60_000, false),
                 candle(Interval::M15, 60_000, false),
@@ -170,11 +173,24 @@ mod tests {
         assert_eq!(
             kinds,
             vec![
-                "candle", "candle", "tick_volume", "candle", "candle", "tick_volume"
+                "candle",
+                "candle",
+                "tick_volume",
+                "candle",
+                "candle",
+                "tick_volume"
             ]
         );
-        assert!(frames[0].data.as_ref().unwrap()["closed"].as_bool().unwrap());
-        assert!(!frames[3].data.as_ref().unwrap()["closed"].as_bool().unwrap());
+        assert!(
+            frames[0].data.as_ref().unwrap()["closed"]
+                .as_bool()
+                .unwrap()
+        );
+        assert!(
+            !frames[3].data.as_ref().unwrap()["closed"]
+                .as_bool()
+                .unwrap()
+        );
 
         let seqs: Vec<u64> = frames.iter().filter_map(|frame| frame.seq).collect();
         assert_eq!(seqs.len(), frames.len(), "every live frame is numbered");
@@ -258,7 +274,10 @@ mod tests {
         }
         match rx.try_recv() {
             Err(broadcast::error::TryRecvError::Lagged(dropped)) => {
-                assert!(dropped >= 3, "expected at least 3 lost frames, got {dropped}")
+                assert!(
+                    dropped >= 3,
+                    "expected at least 3 lost frames, got {dropped}"
+                )
             }
             other => panic!("expected Lagged, got {other:?}"),
         }

@@ -75,12 +75,7 @@ pub struct TickCounters {
 
 impl TickCounters {
     pub fn dropped(&self) -> u64 {
-        self.price
-            + self.timestamp
-            + self.seconds_timestamp
-            + self.future
-            + self.repeat
-            + self.late
+        self.price + self.timestamp + self.seconds_timestamp + self.future + self.repeat + self.late
     }
 
     fn record(&mut self, reason: DropReason) {
@@ -297,8 +292,11 @@ impl Series {
             rejected_invalid: 0,
             bars: 0,
         };
-        let mut by_time: BTreeMap<i64, Candle> =
-            self.bars.iter().map(|bar| (bar.time, bar.clone())).collect();
+        let mut by_time: BTreeMap<i64, Candle> = self
+            .bars
+            .iter()
+            .map(|bar| (bar.time, bar.clone()))
+            .collect();
         let before = by_time.len();
         for bar in bars {
             let aligned = bar.time > 0 && self.interval.align(bar.time) == bar.time;
@@ -460,12 +458,18 @@ impl CandleBook {
     }
 
     fn lock(&self) -> MutexGuard<'_, Book> {
-        self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Closed bars, oldest first. The forming bucket is never included.
     pub fn closed(&self, interval: Interval) -> Vec<Candle> {
-        self.lock().series[interval.index()].bars.iter().cloned().collect()
+        self.lock().series[interval.index()]
+            .bars
+            .iter()
+            .cloned()
+            .collect()
     }
 
     /// The last `limit` closed bars.
@@ -484,12 +488,18 @@ impl CandleBook {
 
     /// Newest closed bar's bucket-open time.
     pub fn edge(&self, interval: Interval) -> Option<i64> {
-        self.lock().series[interval.index()].bars.back().map(|bar| bar.time)
+        self.lock().series[interval.index()]
+            .bars
+            .back()
+            .map(|bar| bar.time)
     }
 
     /// Oldest retained bar's bucket-open time.
     pub fn origin(&self, interval: Interval) -> Option<i64> {
-        self.lock().series[interval.index()].bars.front().map(|bar| bar.time)
+        self.lock().series[interval.index()]
+            .bars
+            .front()
+            .map(|bar| bar.time)
     }
 
     pub fn counters(&self) -> TickCounters {
@@ -610,7 +620,9 @@ mod tests {
         let book = book();
         book.on_tick(3380.0, T0, None, NOW);
         assert!(book.closed(Interval::M1).is_empty());
-        let forming = book.forming(Interval::M1).expect("a bucket is being filled");
+        let forming = book
+            .forming(Interval::M1)
+            .expect("a bucket is being filled");
         assert!(!forming.closed);
         assert_eq!(forming.time, T0);
 
@@ -737,7 +749,10 @@ mod tests {
         forming.closed = false;
         let report = book.seed(Interval::M1, &[forming]);
         assert_eq!(report.accepted, 1);
-        assert!(book.closed(Interval::M1)[0].closed, "seed rows are always closed");
+        assert!(
+            book.closed(Interval::M1)[0].closed,
+            "seed rows are always closed"
+        );
     }
 
     #[test]

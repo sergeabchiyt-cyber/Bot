@@ -118,7 +118,12 @@ mod tests {
         let set = history(NOW);
         assert_eq!(set.len(), 3);
         for (interval, bars) in &set {
-            assert!(bars.len() >= 2_000, "{} has {} bars", interval.as_str(), bars.len());
+            assert!(
+                bars.len() >= 2_000,
+                "{} has {} bars",
+                interval.as_str(),
+                bars.len()
+            );
             assert!(bars.iter().all(|bar| bar.interval == interval.as_str()));
             assert!(bars.iter().all(|bar| bar.closed));
             assert!(bars.iter().all(Candle::is_valid));

@@ -218,8 +218,7 @@ async fn fetch_pages(
             PAGE_LIMIT,
             cursor.as_deref(),
         )?;
-        let (mut page, next_cursor) =
-            get_page(&client, url, api_key, symbol, interval).await?;
+        let (mut page, next_cursor) = get_page(&client, url, api_key, symbol, interval).await?;
         all.append(&mut page);
 
         match next_cursor.filter(|next| !next.is_empty()) {
@@ -250,7 +249,11 @@ pub async fn fetch_seed(
 ) -> Result<Vec<Candle>> {
     let end = Utc::now();
     let start = end - lookback(interval);
-    let order = if interval == Interval::M1 { "asc" } else { "desc" };
+    let order = if interval == Interval::M1 {
+        "asc"
+    } else {
+        "desc"
+    };
     let mut bars = fetch_pages(base_url, api_key, symbol, interval, start, end, order).await?;
 
     // The seed is bounded; keep the newest rows.
