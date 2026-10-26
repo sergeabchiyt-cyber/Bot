@@ -45,7 +45,7 @@ Failure has `accepted: false` and a non-secret `error`, then the socket closes.
   "type": "trade_intent",
   "data": {
     "schema_version": 1,
-    "intent_id": "n3-xauusd-1700000000000-buy-pw-poc",
+    "intent_id": "n3-2-0-0-1700000000000-buy-pw-poc",
     "strategy": "vp_break_retest_v1",
     "symbol": "XAUUSD",
     "side": "buy",
@@ -57,10 +57,30 @@ Failure has `accepted: false` and a non-secret `error`, then the socket closes.
     "level_name": "PW PoC",
     "source_candle_time": 1700000000000,
     "created_at": 1700000000100,
-    "expires_at": 1700000120100
+    "expires_at": 1700000120100,
+    "atr": 2.8,
+    "atr_pips": 280.0,
+    "level_id": "PW_POC",
+    "drawing_id": "PW:poc:1699000000000:1700000000000",
+    "strategy_version": "2.0.0"
   }
 }
 ```
+
+Fields added in Node 3 v2 are optional and additive. Schema 1 consumers that
+ignore unknown fields keep working:
+
+| Field | Meaning |
+|---|---|
+| `atr`, `atr_pips` | Wilder ATR(14) in price units and pips (1 pip = $0.01) at decision time |
+| `level_id` | Stable level identity, for example `PW_POC` |
+| `drawing_id` | Identity of the drawn level, `WINDOW:kind:start:end` |
+| `strategy_version` | Rule version. Bumped on every rule change, so intents from different logic never share an id |
+| `volume_confirmed` | Present and `true` only when the optional volume gate was enabled and passed. Absent when the gate is off (default) |
+
+`stop_loss` and `take_profit` are ATR-derived, clamped to 200–300 and 600–800
+pips, and kept within `risk_reward` 2–3. Node 3 never sets a lot size, stake,
+or account value. Node 4 owns sizing.
 
 The intent deliberately contains no venue, account, stake, lots, leverage,
 slippage, MT5 login, or broker credential. Strategy stop/target prices are hard
@@ -72,6 +92,12 @@ execution report/audit ledger.
 
 `intent_id` is the idempotency key across Node 3, Node 4, the MT5 bridge, EA
 comment, reconciliation, and audit logs.
+
+Node 3 derives it from the rule version, source bar time, side, and level:
+`n3-<strategy_version>-<source_candle_time>-<side>-<level_id>`, for example
+`n3-2-0-0-1700000000000-buy-pw-poc`. The same confirmed retest always produces
+the same id, including after a reconnect or replay. Node 3 also suppresses a
+second emission of an id it has already emitted.
 
 Node 4 must perform these steps in order:
 
@@ -96,9 +122,9 @@ persists/deduplicates the ID.
   "type": "execution_report",
   "data": {
     "schema_version": 1,
-    "intent_id": "n3-xauusd-1700000000000-buy-pw-poc",
+    "intent_id": "n3-2-0-0-1700000000000-buy-pw-poc",
     "status": "filled",
-    "venue": "deriv_mt5_demo",
+    "venue": "node4-venue-label",
     "symbol": "XAUUSD",
     "side": "buy",
     "timestamp": 1700000001400,
@@ -130,7 +156,7 @@ Node 3 answers every syntactically valid report attempt:
 ```json
 {
   "type": "execution_report_ack",
-  "intent_id": "n3-xauusd-1700000000000-buy-pw-poc",
+  "intent_id": "n3-2-0-0-1700000000000-buy-pw-poc",
   "accepted": true
 }
 ```

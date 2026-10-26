@@ -1,14 +1,21 @@
 mod config;
 mod diagnostics;
+mod drawings;
+mod feed;
 mod health;
+mod intent;
+mod market;
+mod ny;
 mod risk;
+mod store;
 mod strategy;
 mod types;
+mod vp;
 
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use tokio::time::sleep;
+use tokio::time::{interval, sleep};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{error, info, warn};
@@ -16,70 +23,272 @@ use tracing_subscriber::EnvFilter;
 
 use config::Config;
 use diagnostics::DiagnosticsHub;
+use feed::{FeedEvent, FeedValidator};
 use risk::RiskProjector;
-use strategy::StrategyEngine;
-use types::{TradeIntent, WsFrame, INTENT_SCHEMA_VERSION};
+use strategy::{ScanContext, StrategyEngine, Trigger};
+use types::ScanningSnapshot;
 
-fn intent_component(value: &str) -> String {
-    value
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
+/// Pause before reconnecting to Node 1 after any disconnect or violation.
+const RECONNECT_DELAY: Duration = Duration::from_secs(5);
+/// How often the pipeline refreshes profiles, silence state, and scanning.
+const REFRESH_EVERY: Duration = Duration::from_secs(5);
+
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
 }
 
-fn build_intent(
+/// Strategy and risk state. It lives across Node 1 reconnects so break and
+/// retest state is not reset by a dropped socket.
+struct Pipeline {
+    config: Config,
+    engine: StrategyEngine,
+    risk: RiskProjector,
+    /// Newest closed strategy-interval bar that was evaluated. Guards against
+    /// evaluating the same bar twice after a reconnect.
+    last_evaluated: Option<i64>,
+}
+
+impl Pipeline {
+    fn new(config: Config) -> Self {
+        let risk = RiskProjector::new(&config);
+        Self {
+            config,
+            engine: StrategyEngine::default(),
+            risk,
+            last_evaluated: None,
+        }
+    }
+
+    async fn sync_levels(&mut self, hub: &DiagnosticsHub) {
+        self.engine.sync_levels(&hub.market_levels().await);
+    }
+
+    async fn scanning(&self, hub: &DiagnosticsHub) -> ScanningSnapshot {
+        let (tradeable, freshness_state) = hub.trading_state().await;
+        self.engine.scanning(
+            &self.risk,
+            &ScanContext {
+                tradeable,
+                freshness_state: &freshness_state,
+                strategy_interval: &self.config.strategy_interval,
+                volume_threshold: self.config.volume_threshold,
+                timestamp: now_ms(),
+            },
+        )
+    }
+
+    async fn handle(&mut self, hub: &DiagnosticsHub, event: FeedEvent) {
+        match event {
+            FeedEvent::Candle {
+                interval: bar_interval,
+                candle,
+                closed,
+                is_new,
+                replay,
+                freshness,
+            } => {
+                hub.record_freshness(&freshness).await;
+                hub.record_bar(bar_interval, &candle, closed, is_new, replay).await;
+                if !closed {
+                    return;
+                }
+                if hub.recompute_market(now_ms()).await {
+                    self.sync_levels(hub).await;
+                }
+                if bar_interval != self.config.strategy_interval {
+                    return;
+                }
+
+                // Only a new, live, open-market bar may trigger. Replays and
+                // stale or closed-market bars only feed ATR history.
+                let fresh_enough = self
+                    .last_evaluated
+                    .is_none_or(|last| candle.time > last);
+                let evaluate = !replay && is_new && freshness.tradeable() && fresh_enough;
+                if !evaluate {
+                    self.engine.seed(&candle);
+                    self.risk.update_atr(self.engine.atr());
+                    return;
+                }
+
+                self.last_evaluated = Some(candle.time);
+                let report = self
+                    .engine
+                    .evaluate(&candle, self.config.volume_threshold);
+                self.risk.update_atr(self.engine.atr());
+                let scanning = self.scanning(hub).await;
+                let triggered: Option<Trigger> = report.triggered.clone();
+                hub.record_evaluation(scanning, &report).await;
+                if let Some(trigger) = triggered {
+                    self.emit(hub, &trigger).await;
+                }
+            }
+            FeedEvent::TickVolume {
+                ticks,
+                last_tick_ms,
+                freshness,
+            } => {
+                hub.record_freshness(&freshness).await;
+                hub.record_tick_volume(ticks, last_tick_ms).await;
+            }
+            FeedEvent::Calendar { items, freshness } => {
+                hub.record_freshness(&freshness).await;
+                hub.record_calendar(items).await;
+            }
+            FeedEvent::Status { freshness } => hub.record_freshness(&freshness).await,
+            FeedEvent::Heartbeat | FeedEvent::Ignored => {}
+        }
+    }
+
+    /// Periodic work: silence detection, profile refresh, and scanning state.
+    async fn refresh(&mut self, hub: &DiagnosticsHub) {
+        let now = now_ms();
+        hub.check_silence(now).await;
+        if hub.recompute_market(now).await {
+            self.sync_levels(hub).await;
+        }
+        let scanning = self.scanning(hub).await;
+        hub.record_scanning(scanning).await;
+    }
+
+    /// Turn a confirmed retest into an intent. Node 3 never sizes or places the order.
+    async fn emit(&self, hub: &DiagnosticsHub, trigger: &Trigger) {
+        let Some(projection) = self.risk.projection() else {
+            warn!("Retest confirmed on {} but ATR is not ready; no intent", trigger.level_name);
+            return;
+        };
+        let Some(order) = self.risk.order(trigger.reference_price, trigger.side) else {
+            warn!(
+                "Retest confirmed on {} but risk bands cannot be met; no intent",
+                trigger.level_name
+            );
+            return;
+        };
+        let intent = intent::build_intent(&intent::IntentInputs {
+            trigger,
+            order: &order,
+            projection,
+            volume_gate: self.config.volume_filter_enabled(),
+            ttl_secs: self.config.signal_ttl_secs,
+            now_ms: now_ms(),
+        });
+        info!(
+            "Strategy confirmed {} at {:.2} on {}; emitting intent {} for Node 4",
+            trigger.side, trigger.reference_price, trigger.level_name, intent.intent_id
+        );
+        if !hub.record_intent(intent).await {
+            warn!("Intent was not emitted (duplicate or pending queue full)");
+        }
+    }
+}
+
+/// One Node 1 connection. Returns the reason it ended.
+async fn feed_session(
     config: &Config,
-    risk: &RiskProjector,
-    side: &str,
-    reference_price: f64,
-    level_name: &str,
-    source_candle_time: i64,
-) -> TradeIntent {
-    let (stop_loss, take_profit, _, _, risk_reward) = risk.compute_details(reference_price, side);
-    let created_at = chrono::Utc::now().timestamp_millis();
-    TradeIntent {
-        schema_version: INTENT_SCHEMA_VERSION,
-        intent_id: format!(
-            "n3-xauusd-{}-{}-{}",
-            source_candle_time,
-            side,
-            intent_component(level_name)
-        ),
-        strategy: "vp_break_retest_v1".into(),
-        symbol: "XAUUSD".into(),
-        side: side.into(),
-        order_type: "market".into(),
-        reference_price,
-        stop_loss,
-        take_profit,
-        risk_reward,
-        level_name: level_name.into(),
-        source_candle_time,
-        created_at,
-        expires_at: created_at + (config.signal_ttl_secs as i64 * 1_000),
+    hub: &DiagnosticsHub,
+    pipeline: &mut Pipeline,
+    reconnect: bool,
+) -> String {
+    info!("Connecting to Node 1 WS at {}", config.node1_ws_url);
+    let (mut ws, _) = match connect_async(&config.node1_ws_url).await {
+        Ok(connection) => connection,
+        Err(error) => return format!("connection failed: {error}"),
+    };
+    hub.set_node1_state(true, "connected", reconnect).await;
+
+    // Node 1 contract v2. The subscription names only the topics Node 3 uses.
+    // It never subscribes to Node 1 `levels`, which Node 3 does not trust.
+    let subscription = serde_json::json!({
+        "type": "subscribe",
+        "contract_version": feed::CONTRACT_VERSION,
+        "topics": ["candle", "tick_volume", "calendar", "status"],
+    });
+    if let Err(error) = ws.send(Message::Text(subscription.to_string().into())).await {
+        return format!("subscribe failed: {error}");
+    }
+
+    // Split so the read and write halves never share one mutable borrow.
+    let (mut sink, mut stream) = ws.split();
+    let mut validator = FeedValidator::default();
+    let mut tick = interval(REFRESH_EVERY);
+    tick.tick().await;
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {
+                pipeline.refresh(hub).await;
+            }
+            message = stream.next() => {
+                match message {
+                    Some(Ok(Message::Text(text))) => {
+                        hub.record_ws_message().await;
+                        match validator.accept(&text) {
+                            Ok(FeedEvent::Heartbeat) => {
+                                let heartbeat = Message::Text(r#"{"type":"heartbeat"}"#.into());
+                                let _ = sink.send(heartbeat).await;
+                            }
+                            Ok(event) => pipeline.handle(hub, event).await,
+                            Err(reason) => {
+                                // Fail closed: drop the connection and never trade on this frame.
+                                error!("Node 1 contract violation: {reason}");
+                                hub.record_violation(&reason).await;
+                                return format!("contract violation: {reason}");
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Ping(payload))) => {
+                        hub.record_ws_message().await;
+                        let _ = sink.send(Message::Pong(payload)).await;
+                    }
+                    Some(Ok(Message::Close(_))) | None => return "closed by Node 1".into(),
+                    Some(Err(error)) => return format!("stream error: {error}"),
+                    Some(Ok(_)) => {}
+                }
+            }
+        }
+    }
+}
+
+async fn feed_loop(config: Config, hub: DiagnosticsHub) {
+    let mut pipeline = Pipeline::new(config.clone());
+    let mut attempts: u64 = 0;
+    loop {
+        let reason = feed_session(&config, &hub, &mut pipeline, attempts > 0).await;
+        warn!("Node 1 feed ended: {reason}; reconnecting in {}s", RECONNECT_DELAY.as_secs());
+        // A violation keeps its own record; this only marks the stream down.
+        hub.set_node1_state(false, &reason, false).await;
+        attempts += 1;
+        sleep(RECONNECT_DELAY).await;
     }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .init();
 
     let config = Config::from_env();
-    info!("Starting Node 3 (strategy-only service)");
+    for warning in &config.warnings {
+        warn!("config: {warning}");
+    }
+    info!("Starting Node 3 (strategy-only service, v{})", env!("CARGO_PKG_VERSION"));
     info!("Node 1 market stream: {}", config.node1_ws_url);
     info!("HTTP/public WS/private execution port: {}", config.port);
+    info!(
+        "Week anchor {}; PS mode {}; CW first publish {}; VA {:.0}%; {} rows",
+        config.week_anchor,
+        config.ps_mode.as_str(),
+        config.cw_first_publish,
+        config.va_pct * 100.0,
+        config.vp_rows
+    );
+    if config.volume_filter_enabled() {
+        info!("Volume gate enabled at {:.0}", config.volume_threshold);
+    } else {
+        info!("Volume gate disabled (VOLUME_THRESHOLD=0)");
+    }
     if !config.node4_link_configured() {
         warn!(
             "NODE4_SHARED_TOKEN is not configured: the strategy will run and queue intents, but Node 4 cannot connect"
@@ -88,156 +297,8 @@ async fn main() -> anyhow::Result<()> {
 
     let hub = DiagnosticsHub::new(&config);
     tokio::spawn(health::serve(config.clone(), hub.clone()));
-
-    info!(
-        "Strategy: volume >= {:.0}, SL {:.0}-{:.0} pips, TP {:.0}-{:.0} pips, RR {:.1}-{:.1}, intent TTL {}s",
-        config.volume_threshold,
-        config.sl_min_pips,
-        config.sl_max_pips,
-        config.tp_min_pips,
-        config.tp_max_pips,
-        config.rr_min,
-        config.rr_max,
-        config.signal_ttl_secs
-    );
-
-    let mut risk = RiskProjector::new(config.clone());
-    let mut strategy = StrategyEngine::new();
-    let mut first_attempt = true;
-
-    loop {
-        info!("Connecting to Node 1 WS at {}", config.node1_ws_url);
-        hub.set_node1_state(
-            false,
-            if first_attempt {
-                "connecting"
-            } else {
-                "reconnecting"
-            },
-            !first_attempt,
-        )
-        .await;
-        first_attempt = false;
-
-        match connect_async(&config.node1_ws_url).await {
-            Ok((mut ws, _)) => {
-                info!("Connected to Node 1 market-data stream");
-                hub.set_node1_state(true, "connected", false).await;
-                let subscription = serde_json::json!({
-                    "type": "subscribe",
-                    "topics": ["candle", "levels"]
-                });
-                if let Err(error) = ws
-                    .send(Message::Text(subscription.to_string().into()))
-                    .await
-                {
-                    error!("Failed to subscribe to Node 1: {error}");
-                    hub.set_node1_state(false, "subscribe_error", false).await;
-                    sleep(Duration::from_secs(3)).await;
-                    continue;
-                }
-
-                while let Some(message) = ws.next().await {
-                    match message {
-                        Ok(Message::Text(text)) => {
-                            hub.record_ws_message().await;
-                            let Ok(frame) = serde_json::from_str::<WsFrame>(&text) else {
-                                continue;
-                            };
-                            match frame {
-                                WsFrame::Levels { data } => {
-                                    strategy.update_levels(&data);
-                                    let scanning = strategy
-                                        .build_scanning_snapshot(&risk, config.volume_threshold);
-                                    hub.record_levels_update(
-                                        &data.window,
-                                        data.poc,
-                                        data.vah,
-                                        data.val,
-                                        scanning,
-                                    )
-                                    .await;
-                                }
-                                WsFrame::Candle { data } => {
-                                    let report = strategy.evaluate_candle_with_diagnostics(
-                                        &data,
-                                        config.volume_threshold,
-                                    );
-                                    let atr = strategy.calculate_atr();
-                                    risk.update_atr(atr);
-                                    let (_, _, sl_pips, tp_pips, risk_reward) =
-                                        risk.compute_details(data.close, "buy");
-                                    let scanning = strategy
-                                        .build_scanning_snapshot(&risk, config.volume_threshold);
-                                    hub.record_candle_update(
-                                        &data,
-                                        atr,
-                                        sl_pips,
-                                        tp_pips,
-                                        risk_reward,
-                                        strategy.candle_history.len(),
-                                        report.breaks_detected,
-                                        report.breaks_invalidated,
-                                        report.retests_rejected_low_volume,
-                                        report.signals_confirmed,
-                                        report.events,
-                                        scanning,
-                                    )
-                                    .await;
-
-                                    if let Some((side, price, level_name)) = report.triggered {
-                                        let intent = build_intent(
-                                            &config,
-                                            &risk,
-                                            side,
-                                            price,
-                                            &level_name,
-                                            data.time,
-                                        );
-                                        info!(
-                                            "Strategy confirmed {} at {:.2} on {}; emitting intent {} for Node 4",
-                                            side, price, level_name, intent.intent_id
-                                        );
-                                        if !hub.record_intent(intent).await {
-                                            error!(
-                                                "Intent was not emitted because the bounded pending queue is full"
-                                            );
-                                        }
-                                    }
-                                }
-                                WsFrame::Heartbeat => {
-                                    let _ = ws
-                                        .send(Message::Text(r#"{"type":"heartbeat"}"#.into()))
-                                        .await;
-                                }
-                                _ => {}
-                            }
-                        }
-                        Ok(Message::Ping(payload)) => {
-                            hub.record_ws_message().await;
-                            let _ = ws.send(Message::Pong(payload)).await;
-                        }
-                        Ok(Message::Close(_)) => {
-                            warn!("Node 1 closed the market-data stream");
-                            hub.set_node1_state(false, "disconnected", false).await;
-                            break;
-                        }
-                        Err(error) => {
-                            error!("Node 1 WebSocket error: {error}");
-                            hub.set_node1_state(false, "stream_error", false).await;
-                            break;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Err(error) => {
-                warn!("Failed to connect to Node 1: {error}; retrying in 5 seconds");
-                hub.set_node1_state(false, "connection_failed", false).await;
-            }
-        }
-        sleep(Duration::from_secs(5)).await;
-    }
+    feed_loop(config, hub).await;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -245,13 +306,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn intent_id_is_deterministic_and_contains_no_credentials() {
-        let config = Config::default();
-        let risk = RiskProjector::new(config.clone());
-        let intent = build_intent(&config, &risk, "buy", 2_650.25, "PW PoC", 1_700_000_000_000);
-        assert_eq!(intent.intent_id, "n3-xauusd-1700000000000-buy-pw-poc");
-        assert_eq!(intent.symbol, "XAUUSD");
-        assert!(intent.stop_loss < intent.reference_price);
-        assert!(intent.take_profit > intent.reference_price);
+    fn pipeline_starts_without_levels_or_atr() {
+        let pipeline = Pipeline::new(Config::default());
+        assert!(pipeline.engine.atr().is_none());
+        assert!(pipeline.risk.projection().is_none());
+        assert!(pipeline.last_evaluated.is_none());
     }
 }
