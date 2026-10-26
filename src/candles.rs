@@ -266,6 +266,10 @@ impl Series {
                     Ok(index) => self.bars[index] = bar,
                     Err(index) => self.bars.insert(index, bar),
                 }
+                // An out-of-order insert can leave the series one row over
+                // capacity. Trim from the front, so the newest bar is never
+                // the one that goes.
+                self.trim();
             }
             _ => {
                 self.bars.push_back(bar);
@@ -764,7 +768,18 @@ mod tests {
         let times: Vec<i64> = series.bars.iter().map(|b| b.time).collect();
         assert_eq!(times, vec![T0 + 2 * M15, T0 + 3 * M15, T0 + 4 * M15]);
 
-        // ...and a late bar lands in its own slot instead of the tail.
+        // A late bar stays bounded too: it takes its own slot (front, not the
+        // tail) and the oldest row — here, itself — is what gets evicted.
+        series.push(bar(Interval::M15, T0 + M15));
+        let times: Vec<i64> = series.bars.iter().map(|b| b.time).collect();
+        assert_eq!(times, vec![T0 + 2 * M15, T0 + 3 * M15, T0 + 4 * M15]);
+    }
+
+    #[test]
+    fn a_late_bar_takes_its_own_slot_when_there_is_room() {
+        let mut series = Series::new(Interval::M15, 4);
+        series.push(bar(Interval::M15, T0 + 2 * M15));
+        series.push(bar(Interval::M15, T0 + 3 * M15));
         series.push(bar(Interval::M15, T0 + M15));
         let times: Vec<i64> = series.bars.iter().map(|b| b.time).collect();
         assert_eq!(times, vec![T0 + M15, T0 + 2 * M15, T0 + 3 * M15]);
