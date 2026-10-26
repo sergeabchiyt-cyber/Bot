@@ -330,10 +330,16 @@ fn check_symbol(data: &Value) -> Result<(), String> {
     }
 }
 
-fn validate_candle(candle: &VpCandle) -> Result<(), String> {
-    let finite = [candle.open, candle.high, candle.low, candle.close, candle.volume]
-        .iter()
-        .all(|value| value.is_finite());
+pub(crate) fn validate_candle(candle: &VpCandle) -> Result<(), String> {
+    let finite = [
+        candle.open,
+        candle.high,
+        candle.low,
+        candle.close,
+        candle.volume,
+    ]
+    .iter()
+    .all(|value| value.is_finite());
     if !finite
         || candle.time <= 0
         || candle.low <= 0.0
@@ -404,7 +410,14 @@ mod tests {
         let first = validator
             .accept(&candle_frame(2, "15m", 900_000, true))
             .expect("first candle");
-        assert!(matches!(first, FeedEvent::Candle { is_new: true, replay: false, .. }));
+        assert!(matches!(
+            first,
+            FeedEvent::Candle {
+                is_new: true,
+                replay: false,
+                ..
+            }
+        ));
         let repeat = validator
             .accept(&candle_frame(3, "15m", 900_000, true))
             .expect("repeat candle");
@@ -435,7 +448,14 @@ mod tests {
         let open = validator
             .accept(&candle_frame(2, "1m", 60_000, false))
             .expect("open candle");
-        assert!(matches!(open, FeedEvent::Candle { closed: false, is_new: false, .. }));
+        assert!(matches!(
+            open,
+            FeedEvent::Candle {
+                closed: false,
+                is_new: false,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -469,12 +489,18 @@ mod tests {
         validator
             .accept(&candle_frame(5, "1m", 60_000, true))
             .expect("candle");
-        assert!(validator
-            .accept(&candle_frame(5, "1m", 120_000, true))
-            .is_err(), "duplicate seq");
-        assert!(validator
-            .accept(&candle_frame(4, "1m", 180_000, true))
-            .is_err(), "out of order");
+        assert!(
+            validator
+                .accept(&candle_frame(5, "1m", 120_000, true))
+                .is_err(),
+            "duplicate seq"
+        );
+        assert!(
+            validator
+                .accept(&candle_frame(4, "1m", 180_000, true))
+                .is_err(),
+            "out of order"
+        );
     }
 
     #[test]
@@ -625,7 +651,9 @@ mod tests {
     fn heartbeat_needs_no_fields() {
         let mut validator = FeedValidator::default();
         assert!(matches!(
-            validator.accept(r#"{"type":"heartbeat"}"#).expect("heartbeat"),
+            validator
+                .accept(r#"{"type":"heartbeat"}"#)
+                .expect("heartbeat"),
             FeedEvent::Heartbeat
         ));
     }

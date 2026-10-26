@@ -3,6 +3,7 @@ mod diagnostics;
 mod drawings;
 mod feed;
 mod health;
+mod history;
 mod intent;
 mod market;
 mod ny;
@@ -186,6 +187,32 @@ impl Pipeline {
     }
 }
 
+/// Load closed history over REST, record it, and rebuild the levels from it.
+///
+/// Every resolution is fetched and validated before any bar is recorded, so a
+/// failure leaves the store as it was. The strategy interval also seeds ATR.
+async fn load_history(
+    config: &Config,
+    hub: &DiagnosticsHub,
+    pipeline: &mut Pipeline,
+) -> Result<(), String> {
+    let base = history::rest_base(&config.node1_ws_url)?;
+    let loaded = history::fetch_all(&base).await?;
+    for (interval, bars) in &loaded {
+        for bar in bars {
+            hub.record_bar(interval, bar, true, true, true).await;
+            if *interval == config.strategy_interval {
+                pipeline.engine.seed(bar);
+            }
+        }
+        info!("Loaded {} closed {interval} bars from Node 1 history", bars.len());
+    }
+    hub.recompute_market(now_ms()).await;
+    pipeline.sync_levels(hub).await;
+    pipeline.risk.update_atr(pipeline.engine.atr());
+    Ok(())
+}
+
 /// One Node 1 connection. Returns the reason it ended.
 async fn feed_session(
     config: &Config,
@@ -209,6 +236,13 @@ async fn feed_session(
     });
     if let Err(error) = ws.send(Message::Text(subscription.to_string().into())).await {
         return format!("subscribe failed: {error}");
+    }
+
+    // Subscribed. Live frames queue in the socket while history loads, so none are lost.
+    // The subscription also replays recent bars, which the store dedupes by open time.
+    if let Err(reason) = load_history(config, hub, pipeline).await {
+        error!("Node 1 history load failed: {reason}");
+        return format!("history load failed: {reason}");
     }
 
     // Split so the read and write halves never share one mutable borrow.
