@@ -707,7 +707,8 @@ not a table row
             get(|| async { (StatusCode::FORBIDDEN, "blocked").into_response() }),
         );
         let base = spawn_mock(router).await;
-        let source = CalendarSource::with_urls_and_sifting(vec![format!("{base}/broken.json")], None);
+        let source =
+            CalendarSource::with_urls_and_sifting(vec![format!("{base}/broken.json")], None);
         let status = FeedStatus::new();
         let err = source.fetch(None, &status).await.unwrap_err();
         assert!(err.to_string().contains("all calendar sources failed"));

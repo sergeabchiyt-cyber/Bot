@@ -78,10 +78,7 @@ async fn seed_history(config: &Config, book: &CandleBook) {
                 ),
             }
 
-            if interval != Interval::M1
-                && book.bars(interval) == 0
-                && book.bars(Interval::M1) > 0
-            {
+            if interval != Interval::M1 && book.bars(interval) == 0 && book.bars(Interval::M1) > 0 {
                 let minutes = book.closed(Interval::M1);
                 let folded = candles::fold_closed_from_minutes(&minutes, interval, now_ms());
                 if !folded.is_empty() {

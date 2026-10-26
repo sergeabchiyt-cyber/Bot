@@ -572,8 +572,6 @@ fn has_valid_values(candle: &Candle) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use axum::{
         Json, Router,
         extract::Query,
@@ -582,6 +580,8 @@ mod tests {
         routing::get,
     };
     use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn url_for(interval: Interval) -> String {
         history_url(
