@@ -1,0 +1,7 @@
+"use strict";
+const test=require("node:test");const assert=require("node:assert/strict");const fs=require("node:fs");const path=require("node:path");const root=path.join(__dirname,"..");
+const html=fs.readFileSync(path.join(root,"index.html"),"utf8");
+const active=["js/node2-client.js","js/config.js","js/api.js","js/socket.js","js/chart.js","js/levels.js","js/calendar.js","js/status.js","js/node3-dashboard.js","js/app.js"].map(f=>fs.readFileSync(path.join(root,f),"utf8")).join("\n");
+test("the original terminal shell and chart library remain in use",()=>{assert.match(html,/<title>XAUUSD Terminal<\/title>/);assert.match(html,/id="chart"/);assert.match(html,/lightweight-charts@4\.2\.0/);assert.match(html,/data-interval="1m"/);assert.match(html,/data-interval="15m"/);assert.match(html,/data-interval="1h"/);});
+test("active dashboard has no Node 4 execution route, secrets, or local endpoint",()=>{assert.doesNotMatch(active,/\/execution(?:\b|[?])/i);assert.doesNotMatch(active,/NODE4_SHARED_TOKEN|Bearer\s+[A-Za-z0-9._-]+/);assert.doesNotMatch(active,/(?:https?:\/\/|wss?:\/\/)(?:localhost|127\.0\.0\.1)(?::|\/)/i);});
+test("only contract topics are subscribed and route traffic is GET-only",()=>{assert.match(active,/topics:\s*\["candle", "tick_volume", "calendar", "status"\]/);assert.match(active,/\["levels","drawing","vp","scanning","signals","diagnostics"\]/);assert.match(fs.readFileSync(path.join(root,"js/node2-client.js"),"utf8"),/method:\s*"GET"/);assert.doesNotMatch(active,/method:\s*"(?:POST|PUT|PATCH|DELETE)"/);});

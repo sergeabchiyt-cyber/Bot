@@ -16,7 +16,7 @@
 (function (App) {
   "use strict";
 
-  const { $, escapeHtml, toMs, fetchPublicJson } = App.utils;
+  const { $, escapeHtml, toMs } = App.utils;
   const format = App.format;
   const normalisePayload = App.normalize;
   const cfg = App.config.calendar;
@@ -188,14 +188,15 @@
 
   // ---------- REST ----------
   async function fetchAll() {
-    const endpoint = App.config.endpoints.calendar;
-    if (fetchInProgress || !endpoint) return;
+    if (fetchInProgress) return;
     fetchInProgress = true;
     const requestRevision = wsRevision;
     try {
-      const payload = await fetchPublicJson(endpoint);
+      const payload = await App.api.fetchCalendar();
+      if (App.node3 && App.node3.clearNode1Error) App.node3.clearNode1Error("calendar");
       if (wsRevision === requestRevision) ingest(payload, "rest");
     } catch (error) {
+      if (App.node3 && App.node3.reportNode1Error) App.node3.reportNode1Error("calendar", error.message);
       console.error("Market calendar snapshot failed:", error);
     } finally {
       fetchInProgress = false;
