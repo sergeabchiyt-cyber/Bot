@@ -46,7 +46,9 @@ pub struct Config {
     /// Override the direct calendar feed URL (defaults to the ForexFactory
     /// weekly export). Set empty to rely on the defaults.
     pub calendar_url: Option<String>,
-    /// Use the browser MCP server as a fallback when the direct feed fails.
+    /// Use the browser MCP server as a fallback when direct/API calendar feeds
+    /// fail. Auto-enabled only when `MCP_BROWSER_URL` is configured (or when
+    /// `CALENDAR_USE_MCP` explicitly turns it on).
     pub calendar_use_mcp: bool,
 
     /// CI/offline only: seed a deterministic synthetic series when no upstream
@@ -83,24 +85,27 @@ fn env_u64(key: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
-/// tri-state feed switch: FEED_X=on|off|auto (auto = on only when its
-/// credentials exist, or always-on for keyless public feeds).
-fn env_switch(key: &str, has_credentials: bool) -> bool {
-    match env::var(key)
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
+fn tri_state_switch(raw: Option<&str>, has_credentials: bool) -> bool {
+    match raw.unwrap_or_default().trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "on" | "yes" => true,
         "0" | "false" | "off" | "no" => false,
         _ => has_credentials, // auto
     }
 }
 
+/// tri-state feed switch: FEED_X=on|off|auto (auto = on only when its
+/// credentials exist, or always-on for keyless public feeds).
+fn env_switch(key: &str, has_credentials: bool) -> bool {
+    let value = env::var(key).ok();
+    tri_state_switch(value.as_deref(), has_credentials)
+}
+
 impl Config {
     pub fn from_env() -> Self {
         let sifting_api_key = env_opt("SIFTING_API_KEY").unwrap_or_default();
         let has_sifting_key = !sifting_api_key.is_empty();
+        let mcp_url = env_opt("MCP_BROWSER_URL");
+        let has_mcp_url = mcp_url.is_some();
 
         Self {
             port: env::var("PORT")
@@ -119,12 +124,12 @@ impl Config {
                 DEFAULT_CORS_ALLOWED_ORIGIN,
             )),
 
-            mcp_browser_url: env_str("MCP_BROWSER_URL", "http://localhost:3001"),
+            mcp_browser_url: mcp_url.unwrap_or_else(|| "http://localhost:3001".to_string()),
             mcp_browser_token: env_opt("MCP_BROWSER_TOKEN"),
             mcp_scrape_secs: env_u64("MCP_SCRAPE_SECS", 900).max(60),
 
             calendar_url: env_opt("CALENDAR_URL"),
-            calendar_use_mcp: env_bool("CALENDAR_USE_MCP", true),
+            calendar_use_mcp: env_switch("CALENDAR_USE_MCP", has_mcp_url),
 
             seed_synthetic_candles: env_bool("SEED_SYNTHETIC_CANDLES", false),
         }
@@ -176,5 +181,24 @@ mod tests {
     fn the_calendar_poll_cannot_be_configured_below_a_minute() {
         // A zero interval would busy-loop the ForexFactory feed into a ban.
         assert!(Config::from_env().mcp_scrape_secs >= 60);
+    }
+
+    #[test]
+    fn mcp_fallback_is_auto_enabled_only_when_mcp_url_is_configured() {
+        assert!(!tri_state_switch(None, false));
+        assert!(tri_state_switch(None, true));
+        assert!(tri_state_switch(Some("auto"), true));
+        assert!(!tri_state_switch(Some("auto"), false));
+        assert!(tri_state_switch(Some("1"), false));
+        assert!(!tri_state_switch(Some("0"), true));
+
+        if std::env::var_os("MCP_BROWSER_URL").is_none()
+            && std::env::var_os("CALENDAR_USE_MCP").is_none()
+        {
+            assert!(
+                !Config::from_env().calendar_use_mcp,
+                "bare deployments without MCP_BROWSER_URL must not probe localhost:3001"
+            );
+        }
     }
 }

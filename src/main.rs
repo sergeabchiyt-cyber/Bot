@@ -73,9 +73,26 @@ async fn seed_history(config: &Config, book: &CandleBook) {
                     fill_tail(config, book, interval).await;
                 }
                 Err(error) => warn!(
-                    "SiftingIO {} history unavailable: {error}",
+                    "SiftingIO {} history unavailable: {error:#}",
                     interval.as_str()
                 ),
+            }
+
+            if interval != Interval::M1 && book.bars(interval) == 0 && book.bars(Interval::M1) > 0 {
+                let minutes = book.closed(Interval::M1);
+                let folded = candles::fold_closed_from_minutes(&minutes, interval, now_ms());
+                if !folded.is_empty() {
+                    let report = book.seed(interval, &folded);
+                    info!(
+                        "Folded {} {} bars from seeded 1m history ({} rejected)",
+                        report.bars,
+                        interval.as_str(),
+                        report.rejected()
+                    );
+                    if report.bars > 0 {
+                        seeded = true;
+                    }
+                }
             }
         }
     }
@@ -106,7 +123,8 @@ async fn fill_tail(config: &Config, book: &CandleBook, interval: Interval) {
         return;
     };
     let lag_ms = now_ms() - edge;
-    if lag_ms <= 30 * 60_000 {
+    let threshold_ms = (2 * interval.millis()).max(30 * 60_000);
+    if lag_ms < threshold_ms {
         return;
     }
 
@@ -197,10 +215,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // ---------- Economic calendar ----------
-    // Direct ForexFactory weekly feed (no browser needed); the browser MCP
-    // server is only used as a fallback when the feed fails.
+    // Direct ForexFactory weekly feed first, SiftingIO economic calendar API
+    // second when keyed, and an external MCP browser third only if configured.
     {
-        let source = Arc::new(calendar::CalendarSource::new(config.calendar_url.clone()));
+        let source = Arc::new(calendar::CalendarSource::with_sifting(
+            config.calendar_url.clone(),
+            Some(config.sifting_hist_url.clone()),
+            Some(config.sifting_api_key.clone()),
+        ));
         let mcp = if config.calendar_use_mcp {
             Some(Arc::new(mcp_client::McpClient::new(
                 config.mcp_browser_url.clone(),
@@ -215,13 +237,11 @@ async fn main() -> anyhow::Result<()> {
         let interval_secs = config.mcp_scrape_secs;
         feed_status.set("calendar", "starting");
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+            let mut populated = false;
             loop {
-                // Ticks immediately on the first pass, so the calendar is
-                // populated at boot instead of after the first interval.
-                interval.tick().await;
                 match source.fetch(mcp.as_deref(), &feed_status).await {
                     Ok((events, origin)) => {
+                        populated = true;
                         let payload = serde_json::json!({
                             "source": origin,
                             "count": events.len(),
@@ -231,8 +251,14 @@ async fn main() -> anyhow::Result<()> {
                         *cache.write().await = payload.clone();
                         publisher.publish_calendar(payload);
                     }
-                    Err(error) => warn!("Calendar update failed: {error}"),
+                    Err(error) => warn!("Calendar update failed: {error:#}"),
                 }
+                let wait_secs = if populated {
+                    interval_secs
+                } else {
+                    interval_secs.min(60)
+                };
+                tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
             }
         });
     }

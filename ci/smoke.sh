@@ -138,14 +138,28 @@ for INTERVAL in 1m 15m 1h; do
   echo
 done
 
-echo "--- /candles interval handling ---"
+echo "--- /candles interval and limit handling ---"
 CODE=$(curl -s -o /tmp/bad-interval.json -w '%{http_code}' "$BASE/candles?interval=5m")
 [ "$CODE" = "400" ] || fail "/candles?interval=5m returned $CODE, expected 400"
 grep -q '"contract_version":"2.0"' /tmp/bad-interval.json \
   || fail "the 400 body does not name the contract version: $(cat /tmp/bad-interval.json)"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/candles?interval=60m")
 [ "$CODE" = "200" ] || fail "/candles?interval=60m returned $CODE, expected 200 (1h synonym)"
-echo "  ?interval=5m -> 400 (names contract_version), ?interval=60m -> 200"
+CODE=$(curl -s -o /tmp/bad-limit.json -w '%{http_code}' "$BASE/candles?interval=1m&limit=0")
+[ "$CODE" = "400" ] || fail "/candles?interval=1m&limit=0 returned $CODE, expected 400"
+grep -q '"contract_version":"2.0"' /tmp/bad-limit.json \
+  || fail "the limit 400 body does not name the contract version: $(cat /tmp/bad-limit.json)"
+curl -sf "$BASE/candles?interval=1m&limit=10" -o /tmp/candles-1m-limit10.json \
+  || fail "/candles?interval=1m&limit=10 request failed"
+python3 - "$PAYLOADS/candles-1m.json" /tmp/candles-1m-limit10.json <<'PY' || fail "/candles?limit=10 mismatch"
+import json, sys
+full = json.load(open(sys.argv[1]))
+tail = json.load(open(sys.argv[2]))
+assert len(full) >= 7200, f"expected full 1m history (>=7200), got {len(full)}"
+assert len(tail) == 10, f"expected 10 bars with limit=10, got {len(tail)}"
+assert tail == full[-10:], "limit=10 did not return the exact last 10 closed bars"
+PY
+echo "  ?interval=5m -> 400, ?interval=60m -> 200, ?interval=1m&limit=10 -> last 10 closed bars, ?limit=0 -> 400"
 
 echo
 echo "--- /tick-volume ---"

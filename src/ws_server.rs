@@ -130,6 +130,8 @@ async fn health() -> &'static str {
 ///
 /// `interval` defaults to `15m` (the chart's original contract) and rejects
 /// anything else with a 400 instead of silently serving another resolution.
+/// Optional `limit` returns only the newest `N` closed bars (still ascending);
+/// omitting `limit` serves the full retained series unchanged.
 async fn candles_snapshot(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
@@ -150,7 +152,22 @@ async fn candles_snapshot(
             }
         },
     };
-    let bars: Vec<Candle> = state.candles.closed(interval);
+    let bars: Vec<Candle> = match params.get("limit") {
+        None => state.candles.closed(interval),
+        Some(raw) => match raw.trim().parse::<std::num::NonZeroUsize>() {
+            Ok(limit) => state.candles.recent(interval, limit.get()),
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": "limit must be a positive integer",
+                        "contract_version": CONTRACT_VERSION,
+                    })),
+                )
+                    .into_response();
+            }
+        },
+    };
     ([(header::CACHE_CONTROL, "no-store")], Json(bars)).into_response()
 }
 
@@ -943,5 +960,200 @@ mod tests {
 
         assert!(good.is_ok());
         assert!(bad.is_err());
+    }
+
+    #[tokio::test]
+    async fn candles_limit_returns_last_n_closed_bars_and_preserves_default() {
+        const {
+            assert!(
+                CAPACITY_M1 >= 43_200,
+                "full 1m retention must remain intact"
+            );
+            assert!(
+                BROADCAST_CAPACITY >= 4_096,
+                "broadcast buffer must stay at least 4096"
+            );
+        }
+
+        let (tx, _rx) = broadcast::channel(64);
+        let mut config = Config::from_env();
+        config.cors_allowed_origin = ALLOWED.to_string();
+        let store = TickVolumeStore::new(16);
+        let book = CandleBook::new();
+        let base_t = 1_700_000_100_000 - 1_700_000_100_000 % 3_600_000;
+        let seeded: Vec<Candle> = (0..5_i64)
+            .map(|i| candle(Interval::M1, base_t + i * 60_000))
+            .collect();
+        book.seed(Interval::M1, &seeded);
+        // Add a live forming bucket at base_t + 5m to ensure `/candles` never returns it.
+        book.on_tick(3384.0, base_t + 5 * 60_000, None, base_t + 6 * 60_000);
+
+        let router = router(AppState {
+            publisher: MarketPublisher::new(
+                tx,
+                Sequencer::new(),
+                store.clone(),
+                FreshnessTracker::new("sifting"),
+            ),
+            candles: book,
+            tick_volume: store,
+            calendar: Arc::new(RwLock::new(serde_json::json!({
+                "source": "ff_json",
+                "count": 0,
+                "events": [],
+                "updated": base_t
+            }))),
+            status: FeedStatus::new(),
+            freshness: FreshnessTracker::new("sifting"),
+            boot: Arc::new(BootInfo::new(base_t)),
+            config,
+        });
+
+        // Default `/candles?interval=1m` returns all 5 closed bars.
+        let full = body_json(
+            router
+                .clone()
+                .oneshot(build("GET", "/candles?interval=1m", None))
+                .await
+                .expect("full response"),
+        )
+        .await;
+        let full_arr = full.as_array().expect("array");
+        assert_eq!(full_arr.len(), 5);
+        assert_eq!(full_arr[0]["time"], base_t);
+        assert_eq!(full_arr[4]["time"], base_t + 4 * 60_000);
+
+        // `?limit=2` returns the newest 2 closed bars in ascending order.
+        let tail = body_json(
+            router
+                .clone()
+                .oneshot(build("GET", "/candles?interval=1m&limit=2", None))
+                .await
+                .expect("limit=2 response"),
+        )
+        .await;
+        let tail_arr = tail.as_array().expect("array");
+        assert_eq!(tail_arr.len(), 2);
+        assert_eq!(tail_arr[0]["time"], base_t + 3 * 60_000);
+        assert_eq!(tail_arr[1]["time"], base_t + 4 * 60_000);
+        assert!(tail_arr.iter().all(|c| c["closed"] == true));
+
+        // `?limit=99` caps cleanly at available closed bars.
+        let capped = body_json(
+            router
+                .clone()
+                .oneshot(build("GET", "/candles?interval=1m&limit=99", None))
+                .await
+                .expect("limit=99 response"),
+        )
+        .await;
+        assert_eq!(capped.as_array().unwrap().len(), 5);
+
+        // Malformed or non-positive `limit` returns 400 with contract_version.
+        for bad in ["0", "-3", "abc", ""] {
+            let uri = format!("/candles?interval=1m&limit={bad}");
+            let resp = router
+                .clone()
+                .oneshot(build("GET", &uri, None))
+                .await
+                .expect("bad limit response");
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{uri}");
+            let err_body = body_json(resp).await;
+            assert_eq!(err_body["contract_version"], CONTRACT_VERSION, "{uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn ws_broadcast_overflow_emits_gap_frame_over_the_socket() {
+        let (tx, _rx) = broadcast::channel(4);
+        let mut config = Config::from_env();
+        config.cors_allowed_origin = ALLOWED.to_string();
+        let store = TickVolumeStore::new(16);
+        let book = CandleBook::new();
+        let base_t = 1_700_000_100_000 - 1_700_000_100_000 % 3_600_000;
+        book.seed(Interval::M15, &[candle(Interval::M15, base_t)]);
+
+        let publisher = MarketPublisher::new(
+            tx,
+            Sequencer::new(),
+            store.clone(),
+            FreshnessTracker::new("sifting"),
+        );
+
+        let app = router(AppState {
+            publisher: publisher.clone(),
+            candles: book.clone(),
+            tick_volume: store,
+            calendar: Arc::new(RwLock::new(serde_json::json!({
+                "source": "ff_json",
+                "count": 0,
+                "events": [],
+                "updated": base_t
+            }))),
+            status: FeedStatus::new(),
+            freshness: FreshnessTracker::new("sifting"),
+            boot: Arc::new(BootInfo::new(base_t)),
+            config,
+        });
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws"))
+            .await
+            .expect("ws connect");
+        ws.send(tokio_tungstenite::tungstenite::Message::Text(
+            r#"{"type":"subscribe","topics":["candle"],"intervals":["15m"]}"#.into(),
+        ))
+        .await
+        .expect("send subscribe");
+
+        // Drain the replay burst through the closing replay `status` frame.
+        loop {
+            let msg = ws.next().await.expect("frame").expect("ws message");
+            if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
+                let frame: serde_json::Value = serde_json::from_str(&text).expect("json");
+                if frame["type"] == "status" && frame["replay"] == true {
+                    break;
+                }
+            }
+        }
+
+        // Overflow the 4-slot broadcast ring buffer without reading from `ws`.
+        for step in 1..=10_i64 {
+            let ev = book.on_tick(
+                3380.0 + step as f64 * 0.1,
+                base_t + 900_000 + step * 1_000,
+                None,
+                base_t + 1_800_000,
+            );
+            publisher.publish_tick(&ev);
+        }
+
+        // Next read must deliver a `gap` control frame reporting the lost frames.
+        let mut saw_gap = false;
+        for _ in 0..16 {
+            let msg = tokio::time::timeout(Duration::from_secs(5), ws.next())
+                .await
+                .expect("timeout waiting for gap")
+                .expect("stream open")
+                .expect("ws frame");
+            if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
+                let frame: serde_json::Value = serde_json::from_str(&text).expect("json");
+                if frame["type"] == "gap" {
+                    assert!(frame["data"]["dropped"].as_u64().unwrap_or(0) > 0);
+                    assert!(frame.get("seq").is_none());
+                    assert!(frame.get("replay").is_none());
+                    saw_gap = true;
+                    break;
+                }
+            }
+        }
+        assert!(saw_gap, "overflow must emit a gap frame");
     }
 }
