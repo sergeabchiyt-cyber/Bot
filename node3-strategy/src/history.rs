@@ -118,7 +118,7 @@ async fn fetch_interval(
 ) -> Result<Vec<VpCandle>, String> {
     let url = candles_url(base, interval);
     let response = client
-        .get(&url)
+        .get(url)
         .send()
         .await
         .map_err(|error| format!("{interval}: request failed: {error}"))?;
