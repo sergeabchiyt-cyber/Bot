@@ -539,6 +539,48 @@ impl Default for CandleBook {
     }
 }
 
+/// Fold closed 1-minute candles into completed coarse buckets (`15m` or `1h`).
+///
+/// Any bucket whose close boundary (`bucket + interval.millis()`) has not yet
+/// passed `now_ms` is excluded so `/candles` never receives a partial period.
+pub fn fold_closed_from_minutes(
+    minutes: &[Candle],
+    interval: Interval,
+    now_ms: i64,
+) -> Vec<Candle> {
+    let mut sorted: Vec<&Candle> = minutes.iter().collect();
+    sorted.sort_by_key(|bar| bar.time);
+
+    let mut folded: Vec<Candle> = Vec::new();
+    for bar in sorted {
+        let bucket = interval.align(bar.time);
+        if bucket + interval.millis() > now_ms {
+            continue;
+        }
+        match folded.last_mut() {
+            Some(last) if last.time == bucket => {
+                last.high = last.high.max(bar.high);
+                last.low = last.low.min(bar.low);
+                last.close = bar.close;
+                last.volume += bar.volume;
+            }
+            _ => folded.push(Candle {
+                symbol: bar.symbol.clone(),
+                interval: interval.as_str().to_string(),
+                time: bucket,
+                open: bar.open,
+                high: bar.high,
+                low: bar.low,
+                close: bar.close,
+                volume: bar.volume,
+                source: bar.source.clone(),
+                closed: true,
+            }),
+        }
+    }
+    folded
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -822,5 +864,52 @@ mod tests {
             + counters.repeat
             + counters.late;
         assert_eq!(dropped_by_reason, 5);
+    }
+
+    #[test]
+    fn tick_volume_ticks_equal_sum_of_1m_volumes_over_full_15m_bucket() {
+        let book = book();
+        for minute in 0..15_i64 {
+            let tick_count = (minute % 4) + 1;
+            for offset in 0..tick_count {
+                let ts = T0 + minute * M1 + offset * 1_000;
+                let price = 3380.0 + minute as f64 * 0.25 + offset as f64 * 0.05;
+                assert!(book.on_tick(price, ts, None, NOW).accepted());
+            }
+        }
+        let roll = book.on_tick(3385.0, T0 + M15, None, NOW);
+        let closed_tv = roll.tick_volume_closed.expect("closed 15m tick volume");
+        let closed_15m = book.closed(Interval::M15);
+        let closed_1m = book.closed(Interval::M1);
+
+        assert_eq!(closed_15m.len(), 1);
+        assert_eq!(closed_1m.len(), 15);
+        let sum_1m: f64 = closed_1m.iter().map(|c| c.volume).sum();
+        assert_eq!(closed_tv.ticks as f64, closed_15m[0].volume);
+        assert_eq!(closed_tv.ticks as f64, sum_1m);
+    }
+
+    #[test]
+    fn folded_coarse_bars_exclude_incomplete_current_bucket() {
+        let mut minutes = Vec::new();
+        for i in 0..20_i64 {
+            let mut m = bar(Interval::M1, T0 + i * M1);
+            m.open = 3380.0 + i as f64;
+            m.high = m.open + 1.0;
+            m.low = m.open - 0.5;
+            m.close = m.open + 0.25;
+            m.volume = 10.0;
+            minutes.push(m);
+        }
+        // At T0 + 20m, [T0, T0+15m) is closed; [T0+15m, T0+30m) is still open.
+        let folded = fold_closed_from_minutes(&minutes, Interval::M15, T0 + 20 * M1);
+        assert_eq!(folded.len(), 1);
+        assert_eq!(folded[0].time, T0);
+        assert_eq!(folded[0].open, 3380.0);
+        assert_eq!(folded[0].high, 3395.0);
+        assert_eq!(folded[0].low, 3379.5);
+        assert_eq!(folded[0].close, 3394.25);
+        assert_eq!(folded[0].volume, 150.0);
+        assert!(folded[0].closed);
     }
 }

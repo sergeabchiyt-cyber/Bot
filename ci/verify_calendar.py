@@ -8,7 +8,7 @@ print("source:", cal.get("source"), "| count:", cal.get("count"))
 
 events = cal.get("events", [])
 assert cal.get("count", 0) > 0 and events, f"calendar is EMPTY: {cal}"
-assert cal.get("source") in {"ff_json", "mcp_browser"}, f"unknown calendar source {cal.get('source')!r}"
+assert cal.get("source") in {"ff_json", "sifting", "mcp_browser"}, f"unknown calendar source {cal.get('source')!r}"
 assert isinstance(cal.get("updated"), int) and cal["updated"] > 0, f"no fetch timestamp: {cal.get('updated')!r}"
 
 print("--- first 15 events ---")
