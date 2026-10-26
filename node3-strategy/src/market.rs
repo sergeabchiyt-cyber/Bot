@@ -340,7 +340,9 @@ mod tests {
                 Some(64),
             )
             .expect("custom");
-        assert_eq!(custom.rows, 64);
+        // The span is about 1.00 (4149.6..4150.6). 1.00 / 64 rows is 1.56 cents, so row
+        // heights snap to whole ticks: 2 cents gives 50 rows, the closest achievable count.
+        assert_eq!(custom.rows, 50);
         assert_eq!(custom.window, "CUSTOM");
         assert_eq!(book.levels(), before);
         assert!(book.audit_with_rows("PW", 32, now).is_some());
