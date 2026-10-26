@@ -291,7 +291,7 @@ async fn get_page(
             .await
         {
             Ok(resp) => resp,
-            Err(err) if attempt < MAX_RETRIES => {
+            Err(_err) if attempt < MAX_RETRIES => {
                 let delay = StdDuration::from_millis(250 * (1_u64 << attempt));
                 tokio::time::sleep(delay).await;
                 continue;

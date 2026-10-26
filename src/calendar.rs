@@ -313,6 +313,7 @@ pub struct CalendarSource {
 }
 
 impl CalendarSource {
+    #[cfg(test)]
     pub fn new(primary: Option<String>) -> Self {
         Self::with_sifting(primary, None, None)
     }

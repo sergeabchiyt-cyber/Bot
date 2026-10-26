@@ -964,14 +964,16 @@ mod tests {
 
     #[tokio::test]
     async fn candles_limit_returns_last_n_closed_bars_and_preserves_default() {
-        assert!(
-            CAPACITY_M1 >= 43_200,
-            "full 1m retention must remain intact"
-        );
-        assert!(
-            BROADCAST_CAPACITY >= 4_096,
-            "broadcast buffer must stay at least 4096"
-        );
+        const {
+            assert!(
+                CAPACITY_M1 >= 43_200,
+                "full 1m retention must remain intact"
+            );
+            assert!(
+                BROADCAST_CAPACITY >= 4_096,
+                "broadcast buffer must stay at least 4096"
+            );
+        }
 
         let (tx, _rx) = broadcast::channel(64);
         let mut config = Config::from_env();
