@@ -959,7 +959,7 @@ mod tests {
         assert!(json.get("scanning").is_none(), "no market state in Node 4");
         assert!(json.get("market_feed").is_none(), "no feed state in Node 4");
         assert!(json.get("strategy").is_none(), "no strategy state in Node 4");
-        assert!(json.get("risk").is_object());
+        assert!(json["risk"].is_object(), "risk block is always present");
     }
 
     #[tokio::test]

@@ -98,7 +98,7 @@ pub struct RiskSnapshot {
     pub updated_at_ms: i64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct RiskState {
     day_key: i64,
     open_positions: usize,
@@ -116,27 +116,6 @@ struct RiskState {
     updated_at_ms: i64,
 }
 
-impl Default for RiskState {
-    fn default() -> Self {
-        Self {
-            day_key: 0,
-            open_positions: 0,
-            exposure_lots: 0.0,
-            daily_pnl_usd: 0.0,
-            realised_pnl_usd: 0.0,
-            current_equity_usd: 0.0,
-            peak_equity_usd: 0.0,
-            consecutive_losses: 0,
-            cooldown_until_ms: None,
-            intents_checked: 0,
-            intents_rejected: 0,
-            last_rejection_code: None,
-            last_rejection_message: None,
-            updated_at_ms: 0,
-        }
-    }
-}
-
 impl RiskState {
     fn roll_day(&mut self, now_ms: i64) {
         let day = now_ms / MS_PER_DAY;
@@ -145,6 +124,115 @@ impl RiskState {
             self.daily_pnl_usd = 0.0;
         }
     }
+}
+
+/// Pure, state-free price-band checks. A violation is a refusal, never an edit.
+fn price_refusal(l: &RiskLimits, intent: &TradeIntent, lots: f64) -> Option<(String, String)> {
+    let entry = intent.reference_price;
+    let sl_price = (entry - intent.stop_loss).abs();
+    let tp_price = (intent.take_profit - entry).abs();
+    let sl_pips = sl_price / l.pip_value;
+    let tp_pips = tp_price / l.pip_value;
+    let implied_rr = if sl_pips > 0.0 { tp_pips / sl_pips } else { 0.0 };
+    let risk_usd = sl_price * lots.max(0.0) * l.contract_size;
+
+    if !(l.sl_min_pips - BAND_EPS..=l.sl_max_pips + BAND_EPS).contains(&sl_pips) {
+        return Some((
+            "risk_sl_out_of_band".into(),
+            format!(
+                "stop {sl_pips:.1} pips is outside the {:.0}-{:.0} pip band",
+                l.sl_min_pips, l.sl_max_pips
+            ),
+        ));
+    }
+    if !(l.tp_min_pips - BAND_EPS..=l.tp_max_pips + BAND_EPS).contains(&tp_pips) {
+        return Some((
+            "risk_tp_out_of_band".into(),
+            format!(
+                "target {tp_pips:.1} pips is outside the {:.0}-{:.0} pip band",
+                l.tp_min_pips, l.tp_max_pips
+            ),
+        ));
+    }
+    if !(l.rr_min - BAND_EPS..=l.rr_max + BAND_EPS).contains(&implied_rr) {
+        return Some((
+            "risk_rr_out_of_band".into(),
+            format!(
+                "implied RR {implied_rr:.2} is outside {:.1}-{:.1}",
+                l.rr_min, l.rr_max
+            ),
+        ));
+    }
+    if (implied_rr - intent.risk_reward).abs() > 0.05 * implied_rr.max(1.0) {
+        return Some((
+            "risk_rr_mismatch".into(),
+            format!(
+                "declared RR {} disagrees with the prices (implied {implied_rr:.2})",
+                intent.risk_reward
+            ),
+        ));
+    }
+    if !lots.is_finite() || lots <= 0.0 || lots > l.max_lots + BAND_EPS {
+        return Some((
+            "risk_lot_limit".into(),
+            format!("planned lots {lots} exceed the {:.2} lot cap", l.max_lots),
+        ));
+    }
+    if let Some(cap) = l.max_risk_usd.filter(|cap| risk_usd > *cap + BAND_EPS) {
+        return Some((
+            "risk_per_trade_cap".into(),
+            format!("risk ${risk_usd:.2} exceeds the ${cap:.2} per-trade cap"),
+        ));
+    }
+    None
+}
+
+/// Account-state checks, evaluated only when the price bands pass.
+fn state_refusal(
+    l: &RiskLimits,
+    s: &RiskState,
+    risk_usd: f64,
+    now_ms: i64,
+) -> Option<(String, String)> {
+    if s.open_positions >= l.max_open_positions {
+        return Some((
+            "risk_max_open_positions".into(),
+            format!(
+                "{} positions already open (cap {})",
+                s.open_positions, l.max_open_positions
+            ),
+        ));
+    }
+    if let Some(until) = s.cooldown_until_ms.filter(|until| *until > now_ms) {
+        return Some((
+            "risk_cooldown".into(),
+            format!("cooling down until UTC ms {until} after consecutive losses"),
+        ));
+    }
+    if let Some(cap) = l
+        .max_daily_loss_usd
+        .filter(|cap| s.daily_pnl_usd - risk_usd <= -*cap)
+    {
+        return Some((
+            "risk_daily_loss_cap".into(),
+            format!(
+                "daily PnL ${:.2} plus ${risk_usd:.2} risk breaches the -${cap:.2} cap",
+                s.daily_pnl_usd
+            ),
+        ));
+    }
+    let drawdown = (s.peak_equity_usd > 0.0)
+        .then(|| (s.peak_equity_usd - s.current_equity_usd) / s.peak_equity_usd * 100.0);
+    if let Some((dd, cap)) = drawdown
+        .zip(l.max_drawdown_pct)
+        .filter(|(dd, cap)| *dd > *cap)
+    {
+        return Some((
+            "risk_max_drawdown".into(),
+            format!("drawdown {dd:.2}% exceeds the {cap:.2}% cap"),
+        ));
+    }
+    None
 }
 
 #[derive(Debug, Clone)]
@@ -169,12 +257,8 @@ impl RiskManager {
         self.state.write().unwrap_or_else(|p| p.into_inner())
     }
 
-    pub fn open_positions(&self) -> usize {
-        self.read().open_positions
-    }
-
     pub fn snapshot(&self) -> RiskSnapshot {
-        let l = &self.limits;
+        let l = self.limits.as_ref();
         let s = self.read();
         let drawdown_pct = if s.peak_equity_usd > 0.0 {
             ((s.peak_equity_usd - s.current_equity_usd) / s.peak_equity_usd * 100.0).max(0.0)
@@ -225,13 +309,8 @@ impl RiskManager {
         lots: f64,
         now_ms: i64,
     ) -> Result<(), IntentRejection> {
-        let l = &self.limits;
-        let entry = intent.reference_price;
-        let sl_price = (entry - intent.stop_loss).abs();
-        let tp_price = (intent.take_profit - entry).abs();
-        let sl_pips = sl_price / l.pip_value;
-        let tp_pips = tp_price / l.pip_value;
-        let implied_rr = if sl_pips > 0.0 { tp_pips / sl_pips } else { 0.0 };
+        let l = self.limits.as_ref();
+        let sl_price = (intent.reference_price - intent.stop_loss).abs();
         let risk_usd = sl_price * lots.max(0.0) * l.contract_size;
 
         // A new UTC day resets the realised-PnL counters before any check.
@@ -242,106 +321,7 @@ impl RiskManager {
 
         let refusal = {
             let s = self.read();
-            let mut out: Option<(&str, String)> = None;
-
-            if !(sl_pips >= l.sl_min_pips - BAND_EPS && sl_pips <= l.sl_max_pips + BAND_EPS) {
-                out = Some((
-                    "risk_sl_out_of_band",
-                    format!(
-                        "stop {sl_pips:.1} pips is outside the {:.0}-{:.0} pip band",
-                        l.sl_min_pips, l.sl_max_pips
-                    ),
-                ));
-            } else if !(tp_pips >= l.tp_min_pips - BAND_EPS
-                && tp_pips <= l.tp_max_pips + BAND_EPS)
-            {
-                out = Some((
-                    "risk_tp_out_of_band",
-                    format!(
-                        "target {tp_pips:.1} pips is outside the {:.0}-{:.0} pip band",
-                        l.tp_min_pips, l.tp_max_pips
-                    ),
-                ));
-            } else if !(implied_rr >= l.rr_min - BAND_EPS && implied_rr <= l.rr_max + BAND_EPS) {
-                out = Some((
-                    "risk_rr_out_of_band",
-                    format!(
-                        "implied RR {implied_rr:.2} is outside {:.1}-{:.1}",
-                        l.rr_min, l.rr_max
-                    ),
-                ));
-            } else if (implied_rr - intent.risk_reward).abs() > 0.05 * implied_rr.max(1.0) {
-                out = Some((
-                    "risk_rr_mismatch",
-                    format!(
-                        "declared RR {} disagrees with the prices (implied {implied_rr:.2})",
-                        intent.risk_reward
-                    ),
-                ));
-            } else if !lots.is_finite() || lots <= 0.0 || lots > l.max_lots + BAND_EPS {
-                out = Some((
-                    "risk_lot_limit",
-                    format!("planned lots {lots} exceed the {:.2} lot cap", l.max_lots),
-                ));
-            } else if let Some(cap) = l.max_risk_usd {
-                if risk_usd > cap + BAND_EPS {
-                    out = Some((
-                        "risk_per_trade_cap",
-                        format!("risk ${risk_usd:.2} exceeds the ${cap:.2} per-trade cap"),
-                    ));
-                }
-            }
-
-            if out.is_none() {
-                if s.open_positions >= l.max_open_positions {
-                    out = Some((
-                        "risk_max_open_positions",
-                        format!(
-                            "{} positions already open (cap {})",
-                            s.open_positions, l.max_open_positions
-                        ),
-                    ));
-                }
-            }
-            if out.is_none() {
-                if let Some(until) = s.cooldown_until_ms {
-                    if until > now_ms {
-                        out = Some((
-                            "risk_cooldown",
-                            format!("cooling down until UTC ms {until} after consecutive losses"),
-                        ));
-                    }
-                }
-            }
-            if out.is_none() {
-                if let Some(cap) = l.max_daily_loss_usd {
-                    if s.daily_pnl_usd - risk_usd <= -cap {
-                        out = Some((
-                            "risk_daily_loss_cap",
-                            format!(
-                                "daily PnL ${:.2} plus ${risk_usd:.2} risk breaches the -${cap:.2} cap",
-                                s.daily_pnl_usd
-                            ),
-                        ));
-                    }
-                }
-            }
-            if out.is_none() {
-                if let Some(cap) = l.max_drawdown_pct {
-                    if s.peak_equity_usd > 0.0 {
-                        let dd = (s.peak_equity_usd - s.current_equity_usd)
-                            / s.peak_equity_usd
-                            * 100.0;
-                        if dd > cap {
-                            out = Some((
-                                "risk_max_drawdown",
-                                format!("drawdown {dd:.2}% exceeds the {cap:.2}% cap"),
-                            ));
-                        }
-                    }
-                }
-            }
-            out.map(|(code, msg)| (code.to_string(), msg))
+            price_refusal(l, intent, lots).or_else(|| state_refusal(l, &s, risk_usd, now_ms))
         };
 
         match refusal {
