@@ -1,6 +1,6 @@
 # Live engine probe
 
-generated: 2026-10-26T14:01:45Z
+generated: 2026-10-26T14:49:20Z
 
 Read-only snapshot of the deployed `xauusd-engine` (C1 v2 market feed).
 
@@ -16,31 +16,31 @@ Read-only snapshot of the deployed `xauusd-engine` (C1 v2 market feed).
 
 ### 1m
 
-* **2000 bars**, 2026-10-03 12:45 UTC -> 2026-10-26 13:45 UTC
+* **2000 bars**, 2026-10-03 13:30 UTC -> 2026-10-26 14:30 UTC
 * deltas (min): [(15.0, 1984), (45.0, 3), (30.0, 3), (60.0, 1)] -> **15m**
 * on the 1m grid: 2000/2000; closed: 0/2000; ascending: True
 * sources: ['sifting']; price range: 3975.87 .. 4217.36
-* newest bar is **17 minutes behind now**
+* newest bar is **19 minutes behind now**
 
 ### 15m
 
-* **2000 bars**, 2026-10-03 12:45 UTC -> 2026-10-26 13:45 UTC
+* **2000 bars**, 2026-10-03 13:30 UTC -> 2026-10-26 14:30 UTC
 * deltas (min): [(15.0, 1984), (45.0, 3), (30.0, 3), (60.0, 1)] -> **15m**
 * on the 15m grid: 2000/2000; closed: 0/2000; ascending: True
 * sources: ['sifting']; price range: 3975.87 .. 4217.36
-* newest bar is **17 minutes behind now**
+* newest bar is **19 minutes behind now**
 
 ### 1h
 
-* **2000 bars**, 2026-10-03 12:45 UTC -> 2026-10-26 13:45 UTC
+* **2000 bars**, 2026-10-03 13:30 UTC -> 2026-10-26 14:30 UTC
 * deltas (min): [(15.0, 1984), (45.0, 3), (30.0, 3), (60.0, 1)] -> **15m**
 * on the 1h grid: 500/2000; closed: 0/2000; ascending: True
 * sources: ['sifting']; price range: 3975.87 .. 4217.36
-* newest bar is **17 minutes behind now**
+* newest bar is **19 minutes behind now**
 
 ## /tick-volume
 
-* 197 bar(s); newest 2026-10-26 14:00 UTC closed=False ticks=150 (65↑ 45↓ 40=) at 3996.64
+* 200 bar(s); newest 2026-10-26 14:45 UTC closed=False ticks=1732 (446↑ 621↓ 665=) at 4017.11
 
 ## /calendar
 
@@ -69,23 +69,23 @@ still answering these predates the cutover (404 is the expected answer).
 
 ## WebSocket sample
 
-* frames: {'heartbeat': 2, 'candle': 249, 'tick_volume': 430, 'calendar': 1, 'status': 3}
-* replay: {}; live (seq'd): 0; feed frames with neither: 683
-* `candle` None: 249 frames, deltas (min) [(0.0, 233), (15.0, 15)]
-* last candle frame: {"time": 1793023200000, "open": 3993.15, "high": 3997.55, "low": 3992.78, "close": 3996.79, "volume": 449.0, "source": "sifting"}
+* frames: {'heartbeat': 2, 'candle': 396, 'tick_volume': 580, 'calendar': 1, 'status': 1}
+* replay: {}; live (seq'd): 0; feed frames with neither: 978
+* `candle` None: 396 frames, deltas (min) [(0.0, 380), (15.0, 15)]
+* last candle frame: {"time": 1793025900000, "open": 4022.16, "high": 4022.2, "low": 4016.35, "close": 4017.62, "volume": 2169.0, "source": "sifting"}
 
 ## C1 contract matrix
 
       $: matches none of the anyOf branches
-      - frames.jsonl:684: a live frame has no integer seq
-      - frames.jsonl:685 violates the C1 schema:
+      - frames.jsonl:979: a live frame has no integer seq
+      - frames.jsonl:980 violates the C1 schema:
       $: matches none of the anyOf branches
       $.data: missing required property 'symbol'
       $.data: missing required property 'interval'
       $.data: missing required property 'closed'
-      - frames.jsonl:685: a live frame has no integer seq
+      - frames.jsonl:980: a live frame has no integer seq
 
 ## Verdict
 
 * the deployed engine serves contract `None` — the branch head is 2.0, so the deployment is behind
-* chart candles: **15m** (2000 bars, 2026-10-03 12:45 UTC -> 2026-10-26 13:45 UTC)
+* chart candles: **15m** (2000 bars, 2026-10-03 13:30 UTC -> 2026-10-26 14:30 UTC)
