@@ -757,4 +757,44 @@ mod tests {
         assert_eq!(value["protocol_version"], 1);
         assert_eq!(value["token"], "secret");
     }
+
+    #[test]
+    fn c3_v1_1_additive_fields_are_accepted_and_ignored() {
+        // Node 3 may add optional flat provenance fields without a protocol
+        // bump. Node 4 ignores unknown fields; the v1 validation path still
+        // accepts the intent and never changes its stop or target.
+        let raw = r#"{
+            "type": "trade_intent",
+            "data": {
+                "schema_version": 1,
+                "intent_id": "n3-xauusd-1700000000000-buy-pw-poc",
+                "strategy": "vp_break_retest_v1",
+                "symbol": "XAUUSD",
+                "side": "buy",
+                "order_type": "market",
+                "reference_price": 2650.0,
+                "stop_loss": 2647.5,
+                "take_profit": 2656.25,
+                "risk_reward": 2.5,
+                "level_name": "PW PoC",
+                "source_candle_time": 1700000000000,
+                "created_at": 1700000000100,
+                "expires_at": 1700000120100,
+                "atr": 3.1,
+                "atr_pips": 310.0,
+                "level_id": "PW_POC",
+                "drawing_id": "pw-poc-1700000000000-1700003600000",
+                "strategy_version": "vp_break_retest_v1.1",
+                "volume_confirmed": false
+            }
+        }"#;
+        let frame: Node3Frame = serde_json::from_str(raw).unwrap();
+        let Node3Frame::TradeIntent { data } = frame else {
+            panic!("expected a trade_intent frame");
+        };
+        assert_eq!(data.intent_id, "n3-xauusd-1700000000000-buy-pw-poc");
+        assert_eq!(data.stop_loss, 2647.5);
+        assert_eq!(data.take_profit, 2656.25);
+        assert_eq!(data.risk_reward, 2.5);
+    }
 }

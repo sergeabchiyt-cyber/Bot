@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xauusd.local/contracts/c1-market-feed.schema.json",
+  "title": "C1 v2 — Node 1 market WebSocket frame",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": {
+      "enum": ["candle", "tick_volume", "calendar", "status", "gap", "heartbeat", "subscribe"]
+    },
+    "seq": { "type": "integer", "minimum": 1, "description": "live frames only; strictly increasing" },
+    "replay": { "const": true, "description": "replay frames only; never combined with seq" },
+    "data": { "type": ["object", "array"] },
+    "topics": { "type": "array", "items": { "type": "string" } }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "enum": ["candle", "tick_volume", "calendar", "status"] } } },
+      "then": { "anyOf": [
+        { "required": ["seq"], "not": { "required": ["replay"] } },
+        { "required": ["replay"], "not": { "required": ["seq"] } }
+      ] }
+    },
+    {
+      "if": { "properties": { "type": { "const": "candle" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["time", "open", "high", "low", "close", "volume", "symbol", "interval", "closed"],
+            "properties": {
+              "time": { "type": "integer", "description": "bucket-open epoch ms" },
+              "open": { "type": "number", "exclusiveMinimum": 0 },
+              "high": { "type": "number", "exclusiveMinimum": 0 },
+              "low": { "type": "number", "exclusiveMinimum": 0 },
+              "close": { "type": "number", "exclusiveMinimum": 0 },
+              "volume": { "type": "number", "minimum": 0, "description": "tick count" },
+              "symbol": { "const": "XAUUSD" },
+              "interval": { "enum": ["1m", "15m", "1h"] },
+              "closed": { "type": "boolean" },
+              "source": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "type": { "const": "status" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["contract_version", "boot_id", "freshness"],
+            "properties": {
+              "contract_version": { "const": "2.0" },
+              "boot_id": { "type": "string" },
+              "market_open": { "type": "boolean" },
+              "freshness": {
+                "type": "object",
+                "required": ["feed", "last_tick_ms", "age_ms", "state", "market_open"],
+                "properties": {
+                  "feed": { "type": "string" },
+                  "last_tick_ms": { "type": "integer" },
+                  "age_ms": { "type": "integer", "minimum": 0 },
+                  "state": { "enum": ["live", "stale", "offline", "closed_market"] },
+                  "market_open": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "not": {
+    "description": "No trade/execution vocabulary may appear in a market frame.",
+    "anyOf": [
+      { "required": ["side"] }, { "required": ["stop_loss"] }, { "required": ["take_profit"] },
+      { "required": ["lots"] }, { "required": ["risk_usd"] }, { "required": ["action"] },
+      { "required": ["venue"] }, { "required": ["trade_intent"] }
+    ]
+  }
+}

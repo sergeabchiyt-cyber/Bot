@@ -35,7 +35,7 @@ use crate::intent::{
     SERVICE_NAME,
 };
 use crate::ledger::{ExecutionLedger, IntentLedgerState, LedgerRecord};
-use crate::node1::MarketFeed;
+use crate::risk::RiskManager;
 
 /// Heartbeat cadence on the Node 3 socket.
 const HEARTBEAT_SECS: u64 = 20;
@@ -66,19 +66,15 @@ pub(crate) struct Outgoing {
     pub(crate) text: String,
 }
 
-/// Where a lifecycle report goes.
-///
-/// Node 3 intents report back over the authenticated execution socket with
-/// acknowledgement tracking. Local-strategy intents have no Node 3 peer: the
-/// durable ledger and `/diagnostics` are their report, and the same
-/// `ExecutionReport` object is still built and recorded.
+/// Where a lifecycle report goes: Node 3's authenticated execution socket,
+/// with acknowledgement tracking across reconnects. There is no second intent
+/// source, so there is no other sink.
 #[derive(Clone)]
 pub(crate) enum ReportSink {
     Node3 {
         outbox: mpsc::Sender<Outgoing>,
         pending: Arc<std::sync::Mutex<HashMap<String, PendingReport>>>,
     },
-    Local,
 }
 
 #[derive(Clone)]
@@ -93,9 +89,8 @@ pub(crate) struct LinkShared {
     pub(crate) pending: Arc<std::sync::Mutex<HashMap<String, PendingReport>>>,
     /// Timestamp of the last frame received from Node 3.
     pub(crate) last_frame_ms: Arc<AtomicI64>,
-    /// Present only for the local-strategy source: the live Node 1 feed is the
-    /// gate that replaces the Node 3 link-freshness check.
-    local_feed: Option<MarketFeed>,
+    /// Risk policy / account state, shared with `DiagnosticsHub`.
+    pub(crate) risk: Arc<RiskManager>,
 }
 
 impl LinkShared {
@@ -103,31 +98,8 @@ impl LinkShared {
         self.manager.venue_label()
     }
 
-    /// Build the shared execution state for the local-strategy source.
-    pub(crate) fn for_local(
-        config: Config,
-        hub: DiagnosticsHub,
-        manager: Arc<ExecutionManager>,
-        ledger: Arc<ExecutionLedger>,
-        feed: MarketFeed,
-    ) -> Self {
-        Self {
-            config,
-            hub,
-            manager,
-            ledger,
-            order_gate: Arc::new(tokio::sync::Mutex::new(())),
-            pending: Arc::new(std::sync::Mutex::new(HashMap::new())),
-            last_frame_ms: Arc::new(AtomicI64::new(now_ms())),
-            local_feed: Some(feed),
-        }
-    }
-
-    /// True when the source that produced this intent is still trustworthy.
+    /// True when the Node 3 link that produced this intent is still fresh.
     fn link_is_fresh(&self) -> bool {
-        if let Some(feed) = &self.local_feed {
-            return feed.is_trading_ready();
-        }
         let last = self.last_frame_ms.load(Ordering::SeqCst);
         last > 0 && now_ms() - last <= self.config.node3_stale_ms
     }
@@ -138,9 +110,6 @@ impl LinkShared {
             if let Some(err) = self.config.startup_errors().into_iter().next() {
                 return Err(IntentRejection::new("startup_configuration_error", err));
             }
-        }
-        if let Some(feed) = &self.local_feed {
-            return feed.gate_check();
         }
         if !self.link_is_fresh() {
             return Err(IntentRejection::new(
@@ -175,6 +144,7 @@ pub async fn run(
     manager: Arc<ExecutionManager>,
     ledger: Arc<ExecutionLedger>,
 ) {
+    let risk = hub.risk();
     let shared = LinkShared {
         config: config.clone(),
         hub,
@@ -183,7 +153,7 @@ pub async fn run(
         order_gate: Arc::new(tokio::sync::Mutex::new(())),
         pending: Arc::new(std::sync::Mutex::new(HashMap::new())),
         last_frame_ms: Arc::new(AtomicI64::new(0)),
-        local_feed: None,
+        risk,
     };
 
     if let Err(err) = validate_link_config(&config) {
@@ -448,13 +418,6 @@ fn take_retryable(shared: &LinkShared, on_connect: bool) -> Vec<(String, String)
 
 /// Handle one validated-scope intent: validate, deduplicate durably, then place
 /// at most one broker order.
-/// Entry point for an intent produced by the local strategy. It uses the same
-/// validation, ledger, venue policy and reconciliation as a Node 3 intent; only
-/// the report sink differs (ledger + diagnostics, no upstream socket).
-pub(crate) async fn handle_local_intent(shared: LinkShared, intent: TradeIntent) {
-    handle_intent(shared, ReportSink::Local, intent).await;
-}
-
 async fn handle_intent(shared: LinkShared, sink: ReportSink, intent: TradeIntent) {
     let received_at = now_ms();
     shared.hub.record_intent_received(&intent).await;
@@ -621,6 +584,29 @@ async fn handle_intent(shared: LinkShared, sink: ReportSink, intent: TradeIntent
         return;
     }
 
+    // 5. Risk policy: the ATR-derived SL/TP bands, the RR band and every
+    //    account-level cap are re-checked immediately before the write.
+    //    Node 4 refuses an out-of-policy intent; it never rewrites its prices.
+    if let Err(rejection) = shared
+        .risk
+        .check(&intent, shared.config.mt5_volume_lots, now_ms())
+    {
+        shared.hub.record_intent_rejected(&intent, &rejection).await;
+        publish_report(
+            &shared,
+            &sink,
+            refusal_report(
+                &intent,
+                shared.venue_label(),
+                &rejection.code,
+                &rejection.message,
+            ),
+            true,
+        )
+        .await;
+        return;
+    }
+
     let command = LedgerRecord::BrokerCommand {
         ts: now_ms(),
         intent_id: intent.intent_id.clone(),
@@ -676,6 +662,9 @@ async fn handle_intent(shared: LinkShared, sink: ReportSink, intent: TradeIntent
 
             // A broker-confirmed fill is the only thing that may open a trade.
             if outcome.status.is_fill() {
+                shared
+                    .risk
+                    .record_fill(outcome.quantity.unwrap_or(0.0), now_ms());
                 let trade = shared.manager.trade_from_outcome(&intent, &outcome);
                 shared.hub.record_trade_opened(trade).await;
             } else if outcome.status == ExecutionStatus::Unknown {
@@ -869,15 +858,6 @@ async fn publish_report(
             }
             shared.hub.record_report_sent().await;
         }
-        ReportSink::Local => {
-            // No upstream peer: the ledger recorded the report and
-            // `/diagnostics` renders it below.
-            debug!(
-                "local intent {} recorded with status {}",
-                report.intent_id,
-                report.status.as_str()
-            );
-        }
     }
     shared.hub.record_report(&report).await;
 }
@@ -920,6 +900,7 @@ mod tests {
             "node4-node3-test-{}-{seq}.jsonl",
             std::process::id()
         ))));
+        let risk = hub.risk();
         LinkShared {
             config,
             hub,
@@ -928,7 +909,7 @@ mod tests {
             order_gate: Arc::new(tokio::sync::Mutex::new(())),
             pending: Arc::new(std::sync::Mutex::new(HashMap::new())),
             last_frame_ms: Arc::new(AtomicI64::new(0)),
-            local_feed: None,
+            risk,
         }
     }
 

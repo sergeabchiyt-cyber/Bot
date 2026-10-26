@@ -1,26 +1,17 @@
 //! Node 4 — the execution service.
 //!
-//! By default Node 4 is an outbound **client** of Node 3's strategy engine: it
-//! receives `trade_intent` frames on `NODE3_WS_URL`
-//! (`wss://<node3-host>/execution`), validates them, durably records the
-//! `intent_id`, then places **at most one** broker order and reports the
-//! broker-authoritative result back.
+//! Node 4 is an outbound **client** of Node 3's strategy engine: it receives
+//! `trade_intent` frames on `NODE3_WS_URL`
+//! (`wss://<node3-host>/execution`), validates them, checks them against its
+//! **risk policy**, durably records the `intent_id`, then places **at most one**
+//! broker order and reports the broker-authoritative result back.
 //!
-//! It owns all execution concerns — venue selection, stake/lot size, account
-//! risk, the Deriv options adapter, the Chelsea MCP adapter, the MT5 demo
-//! execution adapter and its outbound `mt5-bridge`, broker/account state,
-//! reconciliation, the kill switch, and the audit ledger.
-//!
-//! Two intent sources are possible, never both at once:
-//!
-//! * `NODE4_INTENT_SOURCE=node3` (default): the original execution-only mode.
-//!   Node 4 dials Node 3's authenticated `/execution` socket and contains no
-//!   strategy or market analytics.
-//! * `NODE4_INTENT_SOURCE=node1_strategy` (opt-in): Node 4 consumes the
-//!   versioned Node 1 market feed and runs the ported `vp_break_retest_v1`
-//!   strategy. It still owns only execution policy: the strategy emits an
-//!   immutable intent that goes through the same validation, durable ledger,
-//!   venue policy and reconciliation as a Node 3 intent.
+//! There is exactly ONE intent source. Node 4 contains no market-data feed, no
+//! volume-profile maths and no strategy: those belong to Nodes 1 and 3. It owns
+//! venue selection, stake/lot size, risk management, the Deriv options adapter,
+//! the Chelsea MCP adapter, the MT5 demo execution adapter and its outbound
+//! `mt5-bridge`, broker/account state, reconciliation, the kill switch, and the
+//! audit ledger. See `PLAN.md` section 5, Agent 4 brief.
 
 mod config;
 mod diagnostics;
@@ -31,24 +22,19 @@ mod execution_mt5;
 mod health;
 mod intent;
 mod ledger;
-mod node1;
 mod node3;
-mod strategy;
-mod strategy_runner;
+mod risk;
 mod types;
 
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
-use config::{Config, IntentSource};
+use config::Config;
 use diagnostics::DiagnosticsHub;
 use execution::ExecutionManager;
 use ledger::ExecutionLedger;
-use node1::MarketFeed;
-use strategy_runner::StrategyHandle;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -74,15 +60,21 @@ async fn main() -> anyhow::Result<()> {
     }
 
     info!("Starting Node 4 (Execution Service)");
-    match config.intent_source {
-        IntentSource::Node3 => info!("Intent source: Node 3 ({})", config.node3_ws_url),
-        IntentSource::Node1Strategy => info!(
-            "Intent source: local strategy on Node 1 feed ({})",
-            config.node1_ws_url
-        ),
-    }
+    info!("Intent source: Node 3 ({})", config.node3_ws_url);
     info!("HTTP & WS port: {}", config.port);
     info!("Execution venue: {}", config.execution_venue().label());
+    info!(
+        "Risk policy: SL {:.0}-{:.0} pips, TP {:.0}-{:.0} pips, RR {:.1}-{:.1}, \
+         max {} open positions, max {:.2} lots",
+        config.risk_sl_min_pips,
+        config.risk_sl_max_pips,
+        config.risk_tp_min_pips,
+        config.risk_tp_max_pips,
+        config.risk_rr_min,
+        config.risk_rr_max,
+        config.risk_max_open_positions,
+        config.risk_max_lots,
+    );
 
     let hub = DiagnosticsHub::new(&config);
 
@@ -153,11 +145,6 @@ async fn main() -> anyhow::Result<()> {
     // `/mt5/*` resources the operator watches are the same session.
     let manager = Arc::new(ExecutionManager::new(&config, hub.mt5()));
 
-    // The strategy diagnostics section exists in both modes: disabled/monitor
-    // when Node 3 is the source, live when the local strategy is.
-    let strategy_handle = StrategyHandle::new(&config);
-    hub.attach_strategy(strategy_handle.clone());
-
     // HTTP (/health, /diagnostics, /open-trades, /account, /mt5/*,
     // POST /mt5/control) and WebSocket (/ws frontends, /mt5/bridge for the
     // bridge) on 0.0.0.0:$PORT.
@@ -179,43 +166,10 @@ async fn main() -> anyhow::Result<()> {
             "UNAVAILABLE"
         }
     );
+    info!("Node 4 ready: awaiting trade_intent frames from Node 3");
 
-    match config.intent_source {
-        IntentSource::Node3 => {
-            // Optional read-only monitor: the feed runs and is visible on
-            // `/diagnostics`, but no intent is ever produced from it.
-            if config.node1_feed_enabled {
-                let feed = MarketFeed::new(&config);
-                hub.attach_market_feed(feed.clone());
-                let (tx, mut rx) = mpsc::channel(256);
-                tokio::spawn(node1::run(config.clone(), feed, tx));
-                tokio::spawn(async move {
-                    while rx.recv().await.is_some() {}
-                    info!("Node 1 monitor feed stopped");
-                });
-            }
-            info!("Node 4 ready: awaiting trade_intent frames from Node 3");
-            // Runs forever with bounded reconnect backoff.
-            node3::run(config.clone(), hub.clone(), manager.clone(), ledger.clone()).await;
-        }
-        IntentSource::Node1Strategy => {
-            let feed = MarketFeed::new(&config);
-            hub.attach_market_feed(feed.clone());
-            let (tx, rx) = mpsc::channel(256);
-            let shared = node3::LinkShared::for_local(
-                config.clone(),
-                hub.clone(),
-                manager.clone(),
-                ledger.clone(),
-                feed.clone(),
-            );
-            info!(
-                "Node 4 ready: local strategy on {} (dry-run unless a venue is configured)",
-                config.node1_ws_url
-            );
-            tokio::spawn(node1::run(config.clone(), feed.clone(), tx));
-            strategy_runner::run(config.clone(), feed, shared, strategy_handle, rx).await;
-        }
-    }
+    // Runs forever with bounded reconnect backoff. This is the only intent
+    // source; there is no local strategy and no second feed consumer.
+    node3::run(config.clone(), hub.clone(), manager.clone(), ledger.clone()).await;
     Ok(())
 }

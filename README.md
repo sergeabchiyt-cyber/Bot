@@ -1,85 +1,84 @@
-# Node 4 — XAUUSD execution service
+# Node 4 — XAUUSD demo execution + risk management
 
-This repository contains the **execution service** of the XAUUSD three-node
-system, plus the MT5 demo bridge that service delegates terminal order routing
-to. Nothing else: the market-data engine (Node 1) and the strategy engine
-(Node 3) live in their own services and are not part of this tree.
+This branch is the **execution service** of the four-node XAUUSD system. It is
+a Rust service that consumes **authenticated trade intents from Node 3**,
+validates them against its risk policy, durably records the `intent_id`, places
+**at most one** order per intent, and reports the broker-authoritative outcome.
+
+It contains **no market data, no volume-profile maths and no strategy**, and it
+ships **no dashboard**. Node 2 is a separate, frontend-only branch.
 
 ```
-Node 1  market data (candles, volume profile, levels)   → its own service
-   │  REST + WS
+Node 1  market data + calendar              → its own branch (`Node1`)
+   │  C1 v2: candles (1m/15m/1h), tick volume, calendar, status
    ▼
-Node 3  strategy: decides side, stop, target, RR        → its own service
-   │  WS /execution, protocol v1: `trade_intent`
+Node 3  VP + strategy                       → its own branch (`Node3`)
+   │  C2 public: /levels /vp /drawings /scanning /signals
+   │  C3 private: WS /execution, `trade_intent`
    ▼
-Node 4  execution (THIS REPOSITORY)
-   │  exactly one venue, durable idempotency, reports back
-   ├── Deriv options demo API     (DERIV_DEMO_API)
-   ├── Chelsea live MCP           (MCP_CHELSEA_URL)
-   └── Deriv MT5 demo via mt5-bridge (MT5_BRIDGE_TOKEN)
+Node 4  execution + risk (THIS BRANCH)
+   │  C4 public: /diagnostics (incl. `risk`), /open-trades, /mt5/*, /ws
+   ├── none            explicit dry-run / signal mode (default)
+   ├── deriv_mt5_demo  Deriv MT5 **demo** via mt5-bridge
+   ├── deriv_demo      Deriv options demo
+   └── chelsea_live    LIVE, doubly opt-in (never the default)
+            ▲
+Node 2  vanilla HTML/CSS/JS + lightweight-charts   → own branch (`Node2`)
 ```
 
-Node 4 has **two mutually exclusive intent sources** (`NODE4_INTENT_SOURCE`):
+**One intent source only.** Node 4 is an outbound client of Node 3: it dials
+`NODE3_WS_URL` (`wss://<node3-host>/execution`), authenticates with
+`execution_hello`, and refuses any intent until Node 3 answers
+`execution_hello_ack { accepted: true }`. The old opt-in
+`NODE4_INTENT_SOURCE=node1_strategy` mode — a verbatim copy of Node 3's
+strategy — has been **deleted**. The Node 1 feed consumer, the strategy
+modules, the embedded `node2/` dashboard and `Node-4.txt` are gone.
 
-* **`node3` (default).** Node 4 is an outbound client of Node 3: it dials
-  `NODE3_WS_URL` (`wss://<node3-host>/execution`), authenticates with
-  `execution_hello`, and refuses to accept any intent until Node 3 answers
-  `execution_hello_ack { accepted: true }`. In this mode it contains no market
-  analytics and no strategy logic.
-* **`node1_strategy` (opt-in, fail-closed).** Node 4 consumes Node 1's versioned
-  market feed and runs the ported `vp_break_retest_v1` strategy as a distinct
-  module. The strategy emits a complete immutable `TradeIntent`; validation,
-  the durable ledger, venue policy, reporting and reconciliation are identical
-  to the Node 3 path. It never talks to a broker adapter directly and executes
-  nothing until an explicit operator gate is set, the feed is contract-valid
-  and fresh, and the strategy spec is approved. See
-  [`docs/node4/LOCAL_STRATEGY.md`](docs/node4/LOCAL_STRATEGY.md).
-
-In both modes Node 4 never recomputes an intent's stop-loss or take-profit from
-broker state: it may refuse an intent, but it never rewrites its meaning.
+See [`PLAN.md`](PLAN.md) for the full refactor plan and
+[`contracts/README.md`](contracts/README.md) for the versioned service
+contracts (C1–C4). The other three nodes have standalone briefs:
+[`AGENT-NODE1.md`](AGENT-NODE1.md), [`AGENT-NODE2.md`](AGENT-NODE2.md),
+[`AGENT-NODE3.md`](AGENT-NODE3.md).
 
 ## Repository layout
 
 | Path | What it is |
 |---|---|
-| `node4-execution/` | The execution service (intent link, venue policy, ledger, adapters, resources, kill switch). |
+| `node4-execution/` | The execution service (Node 3 link, risk policy, ledger, venue adapters, resources, kill switch). |
 | `node4-execution/.env.example` | Every environment variable the service reads, with defaults. |
-| `mt5-bridge/` | Terminal-side bridge: runs next to the MT5 terminal, dials **out** to Node 4 at `WS /mt5/bridge`, routes orders to the EA over loopback. |
-| `node2/` | Read-only demo dashboard (static browser app): Node 1 market data + Node 4 execution state over the published contracts; no strategy, no order submission. See `node2/README.md`. |
-| `docs/mt5/EXECUTION_ARCHITECTURE.md` | MT5 demo topology, the layered guards, the fail-closed order path and the integration gate. |
-| `docs/mt5/FRONTEND_RESOURCES.md` | Field-by-field reference for the JSON/WS resources a frontend can render. |
-| `docs/node1/` | Read-only audit of the Node 1 market-data boundary and the draft v1 feed contract. Node 4 reads that feed only in the opt-in `node1_strategy` mode described below; the contract itself is still a draft. |
-| `docs/node4/LOCAL_STRATEGY.md` | The opt-in Node 1 feed consumer and local strategy: source provenance, the sign-off gate, failure modes and activation checklist. |
-| `ci/mt5/protocol_lint.py` | Build gate: fails if the EA ⇄ bridge ⇄ Node 4 contract drifts (methods, params, fields, frames). |
-| `ci/deriv_probe.py`, `ci/deriv/DERIV.md` | Execution-side Deriv probe/report (which contract shapes are actually tradable). |
+| `mt5-bridge/` | Terminal-side bridge: runs next to the MT5 terminal, dials **out** to Node 4 at `WS /mt5/bridge`. |
+| `mt5-host/` | Headless Linux host that installs/supervises the MT5 terminal under Wine. |
+| `contracts/` | Shared C1–C4 contracts, mirrored byte-identically on all four branches. |
+| `ci/check_node4_boundary.py` | Build gate: fails if market data, VP maths, strategy code or a second dashboard reappears. |
+| `ci/contract_sync.py` | Build gate: verifies `contracts/MANIFEST.sha256` so contracts cannot drift between branches. |
+| `ci/mt5/protocol_lint.py` | Build gate: fails when the EA ⇄ bridge ⇄ Node 4 contract drifts. |
+| `docs/mt5/EXECUTION_ARCHITECTURE.md` | MT5 demo topology, layered guards, fail-closed order path. |
+| `docs/mt5/FRONTEND_RESOURCES.md` | Field-by-field reference for the JSON/WS resources Node 2 renders. |
 | `Dockerfile` | Builds the execution service image only. |
-| `.github/workflows/build.yml` | CI: `node4-execution` (check, fmt, clippy `-D warnings`, tests, release) + `mt5-bridge` (protocol lint, check, contract tests) + `node2` (dashboard test suite). |
 
 ## What Node 4 guarantees
 
-* **Authenticated intents only.** In `node3` mode no intent is accepted before
-  the handshake is acknowledged, and a stale Node 3 link means no new positions
-  (monitoring, reconciliation and the kill switch keep working). In
-  `node1_strategy` mode every intent is refused unless the feed is connected,
-  contract-valid, synchronized, fresh, market-open and recent, checked both at
-  decision time and again immediately before the broker write.
-* **Durable idempotency.** `intent_id` is the system-wide key. It is written to
-  the append-only ledger (`EXECUTION_LEDGER_FILE`, fsynced) **before** any broker
-  write; a repeat replays the recorded result and can never place a second order.
-  With a real venue selected, an unwritable ledger is a refusal to trade.
+* **Authenticated intents only.** No intent is accepted before the Node 3
+  handshake is acknowledged, and a stale Node 3 link means no new positions.
+* **Risk before every write.** `src/risk.rs` enforces the ATR-derived bands —
+  SL 200–300 pips ($2–3), TP 600–800 pips ($6–8), RR 2–3 — plus a per-trade
+  risk cap, max lots, max open positions, daily loss limit, max drawdown and a
+  cooldown after consecutive losses. A violation is a **refusal** with a stable
+  `error_code`; Node 4 never silently rewrites a strategy price.
+* **Durable idempotency.** `intent_id` is the system-wide key, written to the
+  append-only ledger (fsynced) **before** any broker write. A repeat replays the
+  recorded result and can never place a second order.
 * **One venue, no fallback.** Exactly one of `deriv_mt5_demo`, `deriv_demo`,
-  `chelsea_live`, `none`. Two configured credential sets are a startup error;
-  `none` is an explicit dry-run/signal mode.
-* **Broker-authoritative outcomes.** Only a broker-confirmed fill opens a trade.
-  A timeout/unclear write is reported `unknown` and reconciled by
-  `intent_id`/comment/order/deal/position — never retried as a new order.
-* **Demo-only by default.** Live venues are opt-in and gated by the layered demo
-  checks described in `docs/mt5/EXECUTION_ARCHITECTURE.md`; the MT5 demo
-  integration gate must pass before MT5 trading is enabled.
-* **Separate secrets per link.** `NODE4_SHARED_TOKEN` (Node 3 ⇄ Node 4),
-  `MT5_BRIDGE_TOKEN` (bridge ⇄ Node 4) and `MT5_CONTROL_TOKEN` (operator kill
-  switch) are three distinct values; none of them is ever logged or written to
-  the ledger.
+  `chelsea_live`, `none`. `none` is an explicit dry-run/demo mode.
+* **Demo only by default.** A real venue requires
+  `NODE4_DEMO_INTEGRATION_PASSED=1`; `chelsea_live` additionally requires
+  `NODE4_LIVE_TRADING_APPROVED=1`.
+* **Broker-authoritative outcomes.** Only a broker-confirmed fill opens a
+  trade; an unclear write is reported `unknown` and reconciled by `intent_id`,
+  never retried as a new order.
+* **Separate secrets per link.** `NODE4_SHARED_TOKEN`, `MT5_BRIDGE_TOKEN` and
+  `MT5_CONTROL_TOKEN` are three distinct values, never logged or written to the
+  ledger.
 
 ## Quick start
 
@@ -95,29 +94,29 @@ Dry run with no credentials at all:
 EXECUTION_VENUE=none PORT=10000 cargo run --release
 ```
 
-Docker (execution service only — the bridge runs on the terminal host):
+Docker (execution service only):
 
 ```bash
 docker build -f Dockerfile -t xauusd-node4-execution .
 docker run --env-file node4-execution/.env -p 10000:10000 xauusd-node4-execution
 ```
 
-The MT5 demo venue needs the bridge running next to the terminal; it dials out to
-`wss://<node4-host>/mt5/bridge`, so **no inbound port is opened on the terminal
-host** and the MT5 password never leaves it. See `mt5-bridge/README.md`.
-
 ## Resources
 
 | Endpoint | Access | Description |
 |---|---|---|
 | `GET /health` | public | `ok` for platform probes. |
-| `GET /diagnostics` (alias `/status`) | public | `ExecutionSnapshot`: Node 3 link health (separate from broker health), ledger state, counters, open trades, Deriv account, MT5 bridge view, event log. |
-| `GET /open-trades` (alias `/trades`) | public | `OpenTradesSnapshot` — `node4_open_trades`, `deriv_open_trades`, `mt5_open_positions`, `recent_trades`. |
-| `GET /deriv` (alias `/account`) | public | Deriv options account: balance, currency, account id, open contracts, unrealized PnL. |
-| `GET /mt5/account`, `/mt5/positions`, `/mt5/history`, `/mt5/status` | public | MT5 demo account, broker positions, closed deals, bridge/EA link status. |
-| `WS /ws` | public | Live stream of the resources above. Never carries Node 3 intent/report frames. |
+| `GET /diagnostics` (alias `/status`) | public | `ExecutionSnapshot`: Node 3 link health, **`risk`** block, ledger state, counters, open trades, Deriv account, MT5 bridge view, event log. |
+| `GET /open-trades` (alias `/trades`) | public | `OpenTradesSnapshot`. |
+| `GET /deriv` (alias `/account`) | public | Deriv options account. |
+| `GET /mt5/account`, `/mt5/positions`, `/mt5/history`, `/mt5/status` | public | MT5 demo account, positions, closed deals, bridge/EA link status. |
+| `WS /ws` | public | Live stream of the resources above. Never carries private intent/report frames. |
 | `WS /mt5/bridge` | token | The bridge's private session (`bridge_hello` with `MT5_BRIDGE_TOKEN`). |
-| `POST /mt5/control` | token | Kill switch: `halt` (optionally `flatten`), `resume`, `close_all`, `close_position`, with `X-Control-Token: $MT5_CONTROL_TOKEN`. No permissive browser CORS. |
+| `POST /mt5/control` | token | Kill switch: `halt`, `resume`, `close_all`, `close_position` with `X-Control-Token: $MT5_CONTROL_TOKEN`. |
+
+`GET /diagnostics` no longer contains `market_feed` or `strategy`; those blocks
+belonged to the deleted local-strategy mode. The replacement `risk` object is
+specified in [`contracts/c4-diagnostics.schema.json`](contracts/c4-diagnostics.schema.json).
 
 ## Validation
 
@@ -129,16 +128,20 @@ cargo test  --all-targets
 cargo clippy --all-targets -- -D warnings
 cargo build --release
 
-cd ../mt5-bridge && cargo test --all-targets
-cd .. && python3 ci/mt5/protocol_lint.py
+cd ..
+python3 ci/check_node4_boundary.py
+python3 ci/contract_sync.py
+python3 ci/mt5/protocol_lint.py
+cd mt5-bridge && cargo test --all-targets
 ```
 
-CI runs the same set on every push (`.github/workflows/build.yml`) and pushes the
-failing log back to the branch so an error is readable without the Actions tab.
+CI runs the same set on every push (`.github/workflows/build.yml`).
 
 ## Scope guard
 
-This tree deliberately contains no market-data feed, no volume-profile or level
-computation, no candle subscription, no break/retest state machine and no other
-strategy trigger logic. If a change here starts to look like a trading decision,
-it belongs in Node 3.
+`ci/check_node4_boundary.py` enforces the boundary in CI: no `mod strategy`,
+no `strategy_runner`, no `mod node1`, no `NODE4_INTENT_SOURCE`, no
+`volume_profile`, no `StrategyEngine`, no `MarketFeed`, no `FeedSnapshot`/
+`StrategySnapshot`, no `node2/` dashboard and no `Node-4.txt`. If a change here
+starts to look like a market feed, a VP calculation or a trading decision, it
+belongs in Node 1 or Node 3.

@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xauusd.local/contracts/c4-diagnostics.schema.json",
+  "title": "C4 v1 — Node 4 public /diagnostics snapshot",
+  "description": "Read-only execution snapshot. v1 (this refactor) removes the market_feed and strategy blocks (Node 4 has no feed or strategy) and adds the risk block.",
+  "type": "object",
+  "required": ["timestamp", "node3", "risk", "work", "open_trades", "deriv_account", "mt5", "recent_events"],
+  "properties": {
+    "timestamp": { "type": "integer" },
+    "node3": { "type": "object", "description": "private link health, never broker health" },
+    "work": { "type": "object", "description": "execution counters, venue, ledger state" },
+    "open_trades": { "type": "object" },
+    "deriv_account": { "type": "object" },
+    "mt5": { "type": "object" },
+    "recent_events": { "type": "array" },
+    "risk": {
+      "type": "object",
+      "required": [
+        "enabled", "sl_min_pips", "sl_max_pips", "tp_min_pips", "tp_max_pips",
+        "rr_min", "rr_max", "open_positions", "intents_checked", "intents_rejected"
+      ],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "sl_min_pips": { "type": "number" },
+        "sl_max_pips": { "type": "number" },
+        "tp_min_pips": { "type": "number" },
+        "tp_max_pips": { "type": "number" },
+        "rr_min": { "type": "number" },
+        "rr_max": { "type": "number" },
+        "pip_value": { "type": "number" },
+        "contract_size": { "type": "number" },
+        "max_risk_usd": { "type": ["number", "null"] },
+        "max_daily_loss_usd": { "type": ["number", "null"] },
+        "max_drawdown_pct": { "type": ["number", "null"] },
+        "max_open_positions": { "type": "integer" },
+        "max_lots": { "type": "number" },
+        "cooldown_losses": { "type": "integer" },
+        "cooldown_secs": { "type": "integer" },
+        "open_positions": { "type": "integer" },
+        "exposure_lots": { "type": "number" },
+        "daily_pnl_usd": { "type": "number" },
+        "realised_pnl_usd": { "type": "number" },
+        "current_equity_usd": { "type": "number" },
+        "peak_equity_usd": { "type": "number" },
+        "drawdown_pct": { "type": "number" },
+        "consecutive_losses": { "type": "integer" },
+        "cooldown_until_ms": { "type": ["integer", "null"] },
+        "intents_checked": { "type": "integer" },
+        "intents_rejected": { "type": "integer" },
+        "last_rejection_code": { "type": ["string", "null"] },
+        "last_rejection_message": { "type": ["string", "null"] },
+        "updated_at_ms": { "type": "integer" }
+      }
+    }
+  },
+  "not": {
+    "description": "No market/strategy state and no secrets may appear in a public snapshot.",
+    "anyOf": [
+      { "required": ["market_feed"] }, { "required": ["strategy"] },
+      { "required": ["scanning"] }, { "required": ["levels"] },
+      { "required": ["token"] }, { "required": ["password"] }
+    ]
+  }
+}

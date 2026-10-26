@@ -1,15 +1,13 @@
 name: build
 
-# Node 4 is the only application in this repository: the execution service
+# Node 4 is the only application in this branch: the execution service
 # (`node4-execution`), its MT5 demo bridge (`mt5-bridge`), which runs next to the
 # terminal and dials out to Node 4, and `mt5-host`, the headless Linux host that
-# installs and supervises that terminal under Wine so the whole path runs on a
-# Render free instance without a GUI. There is no market-data engine or strategy
-# crate here, so this workflow builds and tests exactly those three crates and
-# lints the bridge's EA ⇄ bridge ⇄ Node 4 protocol plus the host's deployment
-# surface (environment contract, embedded EA, image contents). The `node2` job
-# additionally runs the Node 2 read-only dashboard's test suite (browser app
-# over the published Node 1 / Node 4 contracts).
+# installs and supervises that terminal under Wine. There is no market-data
+# engine, no strategy crate and no dashboard here: Nodes 1, 2 and 3 are separate
+# branches. This workflow builds and tests exactly those three crates, lints the
+# bridge's EA ⇄ bridge ⇄ Node 4 protocol plus the host's deployment surface, and
+# enforces the service boundary and the shared contracts folder.
 #
 # On failure the relevant log is pushed back to the branch so the error is
 # readable without the Actions tab.
@@ -409,63 +407,31 @@ jobs:
       - name: Build release
         run: cargo build --release
 
-  # Node 2 dashboard: static browser app + contract-shaped mock feed.
-  # Checks: npm ci, then the node --test suite (parsing, freshness,
-  # lifecycle, reconnect/disconnect, stale data, layout, security,
-  # store, end-to-end server/WebSocket).
-  node2:
+
+  # Service boundary + shared contracts. Node 4 must contain no market data,
+  # no VP maths, no strategy and no second dashboard; contracts/ must be
+  # byte-identical to the copy on the other three branches.
+  boundary:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: node2
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-python@v5
         with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: node2/package-lock.json
-
-      - name: Install
-        run: npm ci --no-audit --no-fund
-
-      - name: Test suite
-        id: tests
+          python-version: "3.11"
+      - name: Node 4 boundary guard
+        run: python3 ci/check_node4_boundary.py
+      - name: Contract manifest
+        run: python3 ci/contract_sync.py
+      - name: Validate contract JSON schemas
         run: |
-          set -o pipefail
-          npm test 2>&1 | tee /tmp/node2-tests.log
-
-      - name: Save test log to branch
-        if: failure() && steps.tests.outcome == 'failure'
-        working-directory: ${{ github.workspace }}
-        run: |
-          git config user.email ci@example.invalid
-          git config user.name ci
-          git fetch origin ${{ github.ref_name }}
-          git checkout -B ${{ github.ref_name }} origin/${{ github.ref_name }}
-          tail -c 400000 /tmp/node2-tests.log > node2-test-errors.log
-          git add -f node2-test-errors.log
-          git commit -m "ci: node2 test log [skip ci]"
-          git push origin ${{ github.ref_name }}
-
-      - name: Clear stale error logs
-        # A green job leaves no error log behind; the writeback step above only
-        # runs on failure, so this removes whatever an earlier red run committed.
-        if: success()
-        continue-on-error: true
-        working-directory: ${{ github.workspace }}
-        run: |
-          removed=0
-          for f in node2-test-errors.log; do
-            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
-              git rm -q "$f"
-              removed=1
-            fi
-          done
-          if [ "$removed" = "1" ]; then
-            git config user.email ci@example.invalid
-            git config user.name ci
-            git commit -m "ci: clear stale node2 logs [skip ci]"
-            git fetch origin ${{ github.ref_name }}
-            git push origin HEAD:${{ github.ref_name }}
-          fi
+          python3 - <<'PY'
+          import json, glob, sys
+          files = sorted(glob.glob("contracts/*.json"))
+          assert files, "no contract schemas found"
+          for f in files:
+              with open(f) as fh:
+                  json.load(fh)
+              print("valid:", f)
+          PY
+      - name: EA ⇄ bridge ⇄ Node 4 protocol lint
+        run: python3 ci/mt5/protocol_lint.py

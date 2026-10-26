@@ -9,6 +9,13 @@ Everything here is served by Node 4 (`https://execution-southeastasia-sng-main.o
 browser must never be given MT5 credentials, and there is no public bridge port
 by design.
 
+Node 2 is a **pure frontend** on its own branch: it calls three public service
+origins directly (`MARKET_HOST` = Node 1, `STRATEGY_HOST` = Node 3,
+`EXECUTION_HOST` = Node 4). This document covers only C4, the Node 4 surface;
+see `contracts/c2-node3-public.schema.json` for the Node 3 levels/drawings
+payload. All three services must whitelist the deployed dashboard origin in
+CORS and in their WebSocket origin checks.
+
 The field names below are the authoritative ones: they are generated from
 `node4-execution/src/types.rs`, which CI
 (`ci/mt5/protocol_lint.py`) keeps in sync with `mt5-bridge/src/snapshot.rs`.
@@ -209,6 +216,72 @@ connected. Body shape: `{"ok":false,"error":{"code":"...","message":"..."}}`.
 
 ---
 
+### `GET /diagnostics` (alias `/status`) → `ExecutionSnapshot`
+
+Read-only. Top-level keys: `timestamp`, `node3` (private link health),
+**`risk`**, `work` (execution counters, venue, ledger state), `open_trades`,
+`deriv_account`, `mt5`, `recent_events`.
+
+> **Breaking change (C4 v1):** the old `market_feed` and `strategy` blocks were
+> removed when Node 4's duplicated local-strategy mode was deleted. Node 4 has
+> no market feed and no strategy. A dashboard that still renders those panels
+> must switch them off; their replacement is the `risk` block below. See
+> `contracts/c4-diagnostics.schema.json`.
+
+```json
+{
+  "enabled": true,
+  "sl_min_pips": 200.0,
+  "sl_max_pips": 300.0,
+  "tp_min_pips": 600.0,
+  "tp_max_pips": 800.0,
+  "rr_min": 2.0,
+  "rr_max": 3.0,
+  "pip_value": 0.01,
+  "contract_size": 100.0,
+  "max_risk_usd": null,
+  "max_daily_loss_usd": null,
+  "max_drawdown_pct": null,
+  "max_open_positions": 3,
+  "max_lots": 1.0,
+  "cooldown_losses": 3,
+  "cooldown_secs": 900,
+  "open_positions": 1,
+  "exposure_lots": 0.01,
+  "daily_pnl_usd": -2.5,
+  "realised_pnl_usd": 12.0,
+  "current_equity_usd": 12.0,
+  "peak_equity_usd": 15.0,
+  "drawdown_pct": 20.0,
+  "consecutive_losses": 1,
+  "cooldown_until_ms": null,
+  "intents_checked": 42,
+  "intents_rejected": 3,
+  "last_rejection_code": "risk_sl_out_of_band",
+  "last_rejection_message": "stop 120.0 pips is outside the 200-300 pip band",
+  "updated_at_ms": 1792781876162
+}
+```
+
+UI rules:
+
+| Field | Meaning |
+|---|---|
+| `enabled` | Always true; the risk module is the pre-write gate. |
+| `sl_*` / `tp_*` / `rr_*` | The enforced strategy price bands (1 pip = $0.01 ⇒ $2–3 / $6–8). |
+| `open_positions` / `max_open_positions` | Current exposure vs the hard cap. |
+| `daily_pnl_usd` / `max_daily_loss_usd` | Realised PnL since 00:00 UTC; `null` cap = disabled. |
+| `drawdown_pct` / `max_drawdown_pct` | Drawdown on realised equity; `null` cap = disabled. |
+| `cooldown_until_ms` | Non-null and in the future ⇒ new intents are refused (`risk_cooldown`). |
+| `intents_rejected`, `last_rejection_code` | The ONLY place a suppressed/refused signal is visible. Stable codes: `risk_sl_out_of_band`, `risk_tp_out_of_band`, `risk_rr_out_of_band`, `risk_rr_mismatch`, `risk_lot_limit`, `risk_per_trade_cap`, `risk_max_open_positions`, `risk_cooldown`, `risk_daily_loss_cap`, `risk_max_drawdown`. |
+
+Realised PnL comes from the MT5 bridge positions snapshot: when a ticket
+disappears, its last reported `profit + swap` is booked as a close. With
+`EXECUTION_VENUE=none` no fills occur, so the PnL-based counters stay at zero
+while the price-band checks still run.
+
+---
+
 ## 2. WebSocket (`wss://…/ws` for frontends)
 
 All MT5 frames use the same envelope as the rest of the stream:
@@ -258,6 +331,9 @@ forwarded to browser clients, whatever they subscribe to.
   response or any WebSocket frame.
 * There is no endpoint that places an order. Orders are only placed by Node 4
   when Node 3 sends an intent; the operator's lever is halt/resume/close.
+* `/diagnostics` contains **no** `market_feed`, `strategy`, `scanning` or
+  `levels` block. Node 4 never reproduces a strategy decision; those come from
+  Node 3's public C2 resources.
 * The bridge has no public port: it dials out to Node 4, so there is nothing to
   firewall off except the loopback EA link on the MT5 host.
 

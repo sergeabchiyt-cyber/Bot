@@ -35,8 +35,9 @@ def jq_summary(doc: dict) -> dict:
     return {
         "build": f"{service} {version}".strip(),
         "role": work.get("role"),
-        "has_market_feed": "market_feed" in doc,
-        "has_strategy": "strategy" in doc,
+        "has_risk": "risk" in doc,
+        "no_market_feed": "market_feed" not in doc,
+        "no_strategy": "strategy" not in doc,
         "keys": sorted(doc.keys()),
     }
 
@@ -62,8 +63,7 @@ def probe_http(base_url: str) -> dict:
                 "summary": jq_summary(doc),
                 "work": doc.get("work"),
                 "node3": doc.get("node3"),
-                "market_feed": doc.get("market_feed"),
-                "strategy": doc.get("strategy"),
+                "risk": doc.get("risk"),
             }
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")[:500]
@@ -98,8 +98,9 @@ async def probe_ws(base_url: str) -> dict:
                 if ftype == "diagnostics" and isinstance(data, dict):
                     entry["summary"] = jq_summary(data)
                     entry["work"] = data.get("work")
-                    entry["has_market_feed"] = "market_feed" in data
-                    entry["has_strategy"] = "strategy" in data
+                    entry["has_risk"] = "risk" in data
+                    entry["no_market_feed"] = "market_feed" not in data
+                    entry["no_strategy"] = "strategy" not in data
                     frames.append(entry)
                     break
                 frames.append(entry)
@@ -142,42 +143,12 @@ async def probe_local_binary(bin_path: str) -> dict:
             except Exception:
                 proc.kill()
 
-    # 2. Verify local binary in node1_strategy mode (dry-run)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        env_local = {
-            "PATH": os.environ.get("PATH", ""),
-            "PORT": "19091",
-            "EXECUTION_VENUE": "none",
-            "NODE4_INTENT_SOURCE": "node1_strategy",
-            "NODE1_FEED_ENABLED": "1",
-            "NODE4_STRATEGY_APPROVED": "1",
-            "NODE1_WS_URL": "ws://127.0.0.1:19999/ws",
-            "EXECUTION_LEDGER_FILE": os.path.join(tmpdir, "ledger.jsonl"),
-        }
-        proc = subprocess.Popen([bin_path], env=env_local, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        try:
-            http_res = {"ok": False}
-            for _ in range(30):
-                await asyncio.sleep(0.1)
-                http_res = probe_http("http://127.0.0.1:19091")
-                if http_res.get("ok"):
-                    break
-            ws_res = await probe_ws("http://127.0.0.1:19091")
-            results["node1_strategy_mode"] = {"http": http_res, "ws": ws_res}
-        finally:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except Exception:
-                proc.kill()
-
-    # 3. Verify local binary in node3 mode
+    # 2. Verify local binary in the single (Node 3) mode
     with tempfile.TemporaryDirectory() as tmpdir:
         env_node3 = {
             "PATH": os.environ.get("PATH", ""),
             "PORT": "19092",
             "EXECUTION_VENUE": "none",
-            "NODE4_INTENT_SOURCE": "node3",
             "NODE3_WS_URL": "ws://127.0.0.1:19998/execution",
             "NODE4_SHARED_TOKEN": "probe-token",
             "EXECUTION_LEDGER_FILE": os.path.join(tmpdir, "ledger.jsonl"),

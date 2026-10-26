@@ -14,6 +14,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::risk::RiskSnapshot;
+
 // ---------------------------------------------------------------------------
 // Execution-owned trade records
 // ---------------------------------------------------------------------------
@@ -125,9 +127,7 @@ impl Default for Node3LinkStatus {
 pub struct ExecutionWorkDiagnostics {
     pub service: String,
     pub version: String,
-    /// `execution_only` unless `NODE4_INTENT_SOURCE=node1_strategy` selects the
-    /// local strategy source; the value names the execution boundary, not the
-    /// origin of the decision.
+    /// Always `execution_only`: Node 4 never reproduces a strategy decision.
     pub role: String,
     pub venue: String,
     pub started_at: i64,
@@ -158,188 +158,14 @@ pub struct ExecutionWorkDiagnostics {
 pub struct ExecutionSnapshot {
     pub timestamp: i64,
     pub node3: Node3LinkStatus,
-    /// Node 1 market-data consumer health. Additive: always present, with
-    /// `enabled: false` when the service runs in `node3` mode.
+    /// Risk policy, account state and rejection counters. Always present.
     #[serde(default)]
-    pub market_feed: FeedSnapshot,
-    /// Local strategy state. Additive: disabled in `node3` mode.
-    #[serde(default)]
-    pub strategy: StrategySnapshot,
+    pub risk: RiskSnapshot,
     pub work: ExecutionWorkDiagnostics,
     pub open_trades: OpenTradesSnapshot,
     pub deriv_account: DerivAccountSnapshot,
     pub mt5: Mt5Diagnostics,
     pub recent_events: Vec<ActivityLogEntry>,
-}
-
-/// Health of the versioned Node 1 market-data feed.
-///
-/// `trading_ready` is the only field the execution gate reads; it is computed
-/// when the snapshot is taken, so a feed that merely *was* live is never
-/// mistaken for a feed that still is.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FeedSnapshot {
-    pub enabled: bool,
-    /// `disabled | connecting | subscribing | syncing | live | stale |
-    /// market_closed | resyncing | contract_mismatch | contract_violation |
-    /// offline`.
-    pub state: String,
-    pub trading_ready: bool,
-    pub not_ready_reason: Option<String>,
-    pub url: String,
-    /// `none (contract v1)` or `bearer`.
-    pub auth: String,
-    pub contract_version: Option<String>,
-    pub contract_required: String,
-    pub symbol: String,
-    pub interval: String,
-    pub connected: bool,
-    pub last_frame_ms: Option<i64>,
-    pub last_status_ms: Option<i64>,
-    pub last_candle_time: Option<i64>,
-    pub last_closed_candle_time: Option<i64>,
-    pub last_levels_ts: Option<i64>,
-    /// The last live envelope `seq`; replay frames do not advance it.
-    pub last_seq: Option<u64>,
-    /// Closed candles observed since the current socket connected (the v1
-    /// subscribe replay seeds 15).
-    pub session_closed_candles: u64,
-    /// A live (non-replay) frame has arrived after the subscribe replay.
-    pub sync_complete: bool,
-    /// `contract_version` matches the pin.
-    pub contract_ok: bool,
-    pub freshness_state: Option<String>,
-    pub freshness_age_ms: Option<u64>,
-    pub market_open: Option<bool>,
-    pub reconnect_count: u64,
-    pub frames_received: u64,
-    pub candles_received: u64,
-    pub closed_candles: u64,
-    pub levels_received: u64,
-    pub status_frames: u64,
-    pub duplicates: u64,
-    pub out_of_order: u64,
-    pub gaps: u64,
-    pub contract_violations: u64,
-    pub resyncs: u64,
-    pub last_error: Option<String>,
-    pub last_event_ms: Option<i64>,
-}
-
-impl Default for FeedSnapshot {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            state: "disabled".into(),
-            trading_ready: false,
-            not_ready_reason: Some("NODE1_FEED_ENABLED is not set".into()),
-            url: String::new(),
-            auth: "none".into(),
-            contract_version: None,
-            contract_required: "1.0".into(),
-            symbol: "XAUUSD".into(),
-            interval: "15m".into(),
-            connected: false,
-            last_frame_ms: None,
-            last_status_ms: None,
-            last_candle_time: None,
-            last_closed_candle_time: None,
-            last_levels_ts: None,
-            last_seq: None,
-            session_closed_candles: 0,
-            sync_complete: false,
-            contract_ok: false,
-            freshness_state: None,
-            freshness_age_ms: None,
-            market_open: None,
-            reconnect_count: 0,
-            frames_received: 0,
-            candles_received: 0,
-            closed_candles: 0,
-            levels_received: 0,
-            status_frames: 0,
-            duplicates: 0,
-            out_of_order: 0,
-            gaps: 0,
-            contract_violations: 0,
-            resyncs: 0,
-            last_error: None,
-            last_event_ms: None,
-        }
-    }
-}
-
-/// State of the local strategy runner. Disabled (all zeros) when Node 3 is the
-/// intent source, so `/diagnostics` has one stable shape.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StrategySnapshot {
-    pub enabled: bool,
-    pub mode: String,
-    pub strategy_version: String,
-    pub symbol: String,
-    pub interval: String,
-    pub volume_threshold: f64,
-    pub sl_min_pips: f64,
-    pub sl_max_pips: f64,
-    pub tp_min_pips: f64,
-    pub tp_max_pips: f64,
-    pub rr_min: f64,
-    pub rr_max: f64,
-    pub ttl_secs: u64,
-    pub levels_tracked: usize,
-    pub candles_observed: u64,
-    pub last_candle_time: Option<i64>,
-    pub atr: f64,
-    pub last_decision_at_ms: Option<i64>,
-    pub last_action: String,
-    pub last_trigger_level: Option<String>,
-    pub last_intent_id: Option<String>,
-    pub intents_emitted: u64,
-    pub intents_suppressed: u64,
-    pub last_suppression_reason: Option<String>,
-    pub last_error: Option<String>,
-    pub updated_at: Option<i64>,
-    pub breaks_detected: u64,
-    pub breaks_invalidated: u64,
-    pub retests_rejected_low_volume: u64,
-    pub signals_confirmed: u64,
-}
-
-impl Default for StrategySnapshot {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            mode: "node3".into(),
-            strategy_version: String::new(),
-            symbol: String::new(),
-            interval: String::new(),
-            volume_threshold: 0.0,
-            sl_min_pips: 0.0,
-            sl_max_pips: 0.0,
-            tp_min_pips: 0.0,
-            tp_max_pips: 0.0,
-            rr_min: 0.0,
-            rr_max: 0.0,
-            ttl_secs: 0,
-            levels_tracked: 0,
-            candles_observed: 0,
-            last_candle_time: None,
-            atr: 0.0,
-            last_decision_at_ms: None,
-            last_action: "flat".into(),
-            last_trigger_level: None,
-            last_intent_id: None,
-            intents_emitted: 0,
-            intents_suppressed: 0,
-            last_suppression_reason: None,
-            last_error: None,
-            updated_at: None,
-            breaks_detected: 0,
-            breaks_invalidated: 0,
-            retests_rejected_low_volume: 0,
-            signals_confirmed: 0,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
