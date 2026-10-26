@@ -158,24 +158,41 @@ for name, step in INTERVAL_MS.items():
 
     for index, candle in enumerate(candles):
         where = f"candles-{name}[{index}]"
+        if not isinstance(candle, dict):
+            fail(f"{where}: not an object")
+            continue
         schema_check({"type": "candle", "seq": 1, "data": candle}, where)
         if index > 0:
             previous = candles[index - 1]
-            check(candle["time"] > previous["time"], f"{where}: time is not strictly ascending")
-        check(candle["interval"] == name, f"{where}: interval is {candle['interval']!r}")
-        check(candle["symbol"] == SYMBOL, f"{where}: symbol is {candle['symbol']!r}")
-        check(candle["time"] % step == 0, f"{where}: time {candle['time']} is off the {name} grid")
-        check(candle["closed"] is True, f"{where}: /candles served a forming bucket")
-        check(candle["low"] <= min(candle["open"], candle["close"]), f"{where}: body below the low")
-        check(candle["high"] >= max(candle["open"], candle["close"]), f"{where}: body above the high")
-        check(candle["volume"] >= 0, f"{where}: negative volume")
+            if isinstance(previous, dict) and isinstance(candle.get("time"), int):
+                if isinstance(previous.get("time"), int):
+                    check(
+                        candle["time"] > previous["time"],
+                        f"{where}: time is not strictly ascending",
+                    )
+        check(candle.get("interval") == name, f"{where}: interval is {candle.get('interval')!r}")
+        check(candle.get("symbol") == SYMBOL, f"{where}: symbol is {candle.get('symbol')!r}")
+        time = candle.get("time")
+        check(
+            isinstance(time, int) and time % step == 0,
+            f"{where}: time {time!r} is off the {name} grid",
+        )
+        check(candle.get("closed") is True, f"{where}: /candles served a forming bucket")
+        body = [candle.get(key) for key in ("open", "high", "low", "close")]
+        if all(isinstance(value, (int, float)) for value in body):
+            open_, high, low, close = body
+            check(low <= min(open_, close), f"{where}: body below the low")
+            check(high >= max(open_, close), f"{where}: body above the high")
+        volume = candle.get("volume")
+        check(isinstance(volume, (int, float)) and volume >= 0, f"{where}: bad volume {volume!r}")
 
     # The most recent bar may not be the bucket the live tick is filling: a
     # forming bar is a WS-only concept in C1.
-    newest = candles[-1]["time"]
-    forming = ((status or {}).get("candles") or {}).get("intervals", {}).get(name, {}).get("forming")
-    check(forming != newest,
-          f"candles-{name}: /candles served the forming bucket at {newest}")
+    newest = candles[-1].get("time") if isinstance(candles[-1], dict) else None
+    forming = (
+        ((status or {}).get("candles") or {}).get("intervals", {}).get(name, {}).get("forming")
+    )
+    check(forming != newest, f"candles-{name}: /candles served the forming bucket at {newest}")
 
 # ---------------------------------------------------------------------------
 # /tick-volume + /calendar
@@ -185,12 +202,16 @@ tick_volume = load_json(sys.argv[1] if len(sys.argv) > 1 else ".", "tick-volume.
 if tick_volume is not None:
     sweep(tick_volume, "tick-volume.json")
     check(isinstance(tick_volume, list), "tick-volume.json is not an array")
-    times = [bar["time"] for bar in tick_volume or []]
+    bars = [bar for bar in tick_volume or [] if isinstance(bar, dict)]
+    times = [bar.get("time") for bar in bars]
     check(times == sorted(set(times)), "tick-volume bars are not unique and oldest-first")
-    for index, bar in enumerate(tick_volume or []):
-        check(bar["symbol"] == SYMBOL, f"tick-volume[{index}]: symbol is {bar['symbol']!r}")
-        check(bar["up_ticks"] + bar["down_ticks"] + bar["flat_ticks"] == bar["ticks"],
-              f"tick-volume[{index}]: the up/down/flat split does not add up to ticks")
+    for index, bar in enumerate(bars):
+        check(bar.get("symbol") == SYMBOL, f"tick-volume[{index}]: symbol is {bar.get('symbol')!r}")
+        split = [bar.get(key) for key in ("up_ticks", "down_ticks", "flat_ticks", "ticks")]
+        if all(isinstance(value, int) for value in split):
+            up, down, flat, ticks = split
+            check(up + down + flat == ticks,
+                  f"tick-volume[{index}]: the up/down/flat split does not add up to ticks")
 
 calendar = load_json(sys.argv[1] if len(sys.argv) > 1 else ".", "calendar.json")
 if calendar is not None:
