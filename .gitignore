@@ -47,8 +47,8 @@ mt5-host/data/
 .coverage
 htmlcov/
 
-# Node (Node 2 dashboard)
-node2/node_modules/
+# Node 2 is a separate branch (frontend only); no dashboard lives here.
+# Keep ignoring the old log names in case a stale artefact is committed.
 node2-errors.log
 node2-test-errors.log
 
