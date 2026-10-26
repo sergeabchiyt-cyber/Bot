@@ -12,7 +12,9 @@
 //! for every anchor. The unit tests cross-check the offsets against reference
 //! instants.
 
-use chrono::{Datelike, NaiveDate, TimeZone, Utc, Weekday};
+use chrono::{Datelike, NaiveDate, Weekday};
+#[cfg(test)]
+use chrono::{TimeZone, Utc};
 
 pub const HOUR_MS: i64 = 3_600_000;
 pub const DAY_MS: i64 = 24 * HOUR_MS;
