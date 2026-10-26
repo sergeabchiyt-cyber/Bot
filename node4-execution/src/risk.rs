@@ -464,8 +464,10 @@ mod tests {
 
     #[test]
     fn the_per_trade_risk_cap_is_enforced() {
-        let mut config = Config::default();
-        config.risk_max_risk_usd = Some(10.0);
+        let config = Config {
+            risk_max_risk_usd: Some(10.0),
+            ..Default::default()
+        };
         let risk = RiskManager::new(&config);
         // $2.50 stop x 0.05 lots x 100 oz = $12.50.
         let err = risk
@@ -476,8 +478,10 @@ mod tests {
 
     #[test]
     fn the_open_position_cap_is_enforced() {
-        let mut config = Config::default();
-        config.risk_max_open_positions = 1;
+        let config = Config {
+            risk_max_open_positions: 1,
+            ..Default::default()
+        };
         let risk = RiskManager::new(&config);
         let now = 1_700_000_000_000;
         assert!(risk.check(&intent(250.0, 625.0), 0.01, now).is_ok());
@@ -488,9 +492,11 @@ mod tests {
 
     #[test]
     fn consecutive_losses_trigger_a_cooldown() {
-        let mut config = Config::default();
-        config.risk_cooldown_losses = 2;
-        config.risk_cooldown_secs = 60;
+        let config = Config {
+            risk_cooldown_losses: 2,
+            risk_cooldown_secs: 60,
+            ..Default::default()
+        };
         let risk = RiskManager::new(&config);
         let now = 1_700_000_000_000;
         risk.record_fill(0.01, now);
@@ -507,8 +513,10 @@ mod tests {
 
     #[test]
     fn the_daily_loss_cap_blocks_the_next_trade() {
-        let mut config = Config::default();
-        config.risk_max_daily_loss_usd = Some(50.0);
+        let config = Config {
+            risk_max_daily_loss_usd: Some(50.0),
+            ..Default::default()
+        };
         let risk = RiskManager::new(&config);
         let now = 1_700_000_000_000;
         risk.record_fill(0.01, now);
@@ -520,8 +528,10 @@ mod tests {
 
     #[test]
     fn a_new_utc_day_resets_the_daily_pnl() {
-        let mut config = Config::default();
-        config.risk_max_daily_loss_usd = Some(50.0);
+        let config = Config {
+            risk_max_daily_loss_usd: Some(50.0),
+            ..Default::default()
+        };
         let risk = RiskManager::new(&config);
         let now = 1_700_000_000_000;
         risk.record_fill(0.01, now);

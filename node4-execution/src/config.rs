@@ -973,12 +973,14 @@ mod tests {
 
     #[test]
     fn risk_limits_are_clamped_to_safe_values() {
-        let mut config = Config::default();
-        config.risk_sl_min_pips = -5.0;
-        config.risk_sl_max_pips = 0.0;
-        config.risk_rr_max = 0.0;
-        config.risk_pip_value = 0.0;
-        config.risk_max_open_positions = 0;
+        let mut config = Config {
+            risk_sl_min_pips: -5.0,
+            risk_sl_max_pips: 0.0,
+            risk_rr_max: 0.0,
+            risk_pip_value: 0.0,
+            risk_max_open_positions: 0,
+            ..Default::default()
+        };
         config.normalise_risk();
         assert!(config.risk_sl_min_pips >= 1.0);
         assert!(config.risk_sl_max_pips >= config.risk_sl_min_pips);
