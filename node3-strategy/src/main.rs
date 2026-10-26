@@ -93,7 +93,8 @@ impl Pipeline {
                 freshness,
             } => {
                 hub.record_freshness(&freshness).await;
-                hub.record_bar(bar_interval, &candle, closed, is_new, replay).await;
+                hub.record_bar(bar_interval, &candle, closed, is_new, replay)
+                    .await;
                 if !closed {
                     return;
                 }
@@ -106,9 +107,7 @@ impl Pipeline {
 
                 // Only a new, live, open-market bar may trigger. Replays and
                 // stale or closed-market bars only feed ATR history.
-                let fresh_enough = self
-                    .last_evaluated
-                    .is_none_or(|last| candle.time > last);
+                let fresh_enough = self.last_evaluated.is_none_or(|last| candle.time > last);
                 let evaluate = !replay && is_new && freshness.tradeable() && fresh_enough;
                 if !evaluate {
                     self.engine.seed(&candle);
@@ -117,9 +116,7 @@ impl Pipeline {
                 }
 
                 self.last_evaluated = Some(candle.time);
-                let report = self
-                    .engine
-                    .evaluate(&candle, self.config.volume_threshold);
+                let report = self.engine.evaluate(&candle, self.config.volume_threshold);
                 self.risk.update_atr(self.engine.atr());
                 let scanning = self.scanning(hub).await;
                 let triggered: Option<Trigger> = report.triggered.clone();
@@ -159,7 +156,10 @@ impl Pipeline {
     /// Turn a confirmed retest into an intent. Node 3 never sizes or places the order.
     async fn emit(&self, hub: &DiagnosticsHub, trigger: &Trigger) {
         let Some(projection) = self.risk.projection() else {
-            warn!("Retest confirmed on {} but ATR is not ready; no intent", trigger.level_name);
+            warn!(
+                "Retest confirmed on {} but ATR is not ready; no intent",
+                trigger.level_name
+            );
             return;
         };
         let Some(order) = self.risk.order(trigger.reference_price, trigger.side) else {
@@ -205,7 +205,10 @@ async fn load_history(
                 pipeline.engine.seed(bar);
             }
         }
-        info!("Loaded {} closed {interval} bars from Node 1 history", bars.len());
+        info!(
+            "Loaded {} closed {interval} bars from Node 1 history",
+            bars.len()
+        );
     }
     hub.recompute_market(now_ms()).await;
     pipeline.sync_levels(hub).await;
@@ -234,7 +237,10 @@ async fn feed_session(
         "contract_version": feed::CONTRACT_VERSION,
         "topics": ["candle", "tick_volume", "calendar", "status"],
     });
-    if let Err(error) = ws.send(Message::Text(subscription.to_string().into())).await {
+    if let Err(error) = ws
+        .send(Message::Text(subscription.to_string().into()))
+        .await
+    {
         return format!("subscribe failed: {error}");
     }
 
@@ -303,7 +309,10 @@ async fn feed_loop(config: Config, hub: DiagnosticsHub) {
             failures = 0;
         }
         let delay = reconnect_delay(failures);
-        warn!("Node 1 feed ended: {reason}; reconnecting in {}s", delay.as_secs());
+        warn!(
+            "Node 1 feed ended: {reason}; reconnecting in {}s",
+            delay.as_secs()
+        );
         // A violation keeps its own record; this only marks the stream down.
         hub.set_node1_state(false, &reason, false).await;
         attempts += 1;
@@ -339,7 +348,10 @@ async fn main() -> anyhow::Result<()> {
     for warning in &config.warnings {
         warn!("config: {warning}");
     }
-    info!("Starting Node 3 (strategy-only service, v{})", env!("CARGO_PKG_VERSION"));
+    info!(
+        "Starting Node 3 (strategy-only service, v{})",
+        env!("CARGO_PKG_VERSION")
+    );
     info!("Node 1 market stream: {}", config.node1_ws_url);
     info!("HTTP/public WS/private execution port: {}", config.port);
     info!(

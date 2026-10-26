@@ -486,7 +486,8 @@ impl DiagnosticsHub {
                 &mut inner,
                 "warn",
                 "node1",
-                "No Node 1 frame for over 90 seconds; trading is blocked until the feed resumes".into(),
+                "No Node 1 frame for over 90 seconds; trading is blocked until the feed resumes"
+                    .into(),
             );
         }
     }
@@ -521,7 +522,11 @@ impl DiagnosticsHub {
             self.inner.write().await.work.duplicate_bars_ignored += 1;
         }
         // Store every closed bar, including duplicates, so a corrected re-send overwrites.
-        let stored = self.market.write().await.upsert_closed(interval, candle.clone());
+        let stored = self
+            .market
+            .write()
+            .await
+            .upsert_closed(interval, candle.clone());
         let mut inner = self.inner.write().await;
         if stored {
             inner.work.closed_bars_stored += 1;
@@ -652,7 +657,10 @@ impl DiagnosticsHub {
                     &mut inner,
                     "info",
                     "strategy",
-                    format!("Intent {} already emitted; duplicate suppressed", intent.intent_id),
+                    format!(
+                        "Intent {} already emitted; duplicate suppressed",
+                        intent.intent_id
+                    ),
                 );
                 let signals = Self::build_signals_locked(
                     &inner,
@@ -819,7 +827,6 @@ impl DiagnosticsHub {
         });
         Ok(())
     }
-
 }
 
 #[cfg(test)]

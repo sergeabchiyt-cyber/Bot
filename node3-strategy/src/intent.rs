@@ -149,7 +149,11 @@ mod tests {
         let a = intent_id("2.0.0", 42, "buy", "PW_POC");
         assert_eq!(a, intent_id("2.0.0", 42, "buy", "PW_POC"));
         assert_eq!(a, "n3-2-0-0-42-buy-pw-poc");
-        assert_ne!(a, intent_id("2.0.1", 42, "buy", "PW_POC"), "rule change ⇒ new id");
+        assert_ne!(
+            a,
+            intent_id("2.0.1", 42, "buy", "PW_POC"),
+            "rule change ⇒ new id"
+        );
         assert_ne!(a, intent_id("2.0.0", 43, "buy", "PW_POC"));
         assert_ne!(a, intent_id("2.0.0", 42, "sell", "PW_POC"));
     }
@@ -175,7 +179,10 @@ mod tests {
         assert_eq!(intent.drawing_id.as_deref(), Some("PW:poc:1:2"));
         assert_eq!(intent.atr, Some(2.5));
         assert_eq!(intent.atr_pips, Some(250.0));
-        assert_eq!(intent.volume_confirmed, None, "no gate ⇒ no confirmation claim");
+        assert_eq!(
+            intent.volume_confirmed, None,
+            "no gate ⇒ no confirmation claim"
+        );
         assert_eq!(intent.expires_at, 1_000 + 120_000);
         assert!((2.0..=3.0).contains(&intent.risk_reward));
     }
@@ -214,7 +221,9 @@ mod tests {
             if !is_rust {
                 continue;
             }
-            let text = std::fs::read_to_string(&path).expect("read source").to_ascii_lowercase();
+            let text = std::fs::read_to_string(&path)
+                .expect("read source")
+                .to_ascii_lowercase();
             for word in forbidden {
                 assert!(
                     !text.contains(word),
@@ -224,6 +233,9 @@ mod tests {
             }
             scanned += 1;
         }
-        assert!(scanned >= 10, "expected to scan the crate sources, scanned {scanned}");
+        assert!(
+            scanned >= 10,
+            "expected to scan the crate sources, scanned {scanned}"
+        );
     }
 }

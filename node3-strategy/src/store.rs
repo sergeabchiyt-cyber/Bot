@@ -157,7 +157,10 @@ mod tests {
         sparse.upsert("1m", bar(60_000, 1.0));
         assert!(sparse.window(0, 600_000).is_none());
         // ...but custom ranges accept it.
-        assert_eq!(sparse.finest_bars(0, 600_000).map(|(_, b)| b.len()), Some(2));
+        assert_eq!(
+            sparse.finest_bars(0, 600_000).map(|(_, b)| b.len()),
+            Some(2)
+        );
     }
 
     #[test]

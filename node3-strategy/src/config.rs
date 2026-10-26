@@ -164,7 +164,9 @@ impl Config {
         let vp_rows = if (2..=5_000).contains(&rows_raw) {
             rows_raw as usize
         } else {
-            warnings.push(format!("VP_ROWS {rows_raw} outside 2-5000; using {DEFAULT_ROWS}"));
+            warnings.push(format!(
+                "VP_ROWS {rows_raw} outside 2-5000; using {DEFAULT_ROWS}"
+            ));
             DEFAULT_ROWS
         };
 
@@ -186,7 +188,9 @@ impl Config {
         } else if parse_label(&lower_raw).is_some() {
             LowerTf::parse(&lower_raw)
         } else {
-            warnings.push(format!("VP_LOWER_TF '{lower_raw}' not recognised; using tv"));
+            warnings.push(format!(
+                "VP_LOWER_TF '{lower_raw}' not recognised; using tv"
+            ));
             LowerTf::Tv
         };
 
