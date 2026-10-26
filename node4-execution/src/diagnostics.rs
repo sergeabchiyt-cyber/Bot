@@ -958,7 +958,10 @@ mod tests {
         assert!(json["node3"]["state"].is_string());
         assert!(json.get("scanning").is_none(), "no market state in Node 4");
         assert!(json.get("market_feed").is_none(), "no feed state in Node 4");
-        assert!(json.get("strategy").is_none(), "no strategy state in Node 4");
+        assert!(
+            json.get("strategy").is_none(),
+            "no strategy state in Node 4"
+        );
         assert!(json["risk"].is_object(), "risk block is always present");
     }
 

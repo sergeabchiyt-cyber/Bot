@@ -587,10 +587,9 @@ async fn handle_intent(shared: LinkShared, sink: ReportSink, intent: TradeIntent
     // 5. Risk policy: the ATR-derived SL/TP bands, the RR band and every
     //    account-level cap are re-checked immediately before the write.
     //    Node 4 refuses an out-of-policy intent; it never rewrites its prices.
-    if let Err(rejection) =
-        shared
-            .risk
-            .check(&intent, shared.config.mt5_volume_lots, now_ms())
+    if let Err(rejection) = shared
+        .risk
+        .check(&intent, shared.config.mt5_volume_lots, now_ms())
     {
         shared.hub.record_intent_rejected(&intent, &rejection).await;
         publish_report(

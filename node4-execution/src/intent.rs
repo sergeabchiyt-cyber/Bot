@@ -797,5 +797,4 @@ mod tests {
         assert_eq!(data.take_profit, 2656.25);
         assert_eq!(data.risk_reward, 2.5);
     }
-
 }

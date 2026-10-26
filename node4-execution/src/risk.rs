@@ -133,7 +133,11 @@ fn price_refusal(l: &RiskLimits, intent: &TradeIntent, lots: f64) -> Option<(Str
     let tp_price = (intent.take_profit - entry).abs();
     let sl_pips = sl_price / l.pip_value;
     let tp_pips = tp_price / l.pip_value;
-    let implied_rr = if sl_pips > 0.0 { tp_pips / sl_pips } else { 0.0 };
+    let implied_rr = if sl_pips > 0.0 {
+        tp_pips / sl_pips
+    } else {
+        0.0
+    };
     let risk_usd = sl_price * lots.max(0.0) * l.contract_size;
 
     if !(l.sl_min_pips - BAND_EPS..=l.sl_max_pips + BAND_EPS).contains(&sl_pips) {
@@ -413,7 +417,9 @@ mod tests {
     #[test]
     fn a_valid_atr_scaled_intent_passes() {
         let risk = manager();
-        assert!(risk.check(&intent(250.0, 625.0), 0.01, 1_700_000_000_000).is_ok());
+        assert!(risk
+            .check(&intent(250.0, 625.0), 0.01, 1_700_000_000_000)
+            .is_ok());
         assert_eq!(risk.snapshot().intents_checked, 1);
         assert_eq!(risk.snapshot().intents_rejected, 0);
     }
@@ -421,15 +427,22 @@ mod tests {
     #[test]
     fn a_stop_outside_the_200_300_band_is_refused() {
         let risk = manager();
-        let err = risk.check(&intent(120.0, 625.0), 0.01, 1_700_000_000_000).unwrap_err();
+        let err = risk
+            .check(&intent(120.0, 625.0), 0.01, 1_700_000_000_000)
+            .unwrap_err();
         assert_eq!(err.code, "risk_sl_out_of_band");
-        assert_eq!(risk.snapshot().last_rejection_code.as_deref(), Some("risk_sl_out_of_band"));
+        assert_eq!(
+            risk.snapshot().last_rejection_code.as_deref(),
+            Some("risk_sl_out_of_band")
+        );
     }
 
     #[test]
     fn a_target_outside_the_600_800_band_is_refused() {
         let risk = manager();
-        let err = risk.check(&intent(250.0, 1_400.0), 0.01, 1_700_000_000_000).unwrap_err();
+        let err = risk
+            .check(&intent(250.0, 1_400.0), 0.01, 1_700_000_000_000)
+            .unwrap_err();
         assert_eq!(err.code, "risk_tp_out_of_band");
     }
 
@@ -438,7 +451,9 @@ mod tests {
         let risk = manager();
         // 200 pips SL / 800 pips TP = 4R, above the 3R ceiling. Both legs are
         // inside their own bands, so this isolates the RR check.
-        let err = risk.check(&intent(200.0, 800.0), 0.01, 1_700_000_000_000).unwrap_err();
+        let err = risk
+            .check(&intent(200.0, 800.0), 0.01, 1_700_000_000_000)
+            .unwrap_err();
         assert_eq!(err.code, "risk_rr_out_of_band");
 
         let mut lying = intent(250.0, 625.0);
@@ -453,7 +468,9 @@ mod tests {
         config.risk_max_risk_usd = Some(10.0);
         let risk = RiskManager::new(&config);
         // $2.50 stop x 0.05 lots x 100 oz = $12.50.
-        let err = risk.check(&intent(250.0, 625.0), 0.05, 1_700_000_000_000).unwrap_err();
+        let err = risk
+            .check(&intent(250.0, 625.0), 0.05, 1_700_000_000_000)
+            .unwrap_err();
         assert_eq!(err.code, "risk_per_trade_cap");
     }
 
@@ -483,7 +500,9 @@ mod tests {
         let err = risk.check(&intent(250.0, 625.0), 0.01, now).unwrap_err();
         assert_eq!(err.code, "risk_cooldown");
         // The cooldown expires after the configured window.
-        assert!(risk.check(&intent(250.0, 625.0), 0.01, now + 61_000).is_ok());
+        assert!(risk
+            .check(&intent(250.0, 625.0), 0.01, now + 61_000)
+            .is_ok());
     }
 
     #[test]
@@ -507,7 +526,9 @@ mod tests {
         let now = 1_700_000_000_000;
         risk.record_fill(0.01, now);
         risk.record_close(-48.0, now);
-        assert!(risk.check(&intent(250.0, 625.0), 0.01, now + MS_PER_DAY).is_ok());
+        assert!(risk
+            .check(&intent(250.0, 625.0), 0.01, now + MS_PER_DAY)
+            .is_ok());
     }
 
     #[test]
@@ -519,9 +540,17 @@ mod tests {
         let snap = risk.snapshot();
         let json = serde_json::to_value(&snap).unwrap();
         for key in [
-            "sl_min_pips", "sl_max_pips", "tp_min_pips", "tp_max_pips",
-            "rr_min", "rr_max", "open_positions", "daily_pnl_usd",
-            "intents_checked", "intents_rejected", "last_rejection_code",
+            "sl_min_pips",
+            "sl_max_pips",
+            "tp_min_pips",
+            "tp_max_pips",
+            "rr_min",
+            "rr_max",
+            "open_positions",
+            "daily_pnl_usd",
+            "intents_checked",
+            "intents_rejected",
+            "last_rejection_code",
         ] {
             assert!(json.get(key).is_some(), "missing risk key {key}");
         }

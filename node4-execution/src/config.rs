@@ -191,7 +191,6 @@ pub struct Config {
     /// `NODE4_LIVE_TRADING_APPROVED`: required for `chelsea_live`. Live stays
     /// opt-in and is never the default.
     pub live_trading_approved: bool,
-
 }
 
 fn env_str(key: &str, default: &str) -> String {
@@ -316,7 +315,6 @@ impl Default for Config {
             risk_cooldown_secs: 900,
             demo_integration_passed: false,
             live_trading_approved: false,
-
         }
     }
 }
@@ -405,7 +403,6 @@ impl Config {
             risk_cooldown_secs: env_u64("RISK_COOLDOWN_SECS", 900),
             demo_integration_passed: env_truthy("NODE4_DEMO_INTEGRATION_PASSED"),
             live_trading_approved: env_truthy("NODE4_LIVE_TRADING_APPROVED"),
-
         };
         config.symbol_map_errors = symbol_map_errors;
         config.normalise_risk();
@@ -432,9 +429,7 @@ impl Config {
             } else {
                 100.0
             };
-        self.risk_max_drawdown_pct = self
-            .risk_max_drawdown_pct
-            .map(|pct| pct.clamp(0.1, 100.0));
+        self.risk_max_drawdown_pct = self.risk_max_drawdown_pct.map(|pct| pct.clamp(0.1, 100.0));
         self.risk_max_open_positions = self.risk_max_open_positions.clamp(1, 1_000);
         self.risk_max_lots = if self.risk_max_lots.is_finite() && self.risk_max_lots > 0.0 {
             self.risk_max_lots
