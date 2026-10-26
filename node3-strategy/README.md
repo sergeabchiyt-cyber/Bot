@@ -23,7 +23,9 @@ holds no account, broker, stake, or lot-size state.
 1. Connect to `NODE1_WS_URL` and subscribe to `candle`, `tick_volume`,
    `calendar`, and `status` (Node 1 contract v2).
 2. Validate every frame (see *Feed contract* below). A violation drops the
-   connection and reconnects. Node 3 never trades on the violating frame.
+   connection and reconnects after an exponential backoff (2 s, 4 s, … capped
+   at 60 s; the backoff resets after a session stays up for 60 s). Node 3
+   never trades on the violating frame.
 3. Store closed bars per resolution (35 days minimum). Open bars only update
    freshness.
 4. Recompute PW, PS, and CW from the stored bars. Publish the levels, audits,

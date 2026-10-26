@@ -28,8 +28,12 @@ use risk::RiskProjector;
 use strategy::{ScanContext, StrategyEngine, Trigger};
 use types::ScanningSnapshot;
 
-/// Pause before reconnecting to Node 1 after any disconnect or violation.
-const RECONNECT_DELAY: Duration = Duration::from_secs(5);
+/// First pause before reconnecting to Node 1; doubles on each consecutive failure.
+const RECONNECT_BASE: Duration = Duration::from_secs(2);
+/// Upper bound on the reconnect pause.
+const RECONNECT_MAX: Duration = Duration::from_secs(60);
+/// A session that stayed up at least this long resets the backoff.
+const RECONNECT_STABLE_AFTER: Duration = Duration::from_secs(60);
 /// How often the pipeline refreshes profiles, silence state, and scanning.
 const REFRESH_EVERY: Duration = Duration::from_secs(5);
 
@@ -248,16 +252,40 @@ async fn feed_session(
     }
 }
 
+/// Reconnect pause after `failures` consecutive failed sessions: 2s, 4s, ... capped at 60s.
+fn reconnect_delay(failures: u32) -> Duration {
+    let factor = 1u32 << failures.min(6);
+    (RECONNECT_BASE * factor).min(RECONNECT_MAX)
+}
+
 async fn feed_loop(config: Config, hub: DiagnosticsHub) {
     let mut pipeline = Pipeline::new(config.clone());
     let mut attempts: u64 = 0;
+    let mut failures: u32 = 0;
     loop {
+        let started = std::time::Instant::now();
         let reason = feed_session(&config, &hub, &mut pipeline, attempts > 0).await;
-        warn!("Node 1 feed ended: {reason}; reconnecting in {}s", RECONNECT_DELAY.as_secs());
+        if started.elapsed() >= RECONNECT_STABLE_AFTER {
+            failures = 0;
+        }
+        let delay = reconnect_delay(failures);
+        warn!("Node 1 feed ended: {reason}; reconnecting in {}s", delay.as_secs());
         // A violation keeps its own record; this only marks the stream down.
         hub.set_node1_state(false, &reason, false).await;
         attempts += 1;
-        sleep(RECONNECT_DELAY).await;
+        failures = failures.saturating_add(1);
+        sleep(delay).await;
+    }
+}
+
+#[cfg(test)]
+mod reconnect_tests {
+    use super::*;
+
+    #[test]
+    fn backoff_doubles_from_two_seconds_and_caps_at_sixty() {
+        let secs: Vec<u64> = (0..8).map(|n| reconnect_delay(n).as_secs()).collect();
+        assert_eq!(secs, vec![2, 4, 8, 16, 32, 60, 60, 60]);
     }
 }
 
