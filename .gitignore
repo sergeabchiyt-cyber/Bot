@@ -1,4 +1,4 @@
-# Rust (the Node1 market-data / volume-profile engine)
+# Rust (the Node1 market-data + calendar feed)
 target/
 
 # Python (tooling)
@@ -11,8 +11,8 @@ __pycache__/
 *.so
 *.pyc
 
-# Environment — Node1 holds market/feed/calendar credentials only. It has no
-# broker credential, so there is no execution .env to ignore here.
+# Environment — Node1 holds market-feed and calendar credentials only. There
+# is no execution credential and no order route, so no trading .env exists.
 .env
 .env.local
 

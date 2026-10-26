@@ -4,8 +4,8 @@
 usage: live_report.py ci/live > ci/LIVE.md
 
 Everything here is derived from the recorded payloads: it never claims a
-timeframe the engine did not actually serve. The point is to answer "what
-candles does the API get?" with the timestamps as they came off the wire.
+timeframe the engine did not actually serve. The point is to answer "what is
+the deployed engine serving?" with the timestamps as they came off the wire.
 """
 
 import json
@@ -15,6 +15,9 @@ import sys
 import time
 from collections import Counter
 from datetime import datetime, timezone
+
+INTERVAL_MS = {"1m": 60_000, "15m": 15 * 60_000, "1h": 60 * 60_000}
+RETIRED = ["levels", "vp", "strategy", "demo", "ai"]
 
 
 def load(path):
@@ -46,8 +49,7 @@ def deltas_min(times):
 def tf_label(minutes):
     if not minutes:
         return "no bars"
-    for span, label in ((1, "1m"), (5, "5m"), (15, "15m"), (30, "30m"), (60, "1h"),
-                        (240, "4h"), (1440, "1d")):
+    for span, label in ((1, "1m"), (15, "15m"), (60, "1h")):
         if abs(minutes - span) <= span * 0.1:
             return label
     return f"{minutes:g}m"
@@ -59,112 +61,130 @@ def main() -> int:
     print()
     print(f"generated: {datetime.now(tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}")
     print()
+    print("Read-only snapshot of the deployed `xauusd-engine` (C1 v2 market feed).")
+    print()
 
-    # ---- REST status -------------------------------------------------
+    # ---- /status -----------------------------------------------------
     status = load(os.path.join(out, "status.json"))
     print("## /status")
     print()
+    contract = (status or {}).get("contract_version")
     if status:
-        feeds = (status.get("status") or {}).get("feeds") or {}
-        candles = status.get("candles")
-        vp = status.get("volume_profile")
-        print(f"* version `{status.get('version')}` service `market-data`")
-        print(f"* feeds connected: {sum(1 for f in feeds.values() if f.get('state') == 'connected')}"
-              f" / {len(feeds)}")
-        if candles:
-            print(f"* **candles: interval={candles.get('interval')!r} "
-                  f"seed_bars={candles.get('seed_bars')}**")
-            if candles.get("last_bar"):
-                print(f"* history edge: {ts(candles['last_bar'])} "
-                      f"(**{candles.get('edge_lag_minutes')} min behind now**) "
-                      f"over {candles.get('bars')} bars")
-        else:
-            print("* no `candles` block — the deployed build predates the candle contract")
-        if vp:
-            print(f"* volume profile: row_mode={vp.get('row_mode')} rows={vp.get('rows')} "
-                  f"bin={vp.get('bin_size')} va={vp.get('va_pct')} input={vp.get('input')}")
-        else:
-            print("* no `volume_profile` block — the deployed build predates the VP settings report")
+        print(f"* service `{status.get('service')}` version `{status.get('version')}`")
+        print(f"* **contract_version `{contract}`** boot_id `{status.get('boot_id')}` "
+              f"uptime {int((status.get('uptime_ms') or 0) / 1000)}s")
+        if contract != "2.0":
+            print("* the deployed build **predates the C1 v2 cutover** — redeploy to serve "
+                  "the contract this branch implements")
+        freshness = status.get("freshness") or {}
+        print(f"* market_open **{status.get('market_open')}**; freshness "
+              f"`{freshness.get('state')}` feed `{freshness.get('feed')}` "
+              f"age {freshness.get('age_ms')} ms, last tick {ts(freshness.get('last_tick_ms'))}")
+        session = status.get("session") or {}
+        if session:
+            print(f"* session: {ts(session.get('open_ms'))} -> {ts(session.get('close_ms'))} "
+                  f"(18:00 America/New_York anchor)")
+        intervals = ((status.get("candles") or {}).get("intervals") or {})
+        if intervals:
+            print()
+            print("| interval | bars | capacity | first bar | last closed bar | edge lag |")
+            print("|---|---|---|---|---|---|")
+            for name in sorted(intervals):
+                block = intervals[name]
+                print(f"| {name} | {block.get('bars')} | {block.get('capacity')} | "
+                      f"{ts(block.get('first_bar'))} | {ts(block.get('last_bar'))} | "
+                      f"{block.get('edge_lag_minutes')} min |")
+        counters = (status.get("candles") or {}).get("counters")
+        if counters:
+            print()
+            print(f"* ticks: accepted {counters.get('accepted')} / dropped "
+                  f"{counters.get('price', 0) + counters.get('seconds_timestamp', 0) + counters.get('future', 0) + counters.get('repeat', 0) + counters.get('late', 0)} "
+                  f"(price {counters.get('price', 0)}, seconds-ts {counters.get('seconds_timestamp', 0)}, "
+                  f"future {counters.get('future', 0)}, repeat {counters.get('repeat', 0)}, "
+                  f"late {counters.get('late', 0)})")
+        ws = status.get("ws") or {}
+        if ws:
+            print(f"* ws: topics {ws.get('topics')} heartbeat {ws.get('heartbeat_secs')}s "
+                  f"buffer {ws.get('broadcast_capacity')}")
+        calendar = status.get("calendar") or {}
+        if calendar:
+            print(f"* calendar: source `{calendar.get('source')}` "
+                  f"count {calendar.get('count')} updated {ts(calendar.get('updated'))}")
+        retired = [name for name in ("strategy", "demo", "vp", "levels", "volume_profile", "ai")
+                   if name in status]
+        if retired:
+            print(f"* **retired sections still present**: {retired}")
     else:
         print(f"unavailable (http {code(out, 'status')})")
     print()
 
-    # ---- candles -----------------------------------------------------
-    candles = load(os.path.join(out, "candles.json"))
+    # ---- /candles ----------------------------------------------------
     print("## /candles")
     print()
-    if isinstance(candles, list) and candles:
-        times = [c["time"] for c in candles]
-        minutes = deltas_min(times)
-        common = Counter(minutes).most_common(5)
-        fills = sum(1 for c in candles if c["open"] == c["close"])
-        runs = []
-        i = 0
-        while i < len(candles):
-            if candles[i]["open"] != candles[i]["close"]:
-                i += 1
-                continue
-            j = i
-            while j < len(candles) and candles[j]["open"] == candles[j]["close"]:
-                j += 1
-            runs.append(j - i)
-            i = j
-        print(f"* **{len(candles)} bars**, {ts(times[0])} -> {ts(times[-1])}")
-        print(f"* deltas (min): {common}  -> **{tf_label(statistics.median(minutes))}**")
-        print(f"* open==close bars: {fills} ({fills * 100 // len(candles)}%) in {len(runs)} runs"
-              f"{'; longest ' + str(max(runs)) + ' bars' if runs else ''}")
-        print(f"* price range: {min(c['low'] for c in candles):.2f} .. "
-              f"{max(c['high'] for c in candles):.2f}")
-        age_min = (time.time() * 1000 - times[-1]) / 60_000
-        print(f"* newest bar is **{age_min:.0f} minutes behind now**"
-              + (" -- the REST history seed lags the live stream" if age_min > 120 else ""))
-    else:
-        print(f"unavailable (http {code(out, 'candles')})")
-    print()
-
-    # ---- levels + vp -------------------------------------------------
-    print("## /levels")
-    print()
-    levels = load(os.path.join(out, "levels.json"))
-    if isinstance(levels, list) and levels:
-        has_meta = any("meta" in lv for lv in levels)
-        print(f"* windows: {', '.join(lv.get('window', '?') for lv in levels)}")
-        print(f"* `meta` present: **{has_meta}** (the branch adds it)")
+    for name in ("1m", "15m", "1h"):
+        label = "candles" if name == "15m" else f"candles-{name}"
+        candles = load(os.path.join(out, f"{label}.json"))
+        print(f"### {name}")
         print()
-        print("| window | poc | vah | val | start | end |")
-        print("|---|---|---|---|---|---|")
-        for lv in levels:
-            print(f"| {lv.get('window')} | {lv.get('poc')} | {lv.get('vah')} | {lv.get('val')} | "
-                  f"{ts(lv.get('start'))} | {ts(lv.get('end'))} |")
+        if not isinstance(candles, list) or not candles:
+            print(f"* unavailable (http {code(out, label)})")
+            print()
+            continue
+        times = [bar["time"] for bar in candles]
+        minutes = deltas_min(times)
+        step = INTERVAL_MS[name] // 60_000
+        on_grid = sum(1 for t in times if t % INTERVAL_MS[name] == 0)
+        closed = sum(1 for bar in candles if bar.get("closed") is True)
+        sources = sorted({bar.get("source") for bar in candles})
+        age_min = (time.time() * 1000 - times[-1]) / 60_000
+        print(f"* **{len(candles)} bars**, {ts(times[0])} -> {ts(times[-1])}")
+        print(f"* deltas (min): {Counter(minutes).most_common(4)} -> "
+              f"**{tf_label(statistics.median(minutes)) if minutes else 'single bar'}**")
+        print(f"* on the {name} grid: {on_grid}/{len(times)}; closed: {closed}/{len(candles)}; "
+              f"ascending: {times == sorted(set(times))}")
+        print(f"* sources: {sources}; price range: "
+              f"{min(bar['low'] for bar in candles):.2f} .. {max(bar['high'] for bar in candles):.2f}")
+        print(f"* newest bar is **{age_min:.0f} minutes behind now**")
+        print()
+
+    # ---- /tick-volume ------------------------------------------------
+    print("## /tick-volume")
+    print()
+    bars = load(os.path.join(out, "tick-volume.json"))
+    if isinstance(bars, list):
+        if bars:
+            last = bars[-1]
+            print(f"* {len(bars)} bar(s); newest {ts(last['time'])} closed={last['closed']} "
+                  f"ticks={last['ticks']} ({last['up_ticks']}↑ {last['down_ticks']}↓ "
+                  f"{last['flat_ticks']}=) at {last['close']}")
+        else:
+            print("* no live bars (the probe saw a quiet or closed market)")
     else:
-        print(f"unavailable (http {code(out, 'levels')})")
+        print(f"unavailable (http {code(out, 'tick-volume')})")
     print()
 
-    print("## /vp audit")
+    # ---- /calendar ---------------------------------------------------
+    print("## /calendar")
     print()
-    for name in ("vp-PW", "vp-PS", "vp-CW", "vp-PW-64", "vp-6h", "vp-24h",
-                 "vp-bad", "vp-bad-range"):
-        vp = load(os.path.join(out, f"{name}.json"))
-        http = code(out, name)
-        if http != "200" or not isinstance(vp, dict):
-            print(f"* `{name}`: http {http} -> {json.dumps(vp)[:120] if vp else 'no body'}")
-            continue
-        rows = [r for r in vp.get("histogram", []) if isinstance(r, dict)]
-        if name.startswith("vp-6h") or name.startswith("vp-24h"):
-            if vp.get("window") != "CUSTOM":
-                print(f"* `{name}`: the deployed build predates `?start=&end=` "
-                      f"(answered with window={vp.get('window')}) — deploy the branch to "
-                      f"check whether SiftingIO's history covers the last hours")
-                continue
-        print(f"* `{name}`: window={vp.get('window')} rows={vp.get('rows')} "
-              f"row_height={vp.get('row_height')} row_mode={vp.get('row_mode')}")
-        print(f"  range {vp.get('range_low')}..{vp.get('range_high')} "
-              f"input={vp.get('input_interval')} ({vp.get('input_bars')} bars) "
-              f"volume={vp.get('total_volume')} va={vp.get('va_pct')}")
-        print(f"  poc={vp.get('poc')} (row {vp.get('poc_row')}) "
-              f"val={vp.get('val')} (row {vp.get('val_row')}) "
-              f"vah={vp.get('vah')} (row {vp.get('vah_row')}) "
-              f"histogram rows in payload: {len(rows)}")
+    calendar = load(os.path.join(out, "calendar.json"))
+    if isinstance(calendar, dict):
+        print(f"* source `{calendar.get('source')}` count **{calendar.get('count')}** "
+              f"updated {ts(calendar.get('updated'))}")
+        for event in (calendar.get("events") or [])[:10]:
+            print(f"  * {str(event.get('time')):<28} | {event.get('currency'):>4} | "
+                  f"{event.get('impact'):<8} | {event.get('event')}")
+    else:
+        print(f"unavailable (http {code(out, 'calendar')})")
+    print()
+
+    # ---- retired surfaces --------------------------------------------
+    print("## Retired surfaces")
+    print()
+    print("C1 v2 has no fields to draw, no strategy and no simulator. A deployed build")
+    print("still answering these predates the cutover (404 is the expected answer).")
+    print()
+    for surface in RETIRED:
+        print(f"* `/{surface}` -> http {code(out, f'retired-{surface}')}")
     print()
 
     # ---- websocket ---------------------------------------------------
@@ -175,63 +195,77 @@ def main() -> int:
         print("* no sample recorded")
     else:
         kinds = Counter()
-        candle_times, tick_times = [], []
-        meta_seen = False
-        first_candle = None
+        live_seqs, replay = [], Counter()
+        candle_times = {}
+        control_with_seq = 0
+        last_candle = None
         with open(ws_path) as fh:
             for line in fh:
                 try:
                     frame = json.loads(line)
                 except ValueError:
                     continue
-                kind = frame.get("type", frame.get("kind", "?"))
+                if not isinstance(frame, dict) or "type" not in frame:
+                    continue
+                kind = frame["type"]
                 kinds[kind] += 1
-                data = frame.get("data") or {}
+                if frame.get("replay") is True:
+                    replay[kind] += 1
+                elif isinstance(frame.get("seq"), int):
+                    live_seqs.append(frame["seq"])
+                elif kind not in {"heartbeat", "gap"}:
+                    control_with_seq += 1
+                data = frame.get("data")
                 if kind == "candle" and isinstance(data, dict) and "time" in data:
-                    candle_times.append(data["time"])
-                    if first_candle is None:
-                        first_candle = data
-                if kind == "tick_volume" and isinstance(data, dict) and "time" in data:
-                    tick_times.append(data["time"])
-                if kind == "levels" and isinstance(data, dict) and data.get("meta"):
-                    meta_seen = True
+                    candle_times.setdefault(data.get("interval"), []).append(data["time"])
+                    last_candle = data
         print(f"* frames: {dict(kinds)}")
-        if candle_times:
-            minutes = deltas_min(candle_times)
-            print(f"* **live `candle` frames: {len(candle_times)}, deltas (min) "
-                  f"{Counter(minutes).most_common(5)} -> "
-                  f"{tf_label(statistics.median(minutes)) if minutes else 'single frame'}**")
-            print(f"* first frame: {json.dumps(first_candle)[:200]}")
-        else:
-            print("* no `candle` frame arrived in the sample window (weekend/closed market?)")
-        if tick_times:
-            minutes = deltas_min(tick_times)
-            print(f"* live `tick_volume` deltas (min): {Counter(minutes).most_common(5)} -> "
-                  f"{tf_label(statistics.median(minutes)) if minutes else 'single frame'}")
-        print(f"* `levels` frames carrying `meta`: **{meta_seen}**")
+        print(f"* replay: {dict(replay)}; live (seq'd): {len(live_seqs)}; "
+              f"feed frames with neither: {control_with_seq}")
+        if live_seqs:
+            print(f"* live seq range: {min(live_seqs)} .. {max(live_seqs)}, "
+                  f"strictly increasing: {live_seqs == sorted(set(live_seqs))}")
+        for name, times in sorted(candle_times.items()):
+            minutes = deltas_min(times)
+            print(f"* `candle` {name}: {len(times)} frames, deltas (min) "
+                  f"{Counter(minutes).most_common(3) or 'n/a'}")
+        if last_candle is not None:
+            print(f"* last candle frame: {json.dumps(last_candle)[:220]}")
+        if not candle_times:
+            print("* no `candle` frame arrived in the sample window (closed market?)")
+    print()
+
+    # ---- contract matrix ---------------------------------------------
+    matrix_path = os.path.join(out, "contract.txt")
+    print("## C1 contract matrix")
+    print()
+    if os.path.exists(matrix_path):
+        with open(matrix_path) as fh:
+            lines = [line.rstrip() for line in fh if line.strip()]
+        for line in lines[-8:]:
+            print(f"    {line}")
+    else:
+        print("* not run in this probe")
     print()
 
     # ---- verdict -----------------------------------------------------
     print("## Verdict")
     print()
-    if isinstance(candles, list) and candles:
-        minutes = deltas_min([c["time"] for c in candles])
-        med = statistics.median(minutes) if minutes else 0
-        print(f"* the deployed engine serves **{tf_label(med)}** chart candles "
-              f"({len(candles)} bars, {ts(candles[0]['time'])} -> {ts(candles[-1]['time'])})")
-    candles_block = (status or {}).get("candles") or {}
-    if candles_block.get("edge_lag_minutes") is not None:
-        lag = candles_block["edge_lag_minutes"]
-        print(f"* `/status` reports the chart edge: {candles_block.get('bars')} bars, "
-              f"last {ts(candles_block.get('last_bar'))}, **{lag} min behind now**"
-              + (" -- the boot tail fetch did not close the gap (the REST history does not "
-                 "have those bars)" if lag and lag > 120 else ""))
+    candles = load(os.path.join(out, "candles.json"))
+    if status and contract == "2.0":
+        print("* the deployed engine serves **C1 v2**")
     elif status:
-        print("* the deployed build does not report the live edge yet (`/status.candles."
-              "edge_lag_minutes`) — the Node1 merge has not been deployed")
-    if status and not status.get("candles"):
-        print("* the deployed build **predates the current branch** (no `/status.candles`, "
-              "no `/vp`): redeploy to pick up the TradingView-parity profile and the audit endpoint")
+        print(f"* the deployed engine serves contract `{contract}` — the branch head is 2.0, "
+              f"so the deployment is behind")
+    if isinstance(candles, list) and candles:
+        times = [bar["time"] for bar in candles]
+        minutes = deltas_min(times)
+        print(f"* chart candles: **{tf_label(statistics.median(minutes)) if minutes else 'single'}** "
+              f"({len(candles)} bars, {ts(times[0])} -> {ts(times[-1])})")
+    intervals = ((status or {}).get("candles") or {}).get("intervals") or {}
+    lags = {name: block.get("edge_lag_minutes") for name, block in intervals.items()}
+    if lags:
+        print(f"* edge lag now: {lags}")
     return 0
 
 

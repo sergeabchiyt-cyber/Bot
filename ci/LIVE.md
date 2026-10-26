@@ -1,67 +1,91 @@
 # Live engine probe
 
-generated: 2026-10-23T18:58:41Z
+generated: 2026-10-26T14:01:45Z
+
+Read-only snapshot of the deployed `xauusd-engine` (C1 v2 market feed).
 
 ## /status
 
-* version `0.3.0` service `market-data`
-* feeds connected: 8 / 12
-* **candles: interval='15m' seed_bars=2000**
-* history edge: 2026-10-23 18:30 UTC (**27 min behind now**) over 2000 bars
-* volume profile: row_mode=rows rows=128 bin=0.5 va=70.0 input=tv
+* service `None` version `0.4.0`
+* **contract_version `None`** boot_id `None` uptime 0s
+* the deployed build **predates the C1 v2 cutover** — redeploy to serve the contract this branch implements
+* market_open **None**; freshness `None` feed `None` age None ms, last tick ?
+* **retired sections still present**: ['strategy', 'demo', 'volume_profile']
 
 ## /candles
 
-* **2000 bars**, 2026-10-02 00:45 UTC -> 2026-10-23 18:30 UTC
-* deltas (min): [(15.0, 1987), (60.0, 2), (30.0, 2), (165.0, 2), (135.0, 1)]  -> **15m**
-* open==close bars: 385 (19%) in 64 runs; longest 65 bars
-* price range: 3975.87 .. 4225.10
-* newest bar is **29 minutes behind now**
+### 1m
 
-## /levels
+* **2000 bars**, 2026-10-03 12:45 UTC -> 2026-10-26 13:45 UTC
+* deltas (min): [(15.0, 1984), (45.0, 3), (30.0, 3), (60.0, 1)] -> **15m**
+* on the 1m grid: 2000/2000; closed: 0/2000; ascending: True
+* sources: ['sifting']; price range: 3975.87 .. 4217.36
+* newest bar is **17 minutes behind now**
 
-* windows: PW, PS, CW, SWING_BEAR
-* `meta` present: **True** (the branch adds it)
+### 15m
 
-| window | poc | vah | val | start | end |
-|---|---|---|---|---|---|
-| PW | 4156.695 | 4183.25 | 4141.44 | 2026-10-11 22:00 UTC | 2026-10-16 22:00 UTC |
-| PS | 4091.69 | 4109.45 | 4021.13 | 2026-10-21 22:00 UTC | 2026-10-22 22:00 UTC |
-| CW | 4121.545 | 4167.43 | 4104.92 | 2026-10-18 22:00 UTC | 2026-10-22 22:00 UTC |
-| SWING_BEAR | 3996.7400000000002 | 4000.16 | 3990.92 | 2026-10-23 16:45 UTC | 2026-10-23 17:45 UTC |
+* **2000 bars**, 2026-10-03 12:45 UTC -> 2026-10-26 13:45 UTC
+* deltas (min): [(15.0, 1984), (45.0, 3), (30.0, 3), (60.0, 1)] -> **15m**
+* on the 15m grid: 2000/2000; closed: 0/2000; ascending: True
+* sources: ['sifting']; price range: 3975.87 .. 4217.36
+* newest bar is **17 minutes behind now**
 
-## /vp audit
+### 1h
 
-* `vp-PW`: window=PW rows=128 row_height=1.1300000000000001 row_mode=rows
-  range 4073.64..4217.33 input=5m (1438 bars) volume=3012721.0000002873 va=0.7
-  poc=4156.695 (row 73) val=4141.44 (row 60) vah=4183.25 (row 96) histogram rows in payload: 128
-* `vp-PS`: window=PS rows=128 row_height=0.96 row_mode=rows
-  range 4021.13..4143.05 input=1m (1440 bars) volume=460045.0000000139 va=0.7
-  poc=4091.69 (row 73) val=4021.13 (row 0) vah=4109.45 (row 91) histogram rows in payload: 128
-* `vp-CW`: window=CW rows=128 row_height=1.33 row_mode=rows
-  range 4021.13..4190.22 input=5m (1152 bars) volume=2105749.999999891 va=0.7
-  poc=4121.545 (row 75) val=4104.92 (row 63) vah=4167.43 (row 109) histogram rows in payload: 128
-* `vp-PW-64`: window=PW rows=64 row_height=2.25 row_mode=rows
-  range 4073.64..4217.33 input=5m (1438 bars) volume=3012721.0000000014 va=0.7
-  poc=4158.014999999999 (row 37) val=4141.139999999999 (row 30) vah=4183.889999999999 (row 48) histogram rows in payload: 64
-* `vp-6h`: window=CUSTOM rows=128 row_height=0.45 row_mode=rows
-  range 3975.87..4033.33 input=1m (359 bars) volume=156339.99999993568 va=0.7
-  poc=3999.0449999999996 (row 51) val=3993.42 (row 39) vah=4004.6699999999996 (row 63) histogram rows in payload: 128
-* `vp-24h`: window=CUSTOM rows=128 row_height=0.45 row_mode=rows
-  range 3975.87..4033.33 input=1m (1439 bars) volume=536032.9999997823 va=0.7
-  poc=4024.245 (row 107) val=4009.62 (row 75) vah=4032.12 (row 124) histogram rows in payload: 128
-* `vp-bad`: http 404 -> {"error": "no profile computed for this window yet", "window": "NOPE"}
-* `vp-bad-range`: http 400 -> {"error": "start and end must both be epoch milliseconds"}
+* **2000 bars**, 2026-10-03 12:45 UTC -> 2026-10-26 13:45 UTC
+* deltas (min): [(15.0, 1984), (45.0, 3), (30.0, 3), (60.0, 1)] -> **15m**
+* on the 1h grid: 500/2000; closed: 0/2000; ascending: True
+* sources: ['sifting']; price range: 3975.87 .. 4217.36
+* newest bar is **17 minutes behind now**
+
+## /tick-volume
+
+* 197 bar(s); newest 2026-10-26 14:00 UTC closed=False ticks=150 (65↑ 45↓ 40=) at 3996.64
+
+## /calendar
+
+* source `ff_json` count **96** updated 2026-10-26 06:31 UTC
+  * 2026-10-25T19:00:00+00:00    |  NZD | Holiday  | Bank Holiday
+  * 2026-10-25T21:10:00+00:00    |  AUD | Low      | RBA Assist Gov Jones Speaks
+  * 2026-10-26T09:00:00+00:00    |  EUR | Low      | German ifo Business Climate
+  * 2026-10-26T11:00:00+00:00    |  GBP | Low      | CBI Realized Sales
+  * 2026-10-26T23:50:00+00:00    |  JPY | Low      | SPPI y/y
+  * 2026-10-27T00:01:00+00:00    |  GBP | Low      | BRC Shop Price Index y/y
+  * 2026-10-27T05:00:00+00:00    |  JPY | Low      | BOJ Core CPI y/y
+  * 2026-10-27T08:00:00+00:00    |  EUR | Low      | Spanish Unemployment Rate
+  * 2026-10-27T09:00:00+00:00    |  EUR | Low      | M3 Money Supply y/y
+  * 2026-10-27T09:00:00+00:00    |  EUR | Low      | Private Loans y/y
+
+## Retired surfaces
+
+C1 v2 has no fields to draw, no strategy and no simulator. A deployed build
+still answering these predates the cutover (404 is the expected answer).
+
+* `/levels` -> http 200
+* `/vp` -> http 200
+* `/strategy` -> http 200
+* `/demo` -> http 200
+* `/ai` -> http 200
 
 ## WebSocket sample
 
-* frames: {'probe': 1, 'heartbeat': 2, 'levels': 4, 'candle': 203, 'tick_volume': 1706, 'calendar': 1, 'status': 1}
-* **live `candle` frames: 203, deltas (min) [(0.0, 187), (15.0, 15)] -> no bars**
-* first frame: {"time": 1792767600000, "open": 4000.28, "high": 4003.54, "low": 3993.08, "close": 3995.92, "volume": 6329.0, "source": "sifting"}
-* live `tick_volume` deltas (min): [(15.0, 1508), (0.0, 187), (30.0, 2), (165.0, 2), (90.0, 1)] -> 15m
-* `levels` frames carrying `meta`: **True**
+* frames: {'heartbeat': 2, 'candle': 249, 'tick_volume': 430, 'calendar': 1, 'status': 3}
+* replay: {}; live (seq'd): 0; feed frames with neither: 683
+* `candle` None: 249 frames, deltas (min) [(0.0, 233), (15.0, 15)]
+* last candle frame: {"time": 1793023200000, "open": 3993.15, "high": 3997.55, "low": 3992.78, "close": 3996.79, "volume": 449.0, "source": "sifting"}
+
+## C1 contract matrix
+
+      $: matches none of the anyOf branches
+      - frames.jsonl:684: a live frame has no integer seq
+      - frames.jsonl:685 violates the C1 schema:
+      $: matches none of the anyOf branches
+      $.data: missing required property 'symbol'
+      $.data: missing required property 'interval'
+      $.data: missing required property 'closed'
+      - frames.jsonl:685: a live frame has no integer seq
 
 ## Verdict
 
-* the deployed engine serves **15m** chart candles (2000 bars, 2026-10-02 00:45 UTC -> 2026-10-23 18:30 UTC)
-* `/status` reports the chart edge: 2000 bars, last 2026-10-23 18:30 UTC, **27 min behind now**
+* the deployed engine serves contract `None` — the branch head is 2.0, so the deployment is behind
+* chart candles: **15m** (2000 bars, 2026-10-03 12:45 UTC -> 2026-10-26 13:45 UTC)

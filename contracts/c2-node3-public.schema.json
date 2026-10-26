@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xauusd.local/contracts/c2-node3-public.schema.json",
+  "title": "C2 v1 — Node 3 public levels / drawings payload",
+  "description": "GET /levels returns an array of VpLevels. GET /drawings returns 1H FRVP rectangles plus daily horizontal rays and a Sunday-open marker. All public payloads are secret-free.",
+  "type": "object",
+  "required": ["contract_version", "timestamp", "levels", "drawings"],
+  "properties": {
+    "contract_version": { "const": "1.0" },
+    "timestamp": { "type": "integer" },
+    "levels": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["window", "poc", "start", "end", "timestamp"],
+        "properties": {
+          "window": { "enum": ["PW", "PS", "CW"] },
+          "poc": { "type": "number" },
+          "vah": { "type": ["number", "null"], "description": "absent on PS (PoC only)" },
+          "val": { "type": ["number", "null"], "description": "absent on PS (PoC only)" },
+          "start": { "type": "integer", "description": "inclusive epoch ms" },
+          "end": { "type": "integer", "description": "exclusive epoch ms" },
+          "timestamp": { "type": "integer" },
+          "direction": { "type": "string" },
+          "sunday_open": { "type": ["number", "null"] },
+          "meta": {
+            "type": ["object", "null"],
+            "properties": {
+              "row_mode": { "enum": ["rows", "price"] },
+              "row_height": { "type": "number" },
+              "rows": { "type": "integer" },
+              "range_high": { "type": "number" },
+              "range_low": { "type": "number" },
+              "input_interval": { "enum": ["1m", "5m", "15m", "1h"] },
+              "input_bars": { "type": "integer" },
+              "total_volume": { "type": "number" },
+              "va_pct": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "drawings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "label", "price", "timeframe"],
+        "properties": {
+          "id": { "type": "string", "description": "stable: window-kind-start-end" },
+          "kind": { "enum": ["poc", "vah", "val", "sunday_open", "frvp_window"] },
+          "label": { "type": "string" },
+          "price": { "type": "number" },
+          "color": { "type": "string" },
+          "line_style": { "enum": ["solid", "dashed", "dotted"] },
+          "ray_from_time": { "type": "integer" },
+          "start": { "type": "integer" },
+          "end": { "type": "integer" },
+          "timeframe": { "enum": ["1H", "daily"] },
+          "histogram": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "price": { "type": "number" },
+                "volume": { "type": "number" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "not": {
+    "description": "Node 3 publishes prices and drawings, never account or broker state.",
+    "anyOf": [
+      { "required": ["venue"] }, { "required": ["lots"] }, { "required": ["balance"] },
+      { "required": ["token"] }, { "required": ["account"] }
+    ]
+  }
+}

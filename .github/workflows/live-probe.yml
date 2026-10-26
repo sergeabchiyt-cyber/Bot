@@ -14,6 +14,9 @@ on:
       - "ci/live-probe.sh"
       - "ci/live_report.py"
       - "ci/ws_probe.py"
+      - "ci/verify_contract.py"
+      - "ci/c1_schema.py"
+      - "contracts/**"
       - ".github/workflows/live-probe.yml"
 
 permissions:

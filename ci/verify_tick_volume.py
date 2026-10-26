@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Proof (runtime): /tick-volume returns live tick-volume bars in the documented shape.
+"""Proof (runtime): /tick-volume returns live tick-volume bars in C1 v2 shape.
 
 CI has no SiftingIO key, so the array is normally empty there; any bars that
 are present must be well-formed and consistent (up + down + flat == ticks).
+The newest bar may still be filling (`closed: false`); every older one is
+final, exactly like the `tick_volume` frames on the socket.
 
 usage: verify_tick_volume.py <path-to-json>
 """
@@ -22,7 +24,11 @@ for i, b in enumerate(bars):
     assert set(b) == KEYS, f"bar {i} keys {sorted(b)}"
     assert b["up_ticks"] + b["down_ticks"] + b["flat_ticks"] == b["ticks"], f"bar {i} split != ticks"
     assert b["ticks"] >= 1 and b["ticks_per_sec"] >= 0, f"bar {i} impossible counts"
-    assert b["source"] == "sifting", f"bar {i} source {b['source']}"
+    assert b["source"] in {"sifting", "synthetic"}, f"bar {i} source {b['source']}"
+    assert b["symbol"] == "XAUUSD", f"bar {i} symbol {b['symbol']}"
+    assert b["interval"] == "15m", f"bar {i} interval {b['interval']}"
+    assert b["time"] % (15 * 60_000) == 0, f"bar {i} off the 15m grid: {b['time']}"
+    assert b["close"] > 0 and b["last_tick"] >= b["time"], f"bar {i} impossible price/tick"
 
 times = [b["time"] for b in bars]
 assert times == sorted(set(times)), "bars must be unique and oldest-first"
