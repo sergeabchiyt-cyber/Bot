@@ -1,91 +1,88 @@
 # Live engine probe
 
-generated: 2026-10-26T14:49:20Z
+generated: 2026-10-26T19:48:52Z
 
 Read-only snapshot of the deployed `xauusd-engine` (C1 v2 market feed).
 
 ## /status
 
-* service `None` version `0.4.0`
-* **contract_version `None`** boot_id `None` uptime 0s
-* the deployed build **predates the C1 v2 cutover** — redeploy to serve the contract this branch implements
-* market_open **None**; freshness `None` feed `None` age None ms, last tick ?
-* **retired sections still present**: ['strategy', 'demo', 'volume_profile']
+* service `xauusd-engine` version `0.4.0`
+* **contract_version `2.0`** boot_id `boot-1793039839228-1` uptime 4242s
+* market_open **True**; freshness `live` feed `sifting` age 283 ms, last tick 2026-10-26 19:48 UTC
+* session: 2026-10-25 22:00 UTC -> 2026-10-26 22:00 UTC (18:00 America/New_York anchor)
+
+| interval | bars | capacity | first bar | last closed bar | edge lag |
+|---|---|---|---|---|---|
+| 15m | 5 | 2000 | 2026-10-26 18:30 UTC | 2026-10-26 19:30 UTC | 18 min |
+| 1h | 1 | 2000 | 2026-10-26 18:00 UTC | 2026-10-26 18:00 UTC | 108 min |
+| 1m | 14468 | 43200 | 2026-10-12 18:38 UTC | 2026-10-26 19:47 UTC | 1 min |
+
+* ticks: accepted 32324 / dropped 0 (price 0, seconds-ts 0, future 0, repeat 0, late 0)
+* ws: topics ['candle', 'tick_volume', 'calendar', 'status'] heartbeat 30s buffer 4096
+* calendar: source `pending` count 0 updated 1970-01-01 00:00 UTC
 
 ## /candles
 
 ### 1m
 
-* **2000 bars**, 2026-10-03 13:30 UTC -> 2026-10-26 14:30 UTC
-* deltas (min): [(15.0, 1984), (45.0, 3), (30.0, 3), (60.0, 1)] -> **15m**
-* on the 1m grid: 2000/2000; closed: 0/2000; ascending: True
-* sources: ['sifting']; price range: 3975.87 .. 4217.36
-* newest bar is **19 minutes behind now**
+* **14468 bars**, 2026-10-12 18:38 UTC -> 2026-10-26 19:47 UTC
+* deltas (min): [(1.0, 14464), (2881.0, 2), (3.0, 1)] -> **1m**
+* on the 1m grid: 14468/14468; closed: 14468/14468; ascending: True
+* sources: ['sifting']; price range: 3975.87 .. 4200.56
+* newest bar is **2 minutes behind now**
 
 ### 15m
 
-* **2000 bars**, 2026-10-03 13:30 UTC -> 2026-10-26 14:30 UTC
-* deltas (min): [(15.0, 1984), (45.0, 3), (30.0, 3), (60.0, 1)] -> **15m**
-* on the 15m grid: 2000/2000; closed: 0/2000; ascending: True
-* sources: ['sifting']; price range: 3975.87 .. 4217.36
+* **5 bars**, 2026-10-26 18:30 UTC -> 2026-10-26 19:30 UTC
+* deltas (min): [(15.0, 4)] -> **15m**
+* on the 15m grid: 5/5; closed: 5/5; ascending: True
+* sources: ['sifting']; price range: 4008.49 .. 4015.86
 * newest bar is **19 minutes behind now**
 
 ### 1h
 
-* **2000 bars**, 2026-10-03 13:30 UTC -> 2026-10-26 14:30 UTC
-* deltas (min): [(15.0, 1984), (45.0, 3), (30.0, 3), (60.0, 1)] -> **15m**
-* on the 1h grid: 500/2000; closed: 0/2000; ascending: True
-* sources: ['sifting']; price range: 3975.87 .. 4217.36
-* newest bar is **19 minutes behind now**
+* **1 bars**, 2026-10-26 18:00 UTC -> 2026-10-26 18:00 UTC
+* deltas (min): [] -> **single bar**
+* on the 1h grid: 1/1; closed: 1/1; ascending: True
+* sources: ['sifting']; price range: 4012.14 .. 4015.86
+* newest bar is **109 minutes behind now**
 
 ## /tick-volume
 
-* 200 bar(s); newest 2026-10-26 14:45 UTC closed=False ticks=1732 (446↑ 621↓ 665=) at 4017.11
+* 6 bar(s); newest 2026-10-26 19:45 UTC closed=False ticks=1377 (286↑ 322↓ 769=) at 4012.06
 
 ## /calendar
 
-* source `ff_json` count **96** updated 2026-10-26 06:31 UTC
-  * 2026-10-25T19:00:00+00:00    |  NZD | Holiday  | Bank Holiday
-  * 2026-10-25T21:10:00+00:00    |  AUD | Low      | RBA Assist Gov Jones Speaks
-  * 2026-10-26T09:00:00+00:00    |  EUR | Low      | German ifo Business Climate
-  * 2026-10-26T11:00:00+00:00    |  GBP | Low      | CBI Realized Sales
-  * 2026-10-26T23:50:00+00:00    |  JPY | Low      | SPPI y/y
-  * 2026-10-27T00:01:00+00:00    |  GBP | Low      | BRC Shop Price Index y/y
-  * 2026-10-27T05:00:00+00:00    |  JPY | Low      | BOJ Core CPI y/y
-  * 2026-10-27T08:00:00+00:00    |  EUR | Low      | Spanish Unemployment Rate
-  * 2026-10-27T09:00:00+00:00    |  EUR | Low      | M3 Money Supply y/y
-  * 2026-10-27T09:00:00+00:00    |  EUR | Low      | Private Loans y/y
+* source `pending` count **0** updated 1970-01-01 00:00 UTC
 
 ## Retired surfaces
 
 C1 v2 has no fields to draw, no strategy and no simulator. A deployed build
 still answering these predates the cutover (404 is the expected answer).
 
-* `/levels` -> http 200
-* `/vp` -> http 200
-* `/strategy` -> http 200
-* `/demo` -> http 200
-* `/ai` -> http 200
+* `/levels` -> http 404
+* `/vp` -> http 404
+* `/strategy` -> http 404
+* `/demo` -> http 404
+* `/ai` -> http 404
 
 ## WebSocket sample
 
-* frames: {'heartbeat': 2, 'candle': 396, 'tick_volume': 580, 'calendar': 1, 'status': 1}
-* replay: {}; live (seq'd): 0; feed frames with neither: 978
-* `candle` None: 396 frames, deltas (min) [(0.0, 380), (15.0, 15)]
-* last candle frame: {"time": 1793025900000, "open": 4022.16, "high": 4022.2, "low": 4016.35, "close": 4017.62, "volume": 2169.0, "source": "sifting"}
+* frames: {'heartbeat': 2, 'candle': 1534, 'tick_volume': 435, 'calendar': 1, 'status': 1}
+* replay: {'candle': 246, 'tick_volume': 6, 'calendar': 1, 'status': 1}; live (seq'd): 1717; feed frames with neither: 0
+* live seq range: 129543 .. 131259, strictly increasing: True
+* `candle` 15m: 434 frames, deltas (min) [(0.0, 428), (15.0, 5)]
+* `candle` 1h: 430 frames, deltas (min) [(0.0, 428), (60.0, 1)]
+* `candle` 1m: 670 frames, deltas (min) [(0.0, 429), (1.0, 240)]
+* last candle frame: {"close": 4012.08, "closed": false, "high": 4012.39, "interval": "1m", "low": 4012.0, "open": 4012.21, "source": "sifting", "symbol": "XAUUSD", "time": 1793044080000, "volume": 473.0}
 
 ## C1 contract matrix
 
-      $: matches none of the anyOf branches
-      - frames.jsonl:979: a live frame has no integer seq
-      - frames.jsonl:980 violates the C1 schema:
-      $: matches none of the anyOf branches
-      $.data: missing required property 'symbol'
-      $.data: missing required property 'interval'
-      $.data: missing required property 'closed'
-      - frames.jsonl:980: a live frame has no integer seq
+    frames: 5 kind(s) ['calendar', 'candle', 'heartbeat', 'status', 'tick_volume'], 254 replay, 1717 live (seq [129543]..[131259])
+    C1 CONTRACT MATRIX PASSED
 
 ## Verdict
 
-* the deployed engine serves contract `None` — the branch head is 2.0, so the deployment is behind
-* chart candles: **15m** (2000 bars, 2026-10-03 13:30 UTC -> 2026-10-26 14:30 UTC)
+* the deployed engine serves **C1 v2**
+* chart candles: **15m** (5 bars, 2026-10-26 18:30 UTC -> 2026-10-26 19:30 UTC)
+* edge lag now: {'15m': 18, '1h': 108, '1m': 1}
