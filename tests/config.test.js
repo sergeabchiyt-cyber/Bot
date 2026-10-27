@@ -4,105 +4,70 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 function loadConfig(runtime = {}) {
-  global.window = { App: {}, XAUUSD_CONFIG: runtime };
+  global.window = { XAUUSD_CONFIG: runtime };
   const path = require.resolve("../js/config.js");
   delete require.cache[path];
-  require(path);
-  return global.window.App.config;
+  return require(path);
 }
 
-test("all endpoints point at Node 1's documented public routes", () => {
+test("one config exposes exactly the Node 1 and Node 3 base URLs", () => {
   const config = loadConfig();
-  const host = "https://engine-southeastasia-sng-main.onrender.com";
-  assert.equal(config.endpoints.ws, "wss://engine-southeastasia-sng-main.onrender.com/ws");
-  assert.equal(config.endpoints.strategy, `${host}/strategy`);
-  assert.equal(config.endpoints.demo, `${host}/demo`);
-  assert.equal(config.endpoints.status, `${host}/status`);
-  assert.equal(config.endpoints.levels, `${host}/levels`);
-  assert.equal(config.endpoints.calendar, `${host}/calendar`);
-  assert.equal(config.endpoints.candles, `${host}/candles`);
-  assert.equal(config.endpoints.tickVolume, `${host}/tick-volume`);
-  assert.equal(config.MARKET_HOST, host);
-  assert.equal(config.STRATEGY_HOST, undefined);
-  assert.equal(config.EXECUTION_HOST, undefined);
-  // Node 4 is a second, independent service: diagnostics only, no write path.
-  assert.equal(config.NODE4_HOST, "https://execution-southeastasia-sng-main.onrender.com");
-  assert.equal(config.endpoints.executionDiagnostics, "https://execution-southeastasia-sng-main.onrender.com/diagnostics");
-  assert.equal(config.endpoints.executionWs, "wss://execution-southeastasia-sng-main.onrender.com/ws");
-  assert.deepEqual(config.execution.topics, ["diagnostics"]);
+  assert.equal(config.baseUrls.node1, "https://engine-southeastasia-sng-main.onrender.com");
+  assert.equal(config.baseUrls.node3, "https://strategy-api-vp-levels.onrender.com");
+  assert.equal(config.services.node1.base, config.baseUrls.node1);
+  assert.equal(config.services.node3.base, config.baseUrls.node3);
+  assert.equal(config.expectedContractVersion, "2.0");
+  assert.equal(config.endpoints, undefined, "paths belong to the typed client, not config");
+  assert.equal(config.NODE4_HOST, undefined);
 });
 
-test("the single socket subscribes to strategy and demo and never to bubbles", () => {
+test("public topics are split by service and contain no private topic", () => {
   const config = loadConfig();
-  assert.deepEqual(config.socket.topics, [
-    "levels", "candle", "tick_volume", "strategy", "demo", "calendar", "status",
-  ]);
-  assert.equal(config.socket.topics.includes("bubbles"), false);
-  assert.equal(config.socket.heartbeatEveryMs, 30000);
-  assert.equal(config.socket.pollFallbackMs, 5000);
-  assert.equal(config.strategy.historyLimit, 120);
-});
-
-test("a runtime host override changes only the Node 1 origin", () => {
-  const config = loadConfig({ MARKET_HOST: "http://127.0.0.1:8081/" });
-  assert.equal(config.endpoints.ws, "ws://127.0.0.1:8081/ws");
-  assert.equal(config.endpoints.strategy, "http://127.0.0.1:8081/strategy");
-  assert.equal(config.endpoints.demo, "http://127.0.0.1:8081/demo");
-  assert.equal(config.endpoints.status, "http://127.0.0.1:8081/status");
-});
-
-test("an empty Node 1 host disables every Node 1 endpoint", () => {
-  const config = loadConfig({ MARKET_HOST: "" });
-  const node1 = ["ws", "candles", "tickVolume", "levels", "calendar", "strategy", "demo", "status"];
-  for (const key of node1) assert.equal(config.endpoints[key], "", key);
-  // Node 4 is configured separately; it is not disabled by MARKET_HOST.
-  assert.equal(config.endpoints.executionDiagnostics, "https://execution-southeastasia-sng-main.onrender.com/diagnostics");
-});
-
-test("an empty Node 4 host disables only the execution endpoints", () => {
-  const config = loadConfig({ NODE4_HOST: "" });
-  assert.equal(config.endpoints.executionDiagnostics, "");
-  assert.equal(config.endpoints.executionWs, "");
-  assert.equal(config.execution.diagnostics, "");
-  assert.equal(config.endpoints.ws, "wss://engine-southeastasia-sng-main.onrender.com/ws");
-});
-
-test("a Node 4 host override changes only the execution origin", () => {
-  const config = loadConfig({ NODE4_HOST: "http://127.0.0.1:8090/" });
-  assert.equal(config.endpoints.executionDiagnostics, "http://127.0.0.1:8090/diagnostics");
-  assert.equal(config.endpoints.executionWs, "ws://127.0.0.1:8090/ws");
-  assert.equal(config.execution.diagnostics, "http://127.0.0.1:8090/diagnostics");
-  assert.equal(config.execution.ws, "ws://127.0.0.1:8090/ws");
-  assert.equal(config.endpoints.strategy, "https://engine-southeastasia-sng-main.onrender.com/strategy");
-});
-
-test("rejects Node 4 overrides embedding credentials, queries, fragments or paths", () => {
-  for (const value of [
-    "https://user:password@execution.example",
-    "https://execution.example/custom/path",
-    "https://execution.example/?token=secret",
-    "https://execution.example/#fragment",
-  ]) {
-    const config = loadConfig({ NODE4_HOST: value });
-    assert.equal(config.endpoints.executionDiagnostics, "", value);
-    assert.equal(config.endpoints.executionWs, "", value);
+  assert.deepEqual(config.services.node1.topics, ["candle", "tick_volume", "calendar", "status"]);
+  assert.deepEqual(config.services.node3.topics, ["levels", "drawing", "vp", "scanning", "signals", "diagnostics"]);
+  for (const service of ["node1", "node3"]) {
+    for (const topic of config.services[service].topics) {
+      assert.doesNotMatch(topic, /trade_intent|execution|private/i);
+    }
   }
+  assert.deepEqual(config.chart.intervals, ["1m", "15m", "1h"]);
 });
 
-test("rejects overrides embedding credentials, queries, fragments, or paths", () => {
+test("host overrides are origin-only and independent", () => {
+  const config = loadConfig({
+    NODE1_HOST: "https://node1.example",
+    NODE3_HOST: "https://node3.example",
+  });
+  assert.equal(config.baseUrls.node1, "https://node1.example");
+  assert.equal(config.baseUrls.node3, "https://node3.example");
+  assert.equal(config.MARKET_HOST, "https://node1.example");
+});
+
+test("a legacy Node 4 override is ignored and cannot create a third service", () => {
+  const config = loadConfig({
+    NODE4_HOST: "https://private.example",
+    STRATEGY_HOST: "https://legacy.example",
+  });
+  assert.equal(config.NODE4_HOST, undefined);
+  assert.equal(config.services.node4, undefined);
+  assert.equal(config.baseUrls.node1, "https://engine-southeastasia-sng-main.onrender.com");
+  assert.equal(config.baseUrls.node3, "https://strategy-api-vp-levels.onrender.com");
+});
+
+test("relative proxy prefixes are accepted as single base URLs", () => {
+  const config = loadConfig({ NODE1_HOST: "/api/node1", NODE3_HOST: "/api/node3/" });
+  assert.equal(config.baseUrls.node1, "/api/node1");
+  assert.equal(config.baseUrls.node3, "/api/node3");
+});
+
+test("credentials, queries, fragments and custom paths are rejected", () => {
   for (const value of [
-    "https://user:password@market.example",
-    "https://market.example/custom/path",
-    "https://market.example/?token=secret",
-    "https://market.example/#fragment",
+    "https://user:password@node1.example",
+    "https://node1.example/custom/path",
+    "https://node1.example/?q=1",
+    "https://node1.example/#fragment",
   ]) {
-    const config = loadConfig({ MARKET_HOST: value });
-    assert.equal(config.endpoints.ws, "", value);
+    const config = loadConfig({ NODE1_HOST: value });
+    assert.equal(config.baseUrls.node1, "", value);
   }
-});
-
-test("legacy multi-service overrides are ignored", () => {
-  const config = loadConfig({ STRATEGY_HOST: "https://strategy.example", EXECUTION_HOST: "https://execution.example" });
-  assert.equal(config.endpoints.strategy, "https://engine-southeastasia-sng-main.onrender.com/strategy");
-  assert.equal(config.endpoints.demo, "https://engine-southeastasia-sng-main.onrender.com/demo");
 });

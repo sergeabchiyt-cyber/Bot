@@ -1,0 +1,58 @@
+[
+  {
+    "symbol": "XAUUSD",
+    "interval": "15m",
+    "time": 1793012400000,
+    "ticks": 1100,
+    "up_ticks": 572,
+    "down_ticks": 451,
+    "flat_ticks": 77,
+    "close": 4196.0,
+    "last_tick": 1793012460000,
+    "ticks_per_sec": 1.7,
+    "closed": true,
+    "source": "sifting"
+  },
+  {
+    "symbol": "XAUUSD",
+    "interval": "15m",
+    "time": 1793013300000,
+    "ticks": 1173,
+    "up_ticks": 609,
+    "down_ticks": 480,
+    "flat_ticks": 84,
+    "close": 4197.5,
+    "last_tick": 1793013360000,
+    "ticks_per_sec": 1.8,
+    "closed": true,
+    "source": "sifting"
+  },
+  {
+    "symbol": "XAUUSD",
+    "interval": "15m",
+    "time": 1793014200000,
+    "ticks": 1246,
+    "up_ticks": 647,
+    "down_ticks": 510,
+    "flat_ticks": 89,
+    "close": 4199.0,
+    "last_tick": 1793014260000,
+    "ticks_per_sec": 1.9,
+    "closed": true,
+    "source": "sifting"
+  },
+  {
+    "symbol": "XAUUSD",
+    "interval": "15m",
+    "time": 1793015100000,
+    "ticks": 1319,
+    "up_ticks": 685,
+    "down_ticks": 540,
+    "flat_ticks": 94,
+    "close": 4200.5,
+    "last_tick": 1793015160000,
+    "ticks_per_sec": 2.0,
+    "closed": false,
+    "source": "sifting"
+  }
+]

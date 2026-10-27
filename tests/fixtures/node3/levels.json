@@ -1,0 +1,61 @@
+[
+  {
+    "window": "PW",
+    "poc": 4201.125,
+    "vah": 4238.25,
+    "val": 4164.0,
+    "start": 1792584000000,
+    "end": 1793016000000,
+    "timestamp": 1793016000000,
+    "sunday_open": 4197.5,
+    "meta": {
+      "row_mode": "rows",
+      "row_height": 1.125,
+      "rows": 128,
+      "range_low": 4130.0,
+      "range_high": 4274.0,
+      "va_pct": 0.7,
+      "total_volume": 3012721.0,
+      "input_interval": "5m",
+      "input_bars": 1438
+    }
+  },
+  {
+    "window": "PS",
+    "poc": 4212.625,
+    "start": 1792929600000,
+    "end": 1793016000000,
+    "timestamp": 1793016000000,
+    "meta": {
+      "row_mode": "rows",
+      "row_height": 1.125,
+      "rows": 128,
+      "range_low": 4130.0,
+      "range_high": 4274.0,
+      "va_pct": 0.7,
+      "total_volume": 3012721.0,
+      "input_interval": "5m",
+      "input_bars": 1438
+    }
+  },
+  {
+    "window": "CW",
+    "poc": 4194.375,
+    "vah": 4226.5,
+    "val": 4158.25,
+    "start": 1792756800000,
+    "end": 1793016000000,
+    "timestamp": 1793016000000,
+    "meta": {
+      "row_mode": "rows",
+      "row_height": 1.125,
+      "rows": 128,
+      "range_low": 4130.0,
+      "range_high": 4274.0,
+      "va_pct": 0.7,
+      "total_volume": 3012721.0,
+      "input_interval": "5m",
+      "input_bars": 1438
+    }
+  }
+]

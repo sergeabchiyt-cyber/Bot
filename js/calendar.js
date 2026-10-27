@@ -16,7 +16,7 @@
 (function (App) {
   "use strict";
 
-  const { $, escapeHtml, toMs, fetchPublicJson } = App.utils;
+  const { $, escapeHtml, toMs } = App.utils;
   const format = App.format;
   const normalisePayload = App.normalize;
   const cfg = App.config.calendar;
@@ -56,14 +56,18 @@
 
   function ingest(payload, source = "ws") {
     if (source !== "rest") wsRevision += 1;
-    const data = Array.isArray(payload) ? payload : normalisePayload.unwrapFrame(payload);
-    if (data && data.updated !== undefined && data.updated !== null) updatedAt = toMs(data.updated);
+    const data = App.client
+      ? App.client.parseCalendar(payload)
+      : (Array.isArray(payload) ? { events: payload } : normalisePayload.unwrapFrame(payload));
+    if (!data) return false;
+    if (data.updated !== undefined && data.updated !== null) updatedAt = toMs(data.updated);
     allEvents = extract(data)
       .filter((event) => event && String(event.currency || "").toUpperCase() === cfg.currency)
       .map(normalise)
       .filter(Boolean)
       .sort((a, b) => a.ms - b.ms);
     render();
+    return true;
   }
 
   // ---------- Filtering ----------
@@ -188,26 +192,30 @@
 
   // ---------- REST ----------
   async function fetchAll() {
-    const endpoint = App.config.endpoints.calendar;
-    if (fetchInProgress || !endpoint) return;
+    if (fetchInProgress || !App.client || typeof App.client.getCalendar !== "function") return false;
     fetchInProgress = true;
     const requestRevision = wsRevision;
     try {
-      const payload = await fetchPublicJson(endpoint);
+      const payload = await App.client.getCalendar();
       if (wsRevision === requestRevision) ingest(payload, "rest");
+      return true;
     } catch (error) {
       console.error("Market calendar snapshot failed:", error);
+      if (App.panels && typeof App.panels.setError === "function") App.panels.setError("node1", error);
+      return false;
     } finally {
       fetchInProgress = false;
     }
   }
 
-  function start() {
+  function start(options = {}) {
     bindFilters();
-    fetchAll();
+    // The dashboard's single seed pass already reads /calendar. Skip only
+    // that duplicate request; the periodic refresh and countdown remain.
+    if (options.initial !== false) fetchAll();
     setInterval(fetchAll, cfg.refreshMs);
-    setInterval(render, 30000); // keep countdowns / past-dimming fresh
+    setInterval(render, 30000);
   }
 
-  App.calendar = { ingest, start };
+  App.calendar = { ingest, start, fetchAll, render };
 })((window.App = window.App || {}));

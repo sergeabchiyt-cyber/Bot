@@ -1,0 +1,7 @@
+# Generated static build output. npm run build regenerates and verifies it.
+dist/
+
+# Local tooling and OS noise.
+node_modules/
+.DS_Store
+*.log

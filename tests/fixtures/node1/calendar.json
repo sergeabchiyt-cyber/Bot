@@ -1,0 +1,29 @@
+{
+  "count": 2,
+  "source": "ff_json",
+  "updated": 1793008800000,
+  "events": [
+    {
+      "currency": "USD",
+      "event": "Core PCE Price Index m/m",
+      "impact": "High",
+      "actual": "0.3%",
+      "forecast": "0.3%",
+      "previous": "0.2%",
+      "gold_relevant": true,
+      "time": "2026-10-26T12:30:00+00:00",
+      "timestamp": 1793019600000
+    },
+    {
+      "currency": "USD",
+      "event": "Unemployment Claims",
+      "impact": "Medium",
+      "actual": null,
+      "forecast": "198K",
+      "previous": "194K",
+      "gold_relevant": false,
+      "time": "2026-10-26T12:30:00+00:00",
+      "timestamp": 1793019600000
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+[
+  {
+    "symbol": "XAUUSD",
+    "interval": "15m",
+    "time": 1793012400000,
+    "open": 4195.0,
+    "high": 4197.4,
+    "low": 4193.9,
+    "close": 4196.0,
+    "volume": 1100,
+    "source": "sifting",
+    "closed": true
+  },
+  {
+    "symbol": "XAUUSD",
+    "interval": "15m",
+    "time": 1793013300000,
+    "open": 4196.5,
+    "high": 4198.9,
+    "low": 4195.4,
+    "close": 4197.5,
+    "volume": 1137,
+    "source": "sifting",
+    "closed": true
+  },
+  {
+    "symbol": "XAUUSD",
+    "interval": "15m",
+    "time": 1793014200000,
+    "open": 4198.0,
+    "high": 4200.4,
+    "low": 4196.9,
+    "close": 4199.0,
+    "volume": 1174,
+    "source": "sifting",
+    "closed": true
+  },
+  {
+    "symbol": "XAUUSD",
+    "interval": "15m",
+    "time": 1793015100000,
+    "open": 4199.5,
+    "high": 4201.9,
+    "low": 4198.4,
+    "close": 4200.5,
+    "volume": 1211,
+    "source": "sifting",
+    "closed": true
+  }
+]
