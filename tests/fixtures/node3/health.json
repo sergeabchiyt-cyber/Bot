@@ -1,0 +1,18 @@
+{
+  "status": "ok",
+  "ok": true,
+  "service": "xauusd-node3-strategy",
+  "version": "2.0.0",
+  "timestamp": 1793016000000,
+  "uptime_secs": 7342,
+  "contract_version": "2.0",
+  "node1_connected": true,
+  "node1_state": "live",
+  "freshness_state": "live",
+  "tradeable": true,
+  "vp_ready": true,
+  "contract_violations": 1,
+  "intents_pending": 1,
+  "node4_connected": true,
+  "node4_token_configured": true
+}

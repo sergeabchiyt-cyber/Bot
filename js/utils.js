@@ -1,16 +1,27 @@
 /* ============================================================
- * XAUUSD Terminal — shared browser helpers.
+ * XAUUSD Terminal — shared, dependency-free browser helpers.
  *
- * Display formatting lives in js/format.js; this file keeps only DOM,
- * timestamp and public-read plumbing.
+ * All backend transport lives in js/client.js. The compatibility helper below
+ * delegates to that client; no other module constructs a request.
  * ============================================================ */
-(function (App) {
+(function (root, factory) {
   "use strict";
 
-  const normalise = App.normalize;
+  const api = factory(root && root.App);
+  if (typeof module === "object" && module.exports) module.exports = api;
+  if (root) {
+    root.App = root.App || {};
+    root.App.utils = api;
+  }
+})(typeof window !== "undefined" ? window : null, function (App) {
+  "use strict";
 
-  const $ = (id) => document.getElementById(id);
+  const normalise = (App && App.normalize) || (
+    typeof require === "function" ? require("./normalize.js") : null
+  );
 
+  const $ = (id) => (typeof document === "undefined" || !document.getElementById
+    ? null : document.getElementById(id));
   const escapeHtml = (value) => normalise.escapeHtml(value);
   const toMs = (value) => normalise.timestampMs(value);
   const numberOrNull = (value) => normalise.numberOrNull(value);
@@ -19,36 +30,15 @@
     return ms === null ? null : Math.floor(ms / 1000);
   };
 
-  /**
-   * Bounded, credential-free public GET. Both REST snapshots (`/strategy`,
-   * `/demo`) use it; it never sends a body, cache, or auth header.
-   */
-  async function fetchPublicJson(url, timeoutMs = 12000) {
-    if (!url) throw new Error("public snapshot endpoint is not configured");
-    if (typeof fetch !== "function") throw new Error("fetch is not supported in this browser");
-    const timeout = Math.max(1000, Number(timeoutMs) || 12000);
-    const controller = typeof AbortController === "function" ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), timeout) : null;
-    try {
-      const response = await fetch(url, {
-        method: "GET",
-        cache: "no-store",
-        headers: { Accept: "application/json" },
-        ...(controller ? { signal: controller.signal } : {}),
-      });
-      if (!response.ok) throw new Error(`public snapshot request failed (${response.status})`);
-      return await response.json();
-    } catch (error) {
-      if (error && error.name === "AbortError") {
-        throw new Error(`public snapshot request timed out after ${Math.ceil(timeout / 1000)}s`);
-      }
-      throw error;
-    } finally {
-      if (timer !== null) clearTimeout(timer);
+  /** Legacy callers route through the single typed client. */
+  function fetchPublicJson(url, timeoutMs = 12000) {
+    const client = App && App.client;
+    if (!client || typeof client.requestUrl !== "function") {
+      return Promise.reject(new Error("typed backend client is not loaded"));
     }
+    return client.requestUrl(url, timeoutMs);
   }
 
-  /** Hidden aria-live line for chart/history diagnostics. */
   function setStatus(text, state) {
     const el = $("status");
     if (!el) return;
@@ -56,5 +46,18 @@
     el.dataset.state = state || "";
   }
 
-  App.utils = { $, escapeHtml, toMs, toSec, numberOrNull, fetchPublicJson, setStatus };
-})((window.App = window.App || {}));
+  function setText(id, value) {
+    const el = $(id);
+    if (el) el.textContent = String(value == null ? "" : value);
+  }
+
+  function setBadge(id, text, state, title) {
+    const el = $(id);
+    if (!el) return;
+    if (text != null) el.textContent = String(text);
+    if (state != null && el.dataset) el.dataset.state = state;
+    if (title != null) el.title = String(title);
+  }
+
+  return { $, escapeHtml, toMs, toSec, numberOrNull, fetchPublicJson, setStatus, setText, setBadge };
+});

@@ -5,7 +5,7 @@
 (function (App) {
   "use strict";
 
-  const { $, setStatus, toSec, numberOrNull, fetchPublicJson } = App.utils;
+  const { $, setStatus, toSec, numberOrNull } = App.utils;
   const format = App.format;
   const cfg = App.config;
 
@@ -49,10 +49,24 @@
     };
   }
 
-  const axis = App.axis ? App.axis.create() : passthroughAxis();
+  let currentInterval = (cfg.chart && cfg.chart.interval) || "15m";
+  let axis = App.axis
+    ? App.axis.create({ bucket: bucketSeconds(currentInterval) })
+    : passthroughAxis();
   const isClosedMarketBar = App.axis
     ? App.axis.isClosedMarketBar
     : (bar) => !!bar && bar.open === bar.close;
+
+  function bucketSeconds(interval) {
+    const table = (cfg.chart && cfg.chart.bucketSeconds) || {};
+    return numberOrNull(table[interval]) || 900;
+  }
+
+  const FORMING_STYLE = {
+    color: "rgba(125, 133, 144, 0.48)",
+    borderColor: "rgba(125, 133, 144, 0.72)",
+    wickColor: "rgba(125, 133, 144, 0.60)",
+  };
 
   const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -158,6 +172,12 @@
   const COLOR_UP = "#26A69A";
   const COLOR_DOWN = "#EF5350";
 
+  /** A forming bar is still plotted, but never looks like a closed candle. */
+  function styleCandle(candle) {
+    if (!candle || candle.closed !== false) return candle;
+    return { ...candle, ...FORMING_STYLE };
+  }
+
   // Cache candles by bucket time (sec) for color fallbacks. REST snapshots
   // capture these WS revisions and are discarded if newer market data arrived
   // while the request was in flight.
@@ -173,6 +193,20 @@
   function onReset(listener) {
     if (typeof listener === "function") resetListeners.add(listener);
     return () => resetListeners.delete(listener);
+  }
+
+  /** Keep the compact display timeline on the selected Node 1 resolution. */
+  function setInterval(interval) {
+    if (!cfg.chart || !cfg.chart.intervals.includes(interval)) return false;
+    currentInterval = interval;
+    if (App.axis && typeof App.axis.create === "function") {
+      axis = App.axis.create({ bucket: bucketSeconds(interval) });
+    }
+    return true;
+  }
+
+  function getInterval() {
+    return currentInterval;
   }
 
   /** Notified after a live candle is drawn, so overlays can place a marker
@@ -257,6 +291,10 @@
         low,
         close,
         volume: numberOrNull(c.volume) ?? 0,
+        symbol: c.symbol || null,
+        interval: c.interval || currentInterval,
+        source: c.source || null,
+        closed: c.closed !== false,
       };
       if (time == null || open === null || high === null || low === null || close === null) {
         continue;
@@ -286,13 +324,13 @@
   }
 
   async function loadHistory() {
-    if (historyFetchInProgress || !cfg.endpoints.candles) return;
+    if (historyFetchInProgress || !App.client || typeof App.client.getCandles !== "function") return;
     historyFetchInProgress = true;
     const requestCandleRevision = wsCandleRevision;
     const requestTickVolumeRevision = wsTickVolumeRevision;
     setStatus("loading", "busy");
     try {
-      const raw = await fetchPublicJson(cfg.endpoints.candles);
+      const raw = await App.client.getCandles(currentInterval);
       const data = parseCandles(raw);
       if (!data.length) throw new Error("market candles: empty payload");
 
@@ -303,15 +341,26 @@
         for (const c of data) candlesByTime.set(c.time, c);
 
         const view = axis.compact(data);
+        const formingRealTimes = new Set(
+          data.filter((candle) => candle.closed === false).map((candle) => candle.time)
+        );
+        const chartBars = view.bars.map((candle) =>
+          formingRealTimes.has(axis.realFor(candle.time))
+            ? styleCandle({ ...candle, closed: false })
+            : candle
+        );
         const volumeData = view.bars.map((c) => ({
           time: c.time,
           value: c.volume,
           color: c.close >= c.open ? COLOR_UP : COLOR_DOWN,
         }));
 
-        series.setData(view.bars);
+        series.setData(chartBars);
         if (wsTickVolumeRevision === requestTickVolumeRevision) volumeSeries.setData(volumeData);
         chart.timeScale().fitContent();
+        if (App.chartControls && typeof App.chartControls.setCandles === "function") {
+          App.chartControls.setCandles(data);
+        }
         for (const listener of resetListeners) {
           try { listener(); } catch (error) { console.error("Chart reset listener failed:", error); }
         }
@@ -322,11 +371,12 @@
           console.info(`chart: dropped ${view.dropped} closed-market filler bars`);
         }
 
-        if (cfg.endpoints.tickVolume && wsTickVolumeRevision === requestTickVolumeRevision) {
+        if (wsTickVolumeRevision === requestTickVolumeRevision) {
           try {
-            const tvBars = await fetchPublicJson(cfg.endpoints.tickVolume);
+            const tickVolume = await App.client.getTickVolume();
+            const tvBars = tickVolume && Array.isArray(tickVolume.bars) ? tickVolume.bars : [];
             if (wsCandleRevision === requestCandleRevision &&
-                wsTickVolumeRevision === requestTickVolumeRevision && Array.isArray(tvBars)) {
+                wsTickVolumeRevision === requestTickVolumeRevision) {
               for (const bar of tvBars) updateTickVolume(bar, "rest");
             }
           } catch {
@@ -334,10 +384,13 @@
           }
         }
       }
-      setStatus("ready", "busy");
+      setStatus("ready", "live");
     } catch (error) {
       console.error("Market history load failed:", error);
       setStatus("history error", "error");
+      if (App.panels && typeof App.panels.setError === "function") {
+        App.panels.setError("node1", error);
+      }
     } finally {
       historyFetchInProgress = false;
     }
@@ -359,6 +412,10 @@
       low,
       close,
       volume: numberOrNull(c.volume) ?? 0,
+      symbol: c.symbol || null,
+      interval: c.interval || currentInterval,
+      source: c.source || null,
+      closed: c.closed !== false,
     };
     if (open === null || high === null || low === null || close === null) {
       return;
@@ -373,6 +430,7 @@
       prev.high = Math.max(prev.high, candle.high);
       prev.low = Math.min(prev.low, candle.low);
       prev.close = candle.close;
+      prev.closed = candle.closed;
       if (c.volume != null) prev.volume = candle.volume;
     } else {
       candlesByTime.set(time, candle);
@@ -381,7 +439,10 @@
     const displaySec = displaySlotFor(time, candle);
     if (displaySec == null) return; // closed-market placeholder: nothing to draw
 
-    series.update({ ...candle, time: displaySec });
+    series.update(styleCandle({ ...candle, time: displaySec }));
+    if (App.chartControls && typeof App.chartControls.setCandleState === "function") {
+      App.chartControls.setCandleState(candle.closed === false);
+    }
     updateLastPrice(candle.close);
     for (const listener of candleListeners) {
       try { listener(displaySec, candle); } catch (error) { console.error("Chart candle listener failed:", error); }
@@ -412,7 +473,7 @@
       if (displaySec == null) return; // closed-market filler or stale bucket
     }
 
-    const color = getBarColor(bar, candle);
+    const color = bar.closed === false ? "rgba(125, 133, 144, 0.55)" : getBarColor(bar, candle);
 
     volumeSeries.update({
       time: displaySec,
@@ -467,5 +528,7 @@
     removePriceLine,
     onReset,
     onCandleUpdate,
+    setInterval,
+    getInterval,
   };
 })((window.App = window.App || {}));

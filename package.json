@@ -1,10 +1,12 @@
 {
   "name": "xauusd-terminal",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Node 2 static, read-only XAUUSD dashboard: Node 1 market data, built-in strategy evaluator and demo paper account (no build step, no runtime dependencies)",
+  "description": "Node 2 static, read-only XAUUSD dashboard for Node 3 levels, drawings, scanning, signals and diagnostics plus Node 1 market data; no runtime dependencies",
   "scripts": {
-    "lint": "for f in js/*.js; do node --check \"$f\" || exit 1; done",
-    "test": "node --test tests/*.test.js"
+    "lint": "for f in js/*.js scripts/*.js tests/*.test.js; do node --check \"$f\" || exit 1; done",
+    "test": "node --test tests/*.test.js",
+    "build": "node scripts/build.js",
+    "verify": "npm run lint && npm test && npm run build"
   }
 }

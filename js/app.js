@@ -1,109 +1,119 @@
 /* ============================================================
- * XAUUSD Terminal — bootstrap.
+ * XAUUSD Terminal — dashboard bootstrap.
  *
- * One Node 1 WebSocket feeds every market panel. On mount the REST snapshots
- * (`/strategy`, `/demo`, `/status`) seed the UI; while the socket is down a
- * 5 s REST poll keeps strategy + demo fresh and the header shows DELAYED.
- *
- * Node 4 execution diagnostics have their own socket and REST seed inside
- * js/execution.js, so one service being down never disturbs the other.
- * Nothing on this page can place, modify or close an order.
+ * One typed client owns every request. REST seeds paint the panels first;
+ * Node 1 and Node 3 public sockets then replay and replace whole topics.
+ * A disconnected stream uses a clearly labelled REST poll instead of leaving
+ * silent stale data. There is no order entry or broker/account UI.
  * ============================================================ */
 (function (App) {
   "use strict";
 
-  const { $, setStatus } = App.utils;
-  const cfg = App.config;
+  const { $, setStatus, setBadge } = App.utils;
+  const config = App.config;
+  const pollFallbackMs = (config.stream && config.stream.pollFallbackMs) || 5000;
+  const refreshMs = config.refreshMs || 30000;
 
-  App.runtime = { polling: false };
+  App.runtime = {
+    polling: { node1: false, node3: false },
+    startedAt: Date.now(),
+  };
 
-  // ---------- Frame routing ----------
+  const pollTimers = { node1: null, node3: null };
+  const graceTimers = { node1: null, node3: null };
 
-  App.socket.on("levels", (data) => { if (App.levels) App.levels.apply(data); });
-  App.socket.on("candle", (data) => { if (App.chart) App.chart.updateCandle(data); });
-  App.socket.on("tick_volume", (data) => { if (App.chart) App.chart.updateTickVolume(data); });
-  App.socket.on("calendar", (data) => { if (App.calendar) App.calendar.ingest(data); });
-  App.socket.on("strategy", (data) => { if (App.strategy) App.strategy.applyDecision(data, "ws"); });
-  App.socket.on("demo", (data) => { if (App.demo) App.demo.applySnapshot(data, "ws"); });
-  App.socket.on("status", (data) => { if (App.status) App.status.ingest(data, "ws"); });
-
-  // ---------- Polling fallback ----------
-
-  let pollTimer = null;
-  let pollGraceTimer = null;
-  let lastStreamKey = null;
-
-  function paintDelayed(active) {
+  function paintDelayed() {
+    const active = App.runtime.polling.node1 || App.runtime.polling.node3;
     const badge = $("delayed-badge");
     if (!badge) return;
     badge.hidden = !active;
-    badge.title = "Socket unavailable \u2014 /strategy and /demo refresh from REST every 5 s.";
+    badge.title = "A public stream is unavailable — read-only REST polling is delayed.";
   }
 
-  function stopPolling() {
-    if (pollGraceTimer !== null) { clearTimeout(pollGraceTimer); pollGraceTimer = null; }
-    if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null; }
-    App.runtime.polling = false;
-    paintDelayed(false);
+  function stopPolling(service) {
+    if (graceTimers[service] !== null) {
+      clearTimeout(graceTimers[service]);
+      graceTimers[service] = null;
+    }
+    if (pollTimers[service] !== null) {
+      clearInterval(pollTimers[service]);
+      pollTimers[service] = null;
+    }
+    App.runtime.polling[service] = false;
+    paintDelayed();
   }
 
-  function startPolling() {
-    if (pollTimer !== null) return;
-    App.runtime.polling = true;
-    paintDelayed(true);
-    pollTimer = setInterval(() => {
-      if (App.strategy) App.strategy.poll();
-      if (App.demo) App.demo.poll();
-    }, cfg.socket.pollFallbackMs);
+  function startPolling(service) {
+    if (pollTimers[service] !== null) return;
+    App.runtime.polling[service] = true;
+    paintDelayed();
+    const load = service === "node3" ? () => App.panels.loadNode3() : () => App.panels.loadNode1();
+    load();
+    pollTimers[service] = setInterval(load, pollFallbackMs);
   }
 
-  function handleSocketState(state) {
-    // publish() runs for every frame; only react when the state actually
-    // changes so the aria-live line is not repeated every few seconds.
-    const key = `${state.status}|${state.connected}|${state.endpointConfigured}`;
-    if (key === lastStreamKey) return;
-    lastStreamKey = key;
-
-    if (state.connected) {
-      stopPolling();
-      setStatus("stream connected", "live");
+  function handleStreamState(service, streamState) {
+    if (!streamState) return;
+    if (streamState.connected) {
+      stopPolling(service);
+      if (service === "node1") setStatus("market stream connected", "live");
       return;
     }
-    setStatus(`stream ${state.status}`, "busy");
-    if (!state.endpointConfigured) {
-      stopPolling();
+    if (!streamState.endpointConfigured) {
+      stopPolling(service);
       return;
     }
-    if (pollTimer !== null || pollGraceTimer !== null) return;
-    // Brief grace so a normal first connect never flashes DELAYED.
-    pollGraceTimer = setTimeout(() => {
-      pollGraceTimer = null;
-      startPolling();
-      if (App.strategy) App.strategy.tick();
-      if (App.demo) App.demo.load();
+    if (pollTimers[service] !== null || graceTimers[service] !== null) return;
+    graceTimers[service] = setTimeout(() => {
+      graceTimers[service] = null;
+      startPolling(service);
     }, 1500);
   }
 
-  App.socket.onState(handleSocketState);
-
-  // ---------- Boot ----------
-
-  setStatus("dashboard starting", "busy");
-  if (App.calendar) App.calendar.start();
-  if (App.strategy) App.strategy.start();
-  if (App.demo) App.demo.start();
-  if (App.status) App.status.start();
-  if (App.execution) App.execution.start();
-
-  // Mount-time REST seeds run before the first socket frame.
-  App.socket.start();
-  if (App.chart) App.chart.loadHistory();
-  if (App.levels) App.levels.fetchAll();
-
-  if (cfg.levelsRefreshMs > 0 && App.levels) {
-    setInterval(() => App.levels.fetchAll(), cfg.levelsRefreshMs);
+  function bindStatusDrawer() {
+    if (App.panels && typeof App.panels.bind === "function") App.panels.bind();
   }
-  if (cfg.candlesRefreshMs > 0 && App.chart) {
-    setInterval(() => App.chart.loadHistory(), cfg.candlesRefreshMs);
+
+  function bindPeriodicRefresh() {
+    setInterval(() => {
+      App.client.getHealth()
+        .then((health) => App.panels.applyTopic("health", health, "rest"))
+        .catch((error) => App.panels.setError("node3", error));
+      App.client.getStatus()
+        .then((status) => App.panels.applyTopic("status", status, "rest"))
+        .catch((error) => App.panels.setError("node1", error));
+    }, refreshMs);
   }
+
+  async function boot() {
+    setStatus("dashboard starting", "busy");
+    setBadge("node3-stream-badge", "NODE 3 STREAM CONNECTING", "stale", "Waiting for the Node 3 public stream");
+    bindStatusDrawer();
+    if (App.chartControls) App.chartControls.bind();
+    if (App.calendar) App.calendar.start({ initial: false });
+    App.streams.onState(handleStreamState);
+    App.panels.renderAll();
+
+    // The initial GETs keep the chart and panels populated even if CORS or a
+    // WebSocket is unavailable. Failures retain prior DOM and show a banner.
+    await App.panels.loadAll();
+    if (App.chart && typeof App.chart.loadHistory === "function") App.chart.loadHistory();
+    App.panels.loadVp({ window: "PW" });
+
+    App.streams.start();
+    bindPeriodicRefresh();
+    setStatus("dashboard ready", "live");
+  }
+
+  if (typeof window !== "undefined" && window.addEventListener) {
+    window.addEventListener("beforeunload", () => {
+      if (App.streams && typeof App.streams.stop === "function") App.streams.stop();
+    });
+  }
+
+  boot().catch((error) => {
+    console.error("Dashboard boot failed:", error);
+    setStatus("dashboard boot error", "error");
+    App.panels.setError("node3", error);
+  });
 })((window.App = window.App || {}));

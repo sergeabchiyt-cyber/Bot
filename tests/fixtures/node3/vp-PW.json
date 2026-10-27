@@ -1,0 +1,1046 @@
+{
+  "window": "PW",
+  "start": 1792584000000,
+  "end": 1793016000000,
+  "poc": 4201.125,
+  "vah": 4238.25,
+  "val": 4164.0,
+  "poc_row": 63,
+  "vah_row": 96,
+  "val_row": 30,
+  "row_mode": "rows",
+  "row_height": 1.125,
+  "rows": 128,
+  "range_low": 4130.0,
+  "range_high": 4274.0,
+  "va_pct": 0.7,
+  "total_volume": 3012721.0,
+  "input_interval": "5m",
+  "input_bars": 1438,
+  "histogram": [
+    {
+      "low": 4130.0,
+      "high": 4131.125,
+      "price": 4130.5625,
+      "volume": 302.471,
+      "up_volume": 136.112,
+      "down_volume": 166.359
+    },
+    {
+      "low": 4131.125,
+      "high": 4132.25,
+      "price": 4131.6875,
+      "volume": 334.199,
+      "up_volume": 160.416,
+      "down_volume": 173.783
+    },
+    {
+      "low": 4132.25,
+      "high": 4133.375,
+      "price": 4132.8125,
+      "volume": 366.125,
+      "up_volume": 186.724,
+      "down_volume": 179.401
+    },
+    {
+      "low": 4133.375,
+      "high": 4134.5,
+      "price": 4133.9375,
+      "volume": 398.296,
+      "up_volume": 215.08,
+      "down_volume": 183.216
+    },
+    {
+      "low": 4134.5,
+      "high": 4135.625,
+      "price": 4135.0625,
+      "volume": 430.772,
+      "up_volume": 245.54,
+      "down_volume": 185.232
+    },
+    {
+      "low": 4135.625,
+      "high": 4136.75,
+      "price": 4136.1875,
+      "volume": 463.624,
+      "up_volume": 208.631,
+      "down_volume": 254.993
+    },
+    {
+      "low": 4136.75,
+      "high": 4137.875,
+      "price": 4137.3125,
+      "volume": 496.937,
+      "up_volume": 238.53,
+      "down_volume": 258.407
+    },
+    {
+      "low": 4137.875,
+      "high": 4139.0,
+      "price": 4138.4375,
+      "volume": 313.813,
+      "up_volume": 160.045,
+      "down_volume": 153.769
+    },
+    {
+      "low": 4139.0,
+      "high": 4140.125,
+      "price": 4139.5625,
+      "volume": 348.374,
+      "up_volume": 188.122,
+      "down_volume": 160.252
+    },
+    {
+      "low": 4140.125,
+      "high": 4141.25,
+      "price": 4140.6875,
+      "volume": 383.762,
+      "up_volume": 218.745,
+      "down_volume": 165.018
+    },
+    {
+      "low": 4141.25,
+      "high": 4142.375,
+      "price": 4141.8125,
+      "volume": 420.147,
+      "up_volume": 189.066,
+      "down_volume": 231.081
+    },
+    {
+      "low": 4142.375,
+      "high": 4143.5,
+      "price": 4142.9375,
+      "volume": 457.724,
+      "up_volume": 219.707,
+      "down_volume": 238.016
+    },
+    {
+      "low": 4143.5,
+      "high": 4144.625,
+      "price": 4144.0625,
+      "volume": 496.721,
+      "up_volume": 253.328,
+      "down_volume": 243.393
+    },
+    {
+      "low": 4144.625,
+      "high": 4145.75,
+      "price": 4145.1875,
+      "volume": 537.403,
+      "up_volume": 290.197,
+      "down_volume": 247.205
+    },
+    {
+      "low": 4145.75,
+      "high": 4146.875,
+      "price": 4146.3125,
+      "volume": 363.069,
+      "up_volume": 206.95,
+      "down_volume": 156.12
+    },
+    {
+      "low": 4146.875,
+      "high": 4148.0,
+      "price": 4147.4375,
+      "volume": 408.065,
+      "up_volume": 183.629,
+      "down_volume": 224.436
+    },
+    {
+      "low": 4148.0,
+      "high": 4149.125,
+      "price": 4148.5625,
+      "volume": 455.778,
+      "up_volume": 218.773,
+      "down_volume": 237.005
+    },
+    {
+      "low": 4149.125,
+      "high": 4150.25,
+      "price": 4149.6875,
+      "volume": 506.645,
+      "up_volume": 258.389,
+      "down_volume": 248.256
+    },
+    {
+      "low": 4150.25,
+      "high": 4151.375,
+      "price": 4150.8125,
+      "volume": 561.153,
+      "up_volume": 303.023,
+      "down_volume": 258.13
+    },
+    {
+      "low": 4151.375,
+      "high": 4152.5,
+      "price": 4151.9375,
+      "volume": 619.841,
+      "up_volume": 353.309,
+      "down_volume": 266.532
+    },
+    {
+      "low": 4152.5,
+      "high": 4153.625,
+      "price": 4153.0625,
+      "volume": 683.301,
+      "up_volume": 307.486,
+      "down_volume": 375.816
+    },
+    {
+      "low": 4153.625,
+      "high": 4154.75,
+      "price": 4154.1875,
+      "volume": 535.18,
+      "up_volume": 256.886,
+      "down_volume": 278.294
+    },
+    {
+      "low": 4154.75,
+      "high": 4155.875,
+      "price": 4155.3125,
+      "volume": 610.175,
+      "up_volume": 311.189,
+      "down_volume": 298.986
+    },
+    {
+      "low": 4155.875,
+      "high": 4157.0,
+      "price": 4156.4375,
+      "volume": 692.034,
+      "up_volume": 373.698,
+      "down_volume": 318.335
+    },
+    {
+      "low": 4157.0,
+      "high": 4158.125,
+      "price": 4157.5625,
+      "volume": 781.548,
+      "up_volume": 445.483,
+      "down_volume": 336.066
+    },
+    {
+      "low": 4158.125,
+      "high": 4159.25,
+      "price": 4158.6875,
+      "volume": 879.552,
+      "up_volume": 395.798,
+      "down_volume": 483.753
+    },
+    {
+      "low": 4159.25,
+      "high": 4160.375,
+      "price": 4159.8125,
+      "volume": 986.906,
+      "up_volume": 473.715,
+      "down_volume": 513.191
+    },
+    {
+      "low": 4160.375,
+      "high": 4161.5,
+      "price": 4160.9375,
+      "volume": 1104.498,
+      "up_volume": 563.294,
+      "down_volume": 541.204
+    },
+    {
+      "low": 4161.5,
+      "high": 4162.625,
+      "price": 4162.0625,
+      "volume": 1016.221,
+      "up_volume": 548.759,
+      "down_volume": 467.461
+    },
+    {
+      "low": 4162.625,
+      "high": 4163.75,
+      "price": 4163.1875,
+      "volume": 1156.963,
+      "up_volume": 659.469,
+      "down_volume": 497.494
+    },
+    {
+      "low": 4163.75,
+      "high": 4164.875,
+      "price": 4164.3125,
+      "volume": 1310.593,
+      "up_volume": 589.767,
+      "down_volume": 720.826
+    },
+    {
+      "low": 4164.875,
+      "high": 4166.0,
+      "price": 4165.4375,
+      "volume": 1477.937,
+      "up_volume": 709.41,
+      "down_volume": 768.527
+    },
+    {
+      "low": 4166.0,
+      "high": 4167.125,
+      "price": 4166.5625,
+      "volume": 1659.762,
+      "up_volume": 846.478,
+      "down_volume": 813.283
+    },
+    {
+      "low": 4167.125,
+      "high": 4168.25,
+      "price": 4167.6875,
+      "volume": 1856.749,
+      "up_volume": 1002.644,
+      "down_volume": 854.104
+    },
+    {
+      "low": 4168.25,
+      "high": 4169.375,
+      "price": 4168.8125,
+      "volume": 2069.474,
+      "up_volume": 1179.6,
+      "down_volume": 889.874
+    },
+    {
+      "low": 4169.375,
+      "high": 4170.5,
+      "price": 4169.9375,
+      "volume": 2081.383,
+      "up_volume": 936.622,
+      "down_volume": 1144.76
+    },
+    {
+      "low": 4170.5,
+      "high": 4171.625,
+      "price": 4171.0625,
+      "volume": 2326.763,
+      "up_volume": 1116.846,
+      "down_volume": 1209.917
+    },
+    {
+      "low": 4171.625,
+      "high": 4172.75,
+      "price": 4172.1875,
+      "volume": 2588.722,
+      "up_volume": 1320.248,
+      "down_volume": 1268.474
+    },
+    {
+      "low": 4172.75,
+      "high": 4173.875,
+      "price": 4173.3125,
+      "volume": 2867.163,
+      "up_volume": 1548.268,
+      "down_volume": 1318.895
+    },
+    {
+      "low": 4173.875,
+      "high": 4175.0,
+      "price": 4174.4375,
+      "volume": 3161.765,
+      "up_volume": 1802.206,
+      "down_volume": 1359.559
+    },
+    {
+      "low": 4175.0,
+      "high": 4176.125,
+      "price": 4175.5625,
+      "volume": 3471.959,
+      "up_volume": 1562.382,
+      "down_volume": 1909.577
+    },
+    {
+      "low": 4176.125,
+      "high": 4177.25,
+      "price": 4176.6875,
+      "volume": 3796.915,
+      "up_volume": 1822.519,
+      "down_volume": 1974.396
+    },
+    {
+      "low": 4177.25,
+      "high": 4178.375,
+      "price": 4177.8125,
+      "volume": 3918.529,
+      "up_volume": 1998.45,
+      "down_volume": 1920.079
+    },
+    {
+      "low": 4178.375,
+      "high": 4179.5,
+      "price": 4178.9375,
+      "volume": 4269.415,
+      "up_volume": 2305.484,
+      "down_volume": 1963.931
+    },
+    {
+      "low": 4179.5,
+      "high": 4180.625,
+      "price": 4180.0625,
+      "volume": 4630.903,
+      "up_volume": 2639.615,
+      "down_volume": 1991.288
+    },
+    {
+      "low": 4180.625,
+      "high": 4181.75,
+      "price": 4181.1875,
+      "volume": 5001.042,
+      "up_volume": 2250.469,
+      "down_volume": 2750.573
+    },
+    {
+      "low": 4181.75,
+      "high": 4182.875,
+      "price": 4182.3125,
+      "volume": 5377.613,
+      "up_volume": 2581.254,
+      "down_volume": 2796.359
+    },
+    {
+      "low": 4182.875,
+      "high": 4184.0,
+      "price": 4183.4375,
+      "volume": 5758.139,
+      "up_volume": 2936.651,
+      "down_volume": 2821.488
+    },
+    {
+      "low": 4184.0,
+      "high": 4185.125,
+      "price": 4184.5625,
+      "volume": 6139.917,
+      "up_volume": 3315.555,
+      "down_volume": 2824.362
+    },
+    {
+      "low": 4185.125,
+      "high": 4186.25,
+      "price": 4185.6875,
+      "volume": 6303.039,
+      "up_volume": 3592.732,
+      "down_volume": 2710.307
+    },
+    {
+      "low": 4186.25,
+      "high": 4187.375,
+      "price": 4186.8125,
+      "volume": 6678.436,
+      "up_volume": 3005.296,
+      "down_volume": 3673.14
+    },
+    {
+      "low": 4187.375,
+      "high": 4188.5,
+      "price": 4187.9375,
+      "volume": 7045.915,
+      "up_volume": 3382.039,
+      "down_volume": 3663.876
+    },
+    {
+      "low": 4188.5,
+      "high": 4189.625,
+      "price": 4189.0625,
+      "volume": 7402.207,
+      "up_volume": 3775.126,
+      "down_volume": 3627.081
+    },
+    {
+      "low": 4189.625,
+      "high": 4190.75,
+      "price": 4190.1875,
+      "volume": 7744.02,
+      "up_volume": 4181.771,
+      "down_volume": 3562.249
+    },
+    {
+      "low": 4190.75,
+      "high": 4191.875,
+      "price": 4191.3125,
+      "volume": 8068.091,
+      "up_volume": 4598.812,
+      "down_volume": 3469.279
+    },
+    {
+      "low": 4191.875,
+      "high": 4193.0,
+      "price": 4192.4375,
+      "volume": 8371.244,
+      "up_volume": 3767.06,
+      "down_volume": 4604.184
+    },
+    {
+      "low": 4193.0,
+      "high": 4194.125,
+      "price": 4193.5625,
+      "volume": 8433.448,
+      "up_volume": 4048.055,
+      "down_volume": 4385.393
+    },
+    {
+      "low": 4194.125,
+      "high": 4195.25,
+      "price": 4194.6875,
+      "volume": 8685.868,
+      "up_volume": 4429.793,
+      "down_volume": 4256.076
+    },
+    {
+      "low": 4195.25,
+      "high": 4196.375,
+      "price": 4195.8125,
+      "volume": 8908.926,
+      "up_volume": 4810.82,
+      "down_volume": 4098.106
+    },
+    {
+      "low": 4196.375,
+      "high": 4197.5,
+      "price": 4196.9375,
+      "volume": 9100.343,
+      "up_volume": 5187.196,
+      "down_volume": 3913.148
+    },
+    {
+      "low": 4197.5,
+      "high": 4198.625,
+      "price": 4198.0625,
+      "volume": 9258.191,
+      "up_volume": 4166.186,
+      "down_volume": 5092.005
+    },
+    {
+      "low": 4198.625,
+      "high": 4199.75,
+      "price": 4199.1875,
+      "volume": 9380.926,
+      "up_volume": 4502.845,
+      "down_volume": 4878.082
+    },
+    {
+      "low": 4199.75,
+      "high": 4200.875,
+      "price": 4200.3125,
+      "volume": 9467.424,
+      "up_volume": 4828.386,
+      "down_volume": 4639.038
+    },
+    {
+      "low": 4200.875,
+      "high": 4202.0,
+      "price": 4201.4375,
+      "volume": 9300.0,
+      "up_volume": 5022.0,
+      "down_volume": 4278.0
+    },
+    {
+      "low": 4202.0,
+      "high": 4203.125,
+      "price": 4202.5625,
+      "volume": 9312.424,
+      "up_volume": 5308.082,
+      "down_volume": 4004.342
+    },
+    {
+      "low": 4203.125,
+      "high": 4204.25,
+      "price": 4203.6875,
+      "volume": 9287.926,
+      "up_volume": 4179.567,
+      "down_volume": 5108.359
+    },
+    {
+      "low": 4204.25,
+      "high": 4205.375,
+      "price": 4204.8125,
+      "volume": 9227.191,
+      "up_volume": 4429.052,
+      "down_volume": 4798.139
+    },
+    {
+      "low": 4205.375,
+      "high": 4206.5,
+      "price": 4205.9375,
+      "volume": 9131.343,
+      "up_volume": 4656.985,
+      "down_volume": 4474.358
+    },
+    {
+      "low": 4206.5,
+      "high": 4207.625,
+      "price": 4207.0625,
+      "volume": 9001.926,
+      "up_volume": 4861.04,
+      "down_volume": 4140.886
+    },
+    {
+      "low": 4207.625,
+      "high": 4208.75,
+      "price": 4208.1875,
+      "volume": 8840.868,
+      "up_volume": 5039.295,
+      "down_volume": 3801.573
+    },
+    {
+      "low": 4208.75,
+      "high": 4209.875,
+      "price": 4209.3125,
+      "volume": 8433.448,
+      "up_volume": 3795.051,
+      "down_volume": 4638.396
+    },
+    {
+      "low": 4209.875,
+      "high": 4211.0,
+      "price": 4210.4375,
+      "volume": 8216.244,
+      "up_volume": 3943.797,
+      "down_volume": 4272.447
+    },
+    {
+      "low": 4211.0,
+      "high": 4212.125,
+      "price": 4211.5625,
+      "volume": 7975.091,
+      "up_volume": 4067.296,
+      "down_volume": 3907.794
+    },
+    {
+      "low": 4212.125,
+      "high": 4213.25,
+      "price": 4212.6875,
+      "volume": 7713.02,
+      "up_volume": 4165.031,
+      "down_volume": 3547.989
+    },
+    {
+      "low": 4213.25,
+      "high": 4214.375,
+      "price": 4213.8125,
+      "volume": 7433.207,
+      "up_volume": 4236.928,
+      "down_volume": 3196.279
+    },
+    {
+      "low": 4214.375,
+      "high": 4215.5,
+      "price": 4214.9375,
+      "volume": 7138.915,
+      "up_volume": 3212.512,
+      "down_volume": 3926.403
+    },
+    {
+      "low": 4215.5,
+      "high": 4216.625,
+      "price": 4216.0625,
+      "volume": 6833.436,
+      "up_volume": 3280.049,
+      "down_volume": 3553.387
+    },
+    {
+      "low": 4216.625,
+      "high": 4217.75,
+      "price": 4217.1875,
+      "volume": 6303.039,
+      "up_volume": 3214.55,
+      "down_volume": 3088.489
+    },
+    {
+      "low": 4217.75,
+      "high": 4218.875,
+      "price": 4218.3125,
+      "volume": 5984.917,
+      "up_volume": 3231.855,
+      "down_volume": 2753.062
+    },
+    {
+      "low": 4218.875,
+      "high": 4220.0,
+      "price": 4219.4375,
+      "volume": 5665.139,
+      "up_volume": 3229.129,
+      "down_volume": 2436.01
+    },
+    {
+      "low": 4220.0,
+      "high": 4221.125,
+      "price": 4220.5625,
+      "volume": 5346.613,
+      "up_volume": 2405.976,
+      "down_volume": 2940.637
+    },
+    {
+      "low": 4221.125,
+      "high": 4222.25,
+      "price": 4221.6875,
+      "volume": 5032.042,
+      "up_volume": 2415.38,
+      "down_volume": 2616.662
+    },
+    {
+      "low": 4222.25,
+      "high": 4223.375,
+      "price": 4222.8125,
+      "volume": 4723.903,
+      "up_volume": 2409.19,
+      "down_volume": 2314.712
+    },
+    {
+      "low": 4223.375,
+      "high": 4224.5,
+      "price": 4223.9375,
+      "volume": 4424.415,
+      "up_volume": 2389.184,
+      "down_volume": 2035.231
+    },
+    {
+      "low": 4224.5,
+      "high": 4225.625,
+      "price": 4225.0625,
+      "volume": 3918.529,
+      "up_volume": 2233.561,
+      "down_volume": 1684.967
+    },
+    {
+      "low": 4225.625,
+      "high": 4226.75,
+      "price": 4226.1875,
+      "volume": 3641.915,
+      "up_volume": 1638.862,
+      "down_volume": 2003.053
+    },
+    {
+      "low": 4226.75,
+      "high": 4227.875,
+      "price": 4227.3125,
+      "volume": 3378.959,
+      "up_volume": 1621.9,
+      "down_volume": 1757.059
+    },
+    {
+      "low": 4227.875,
+      "high": 4229.0,
+      "price": 4228.4375,
+      "volume": 3130.765,
+      "up_volume": 1596.69,
+      "down_volume": 1534.075
+    },
+    {
+      "low": 4229.0,
+      "high": 4230.125,
+      "price": 4229.5625,
+      "volume": 2898.163,
+      "up_volume": 1565.008,
+      "down_volume": 1333.155
+    },
+    {
+      "low": 4230.125,
+      "high": 4231.25,
+      "price": 4230.6875,
+      "volume": 2681.722,
+      "up_volume": 1528.581,
+      "down_volume": 1153.14
+    },
+    {
+      "low": 4231.25,
+      "high": 4232.375,
+      "price": 4231.8125,
+      "volume": 2481.763,
+      "up_volume": 1116.793,
+      "down_volume": 1364.969
+    },
+    {
+      "low": 4232.375,
+      "high": 4233.5,
+      "price": 4232.9375,
+      "volume": 2081.383,
+      "up_volume": 999.064,
+      "down_volume": 1082.319
+    },
+    {
+      "low": 4233.5,
+      "high": 4234.625,
+      "price": 4234.0625,
+      "volume": 1914.474,
+      "up_volume": 976.382,
+      "down_volume": 938.092
+    },
+    {
+      "low": 4234.625,
+      "high": 4235.75,
+      "price": 4235.1875,
+      "volume": 1763.749,
+      "up_volume": 952.424,
+      "down_volume": 811.324
+    },
+    {
+      "low": 4235.75,
+      "high": 4236.875,
+      "price": 4236.3125,
+      "volume": 1628.762,
+      "up_volume": 928.394,
+      "down_volume": 700.367
+    },
+    {
+      "low": 4236.875,
+      "high": 4238.0,
+      "price": 4237.4375,
+      "volume": 1508.937,
+      "up_volume": 679.022,
+      "down_volume": 829.915
+    },
+    {
+      "low": 4238.0,
+      "high": 4239.125,
+      "price": 4238.5625,
+      "volume": 1403.593,
+      "up_volume": 673.725,
+      "down_volume": 729.868
+    },
+    {
+      "low": 4239.125,
+      "high": 4240.25,
+      "price": 4239.6875,
+      "volume": 1311.963,
+      "up_volume": 669.101,
+      "down_volume": 642.862
+    },
+    {
+      "low": 4240.25,
+      "high": 4241.375,
+      "price": 4240.8125,
+      "volume": 1016.221,
+      "up_volume": 548.759,
+      "down_volume": 467.461
+    },
+    {
+      "low": 4241.375,
+      "high": 4242.5,
+      "price": 4241.9375,
+      "volume": 949.498,
+      "up_volume": 541.214,
+      "down_volume": 408.284
+    },
+    {
+      "low": 4242.5,
+      "high": 4243.625,
+      "price": 4243.0625,
+      "volume": 893.906,
+      "up_volume": 402.258,
+      "down_volume": 491.648
+    },
+    {
+      "low": 4243.625,
+      "high": 4244.75,
+      "price": 4244.1875,
+      "volume": 848.552,
+      "up_volume": 407.305,
+      "down_volume": 441.247
+    },
+    {
+      "low": 4244.75,
+      "high": 4245.875,
+      "price": 4245.3125,
+      "volume": 812.548,
+      "up_volume": 414.4,
+      "down_volume": 398.149
+    },
+    {
+      "low": 4245.875,
+      "high": 4247.0,
+      "price": 4246.4375,
+      "volume": 785.034,
+      "up_volume": 423.918,
+      "down_volume": 361.115
+    },
+    {
+      "low": 4247.0,
+      "high": 4248.125,
+      "price": 4247.5625,
+      "volume": 765.175,
+      "up_volume": 436.15,
+      "down_volume": 329.025
+    },
+    {
+      "low": 4248.125,
+      "high": 4249.25,
+      "price": 4248.6875,
+      "volume": 535.18,
+      "up_volume": 240.831,
+      "down_volume": 294.349
+    },
+    {
+      "low": 4249.25,
+      "high": 4250.375,
+      "price": 4249.8125,
+      "volume": 528.301,
+      "up_volume": 253.585,
+      "down_volume": 274.717
+    },
+    {
+      "low": 4250.375,
+      "high": 4251.5,
+      "price": 4250.9375,
+      "volume": 526.841,
+      "up_volume": 268.689,
+      "down_volume": 258.152
+    },
+    {
+      "low": 4251.5,
+      "high": 4252.625,
+      "price": 4252.0625,
+      "volume": 530.153,
+      "up_volume": 286.283,
+      "down_volume": 243.87
+    },
+    {
+      "low": 4252.625,
+      "high": 4253.75,
+      "price": 4253.1875,
+      "volume": 537.645,
+      "up_volume": 306.458,
+      "down_volume": 231.187
+    },
+    {
+      "low": 4253.75,
+      "high": 4254.875,
+      "price": 4254.3125,
+      "volume": 548.778,
+      "up_volume": 246.95,
+      "down_volume": 301.828
+    },
+    {
+      "low": 4254.875,
+      "high": 4256.0,
+      "price": 4255.4375,
+      "volume": 563.065,
+      "up_volume": 270.271,
+      "down_volume": 292.794
+    },
+    {
+      "low": 4256.0,
+      "high": 4257.125,
+      "price": 4256.5625,
+      "volume": 363.069,
+      "up_volume": 185.165,
+      "down_volume": 177.904
+    },
+    {
+      "low": 4257.125,
+      "high": 4258.25,
+      "price": 4257.6875,
+      "volume": 382.403,
+      "up_volume": 206.497,
+      "down_volume": 175.905
+    },
+    {
+      "low": 4258.25,
+      "high": 4259.375,
+      "price": 4258.8125,
+      "volume": 403.721,
+      "up_volume": 230.121,
+      "down_volume": 173.6
+    },
+    {
+      "low": 4259.375,
+      "high": 4260.5,
+      "price": 4259.9375,
+      "volume": 426.724,
+      "up_volume": 192.026,
+      "down_volume": 234.698
+    },
+    {
+      "low": 4260.5,
+      "high": 4261.625,
+      "price": 4261.0625,
+      "volume": 451.147,
+      "up_volume": 216.55,
+      "down_volume": 234.596
+    },
+    {
+      "low": 4261.625,
+      "high": 4262.75,
+      "price": 4262.1875,
+      "volume": 476.762,
+      "up_volume": 243.149,
+      "down_volume": 233.614
+    },
+    {
+      "low": 4262.75,
+      "high": 4263.875,
+      "price": 4263.3125,
+      "volume": 503.374,
+      "up_volume": 271.822,
+      "down_volume": 231.552
+    },
+    {
+      "low": 4263.875,
+      "high": 4265.0,
+      "price": 4264.4375,
+      "volume": 313.813,
+      "up_volume": 178.874,
+      "down_volume": 134.94
+    },
+    {
+      "low": 4265.0,
+      "high": 4266.125,
+      "price": 4265.5625,
+      "volume": 341.937,
+      "up_volume": 153.872,
+      "down_volume": 188.065
+    },
+    {
+      "low": 4266.125,
+      "high": 4267.25,
+      "price": 4266.6875,
+      "volume": 370.624,
+      "up_volume": 177.9,
+      "down_volume": 192.725
+    },
+    {
+      "low": 4267.25,
+      "high": 4268.375,
+      "price": 4267.8125,
+      "volume": 399.772,
+      "up_volume": 203.884,
+      "down_volume": 195.888
+    },
+    {
+      "low": 4268.375,
+      "high": 4269.5,
+      "price": 4268.9375,
+      "volume": 429.296,
+      "up_volume": 231.82,
+      "down_volume": 197.476
+    },
+    {
+      "low": 4269.5,
+      "high": 4270.625,
+      "price": 4270.0625,
+      "volume": 459.125,
+      "up_volume": 261.701,
+      "down_volume": 197.424
+    },
+    {
+      "low": 4270.625,
+      "high": 4271.75,
+      "price": 4271.1875,
+      "volume": 489.199,
+      "up_volume": 220.14,
+      "down_volume": 269.059
+    },
+    {
+      "low": 4271.75,
+      "high": 4272.875,
+      "price": 4272.3125,
+      "volume": 302.471,
+      "up_volume": 145.186,
+      "down_volume": 157.285
+    },
+    {
+      "low": 4272.875,
+      "high": 4274.0,
+      "price": 4273.4375,
+      "volume": 332.901,
+      "up_volume": 169.779,
+      "down_volume": 163.121
+    }
+  ]
+}

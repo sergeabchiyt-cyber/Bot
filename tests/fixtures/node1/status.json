@@ -1,0 +1,88 @@
+{
+  "service": "xauusd-engine",
+  "version": "2.0.0",
+  "contract_version": "2.0",
+  "boot_id": "boot-20261026-001",
+  "uptime_ms": 7342000,
+  "market_open": true,
+  "session": {
+    "anchor": "18:00 America/New_York",
+    "open_ms": 1793012400000,
+    "close_ms": 1793098800000,
+    "market_open": true
+  },
+  "freshness": {
+    "feed": "sifting",
+    "last_tick_ms": 1793015998800,
+    "age_ms": 1200,
+    "state": "live",
+    "market_open": true
+  },
+  "feeds": {
+    "sifting": {
+      "state": "connected",
+      "last_msg": 1793015998800,
+      "msgs": 58211
+    },
+    "calendar": {
+      "state": "connected",
+      "last_msg": 1793012400000,
+      "msgs": 24
+    }
+  },
+  "candles": {
+    "seed_bars": 2000,
+    "intervals": {
+      "1m": {
+        "bars": 2000,
+        "capacity": 2000,
+        "first_bar": 1792896000000,
+        "last_bar": 1793015940000,
+        "forming": 1793016000000,
+        "edge_lag_minutes": 1
+      },
+      "15m": {
+        "bars": 2000,
+        "capacity": 2000,
+        "first_bar": 1791216000000,
+        "last_bar": 1793015100000,
+        "forming": null,
+        "edge_lag_minutes": 15
+      },
+      "1h": {
+        "bars": 720,
+        "capacity": 720,
+        "first_bar": 1790424000000,
+        "last_bar": 1793012400000,
+        "forming": null,
+        "edge_lag_minutes": 60
+      }
+    },
+    "counters": {
+      "inserted": 4820,
+      "updated": 391,
+      "dropped": 0
+    },
+    "dropped_ticks": 0
+  },
+  "calendar": {
+    "source": "ff_json",
+    "count": 2,
+    "updated": 1793008800000
+  },
+  "ws": {
+    "topics": [
+      "candle",
+      "tick_volume",
+      "calendar",
+      "status"
+    ],
+    "heartbeat_secs": 30,
+    "broadcast_capacity": 4096,
+    "replay_bars": {
+      "1m": 240,
+      "15m": 96,
+      "1h": 48
+    }
+  }
+}
