@@ -7,8 +7,8 @@
 use std::env;
 
 /// The Node 2 static dashboard, deployed separately from the engine. Override
-/// with `CORS_ALLOWED_ORIGIN` when the site moves (or to disable browser CORS
-/// entirely by setting it to an origin that can never match, e.g. empty).
+/// with `CORS_ALLOWED_ORIGIN` when the site moves. The XAUUSD Terminal origin
+/// is also allowed independently of this setting.
 const DEFAULT_CORS_ALLOWED_ORIGIN: &str = "https://static-dash-frontend.onrender.com";
 
 /// An `Origin` header never carries whitespace or a trailing slash, so a

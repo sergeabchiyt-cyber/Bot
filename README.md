@@ -237,11 +237,15 @@ Node 3's decisions.
 
 ### CORS
 
-The Node 2 dashboard is a static site on its own origin, so exactly that origin
-is allowed — no wildcard, no credentials, `GET`/`OPTIONS` only, `max-age=600`,
+The configured Node 2 dashboard origin and the XAUUSD Terminal origin
+`https://bruhfyyy-trading.static.hf.space` are allowed — no wildcard, no
+credentials, `GET`/`OPTIONS` only, `max-age=600`,
 and `Vary: Origin` so a shared cache cannot hand one origin's grant to another.
 Every other origin gets a normal response with no `Access-Control-*` header.
-Override with `CORS_ALLOWED_ORIGIN` when the site moves.
+Override the Node 2 origin with `CORS_ALLOWED_ORIGIN` when the site moves.
+The Terminal origin remains allowed even when that variable is set. Browser origins
+do not include paths, so do not add `/index.html` to the origin. Deploy or restart
+Node 1 for changes to take effect; a network outage can also cause `Failed to fetch`.
 
 ## Contract and handoff
 
@@ -282,7 +286,7 @@ while the WS clients are connected), then proves against the live process:
 2. `/candles` is ascending, unique, bucket-aligned and closed on 1m, 15m and 1h,
    `?interval=5m` is a `400`, `?interval=60m` is `1h`;
 3. `/tick-volume` and `/calendar` are well-formed;
-4. CORS grants exactly the Node 2 origin, `GET`/`OPTIONS` only;
+4. CORS grants the configured Node 2 and XAUUSD Terminal origins, `GET`/`OPTIONS` only;
 5. every non-`GET` method is `405` on every route;
 6. `/ws` (raw sockets in `ci/verify_ws.py`) replays closed bars per resolution,
    numbers live frames with one strictly increasing `seq`, answers heartbeats,
