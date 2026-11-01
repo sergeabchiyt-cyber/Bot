@@ -73,13 +73,13 @@ pub struct AppState {
 
 /// Browser-facing CORS policy.
 ///
-/// The Node 2 dashboard is a static site served from its own origin, so that
-/// origin has to be allowed explicitly: no wildcard, no `Any`, and no
+/// The dashboards are static sites served from their own origins, so those
+/// origins have to be allowed explicitly: no wildcard, no `Any`, and no
 /// credentials — nothing here is cookie/token authenticated, and mirroring
 /// arbitrary origins would let any page read the API.
 ///
 /// `AllowOrigin::list` compares the request's `Origin` first and simply omits
-/// the header when it does not match, which is what "only this origin may call
+/// the header when it does not match, which is what "only these origins may call
 /// the API" requires (unlike `exact`, which is a constant header value emitted
 /// to every caller).
 pub fn cors_layer(allowed_origin: &str) -> CorsLayer {
@@ -87,8 +87,10 @@ pub fn cors_layer(allowed_origin: &str) -> CorsLayer {
         panic!("CORS_ALLOWED_ORIGIN must be a valid header value ({allowed_origin:?}): {e}")
     });
 
+    let terminal_origin = HeaderValue::from_static("https://bruhfyyy-trading.static.hf.space");
+
     CorsLayer::new()
-        .allow_origin(AllowOrigin::list([origin]))
+        .allow_origin(AllowOrigin::list([origin, terminal_origin]))
         .allow_methods([Method::GET, Method::OPTIONS])
         .allow_headers([header::CONTENT_TYPE, header::ACCEPT, header::ORIGIN])
         .max_age(Duration::from_secs(600))
@@ -108,7 +110,7 @@ pub fn router(state: AppState) -> Router {
     let cors = cors_layer(&state.config.cors_allowed_origin);
     info!(
         origin = %state.config.cors_allowed_origin,
-        "CORS: browser access to the REST API allowed for this origin"
+        "CORS: browser access allowed for configured origin and XAUUSD Terminal"
     );
 
     Router::new()
@@ -612,6 +614,36 @@ mod tests {
             .headers()
             .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
             .map(|value| value.to_str().expect("header value").to_string())
+    }
+
+    #[tokio::test]
+    async fn xauusd_terminal_origin_is_allowed_with_an_existing_configuration() {
+        let terminal = "https://bruhfyyy-trading.static.hf.space";
+        for uri in REST_ROUTES {
+            let response = app(ALLOWED)
+                .oneshot(build("GET", uri, Some(terminal)))
+                .await
+                .unwrap();
+            assert_eq!(acao(&response).as_deref(), Some(terminal), "{uri}");
+        }
+        let request = Request::builder()
+            .method("OPTIONS")
+            .uri("/candles")
+            .header(header::ORIGIN, terminal)
+            .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
+            .body(Body::empty())
+            .unwrap();
+        let response = app(ALLOWED).oneshot(request).await.unwrap();
+        assert_eq!(acao(&response).as_deref(), Some(terminal));
+        let response = app(ALLOWED)
+            .oneshot(build(
+                "GET",
+                "/status",
+                Some("https://bruhfyyy-trading.static.hf.space.evil.example"),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(acao(&response), None);
     }
 
     #[tokio::test]
